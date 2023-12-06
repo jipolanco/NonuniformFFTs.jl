@@ -6,6 +6,9 @@ Module for spreading point data onto a grid using smoothing filters.
 module Gridding
 
 using StaticArrays: StaticArrays
+using StructArrays: StructVector
+using FFTW: FFTW
+using LinearAlgebra: mul!
 using Reexport
 
 include("Kernels/Kernels.jl")
@@ -18,83 +21,138 @@ using .Kernels:
     init_fourier_coefficients!
 
 export
+    PlanNUFFT,
     spread_from_point!,
     spread_from_points!,
     deconvolve_fourier!
 
 include("spreading.jl")
 include("interpolation.jl")
+include("convolution.jl")
 
-"""
-    deconvolve_fourier!(
-        gs::NTuple{D, AbstractKernel},
-        [dest::AbstractArray{T, D}],
-        src::AbstractArray{T, D},
-        ks::NTuple{D, AbstractVector},
-    )
-
-Apply deconvolution to field in Fourier space.
-
-The wavenumber vectors included in `ks` are typically obtained from
-`AbstractFFTs.(r)fftfreq`.
-
-If `dest` is not passed, then `src` will be overwritten.
-
-As with [`spread_from_point!`](@ref), `dest` and `src` can also be tuples of arrays.
-"""
-function deconvolve_fourier!(
-        gs::NTuple{D, AbstractKernel},
-        dst::NTuple{M, AbstractArray{T, D}},
-        src::NTuple{M, AbstractArray{T, D}},
-        ks::NTuple{D, AbstractVector},
-    ) where {D, M, T <: Complex}
-    @assert M > 0
-    gks = map(init_fourier_coefficients!, gs, ks)  # this takes time only the first time it's called
-    inds = CartesianIndices(first(dst))
-    @inbounds for I ∈ inds
-        g⃗ = map(getindex, gks, Tuple(I))
-        gdiv = 1 / prod(g⃗)
-        for (u, v) ∈ zip(dst, src)
-            u[I] = v[I] * gdiv
-        end
-    end
-    dst
+# TODO
+# - allow complex non-uniform values?
+struct PlanNUFFT{
+        T <: AbstractFloat, N, M,
+        Kernels <: NTuple{N, AbstractKernel{M, T}},
+        WaveNumbers <: NTuple{N, AbstractVector{T}},
+        Points <: StructVector{NTuple{N, T}},
+        PlanFFT_fw <: FFTW.Plan{T},
+        PlanFFT_bw <: FFTW.Plan{Complex{T}},
+    }
+    kernels :: Kernels
+    ks      :: WaveNumbers  # wavenumbers in *non-oversampled* Fourier grid
+    σ       :: T            # oversampling factor (≥ 1)
+    points  :: Points       # non-uniform points (real values)
+    us      :: Array{T, N}  # values in oversampled grid
+    ûs      :: Array{Complex{T}, N}  # Fourier coefficients in oversampled grid
+    plan_fw :: PlanFFT_fw
+    plan_bw :: PlanFFT_bw
 end
 
-# TODO do we need this??
-function convolve_fourier!(
-        gs::NTuple{D, AbstractKernel},
-        dst::NTuple{M, AbstractArray{T, D}},
-        src::NTuple{M, AbstractArray{T, D}},
-        ks::NTuple{D},
-    ) where {D, M, T <: Complex}
-    @assert M > 0
-    gks = map(init_fourier_coefficients!, gs, ks)  # this takes time only the first time it's called
-    inds = CartesianIndices(first(dst))
-    @inbounds for I ∈ inds
-        g⃗ = map(getindex, gks, Tuple(I))
-        gmul = prod(g⃗)
-        for (u, v) ∈ zip(dst, src)
-            u[I] = v[I] * gmul
-        end
+# This constructor is generally not called directly.
+function PlanNUFFT(kernels, σ_wanted, Ns::Dims{D}; fftw_flags = FFTW.MEASURE) where {D}
+    T = typeof(σ_wanted)
+    ks = ntuple(Val(length(Ns))) do i
+        N = Ns[i]
+        # This assumes L = 2π:
+        i == 1 ? FFTW.rfftfreq(N, N) : FFTW.fftfreq(N, N)
     end
-    dst
+    # Determine dimensions of oversampled grid.
+    Ñs = map(Ns) do N
+        # We try to make sure that each dimension is a product of powers of small primes,
+        # which is good for FFT performance.
+        nextprod((2, 3, 5), floor(Int, σ_wanted * N))
+    end
+    σ::T = maximum(Ñs ./ Ns)  # actual oversampling factor
+    points = StructVector(ntuple(_ -> T[], Val(D)))
+    us = Array{T}(undef, Ñs)
+    plan_fw = FFTW.plan_rfft(us; flags = fftw_flags)
+    ûs = plan_fw * us
+    plan_bw = FFTW.plan_brfft(ûs, size(us, 1); flags = fftw_flags)
+    PlanNUFFT(kernels, ks, σ, points, us, ûs, plan_fw, plan_bw)
 end
 
-for f ∈ (:deconvolve_fourier!, :convolve_fourier!)
-    @eval begin
-        # Scalar field version
-        $f(
-            gs::NTuple{D}, dst::AbstractArray, src::AbstractArray, ks::NTuple{D},
-        ) where {D} = only($f(gs, (dst,), (src,), ks))
-
-        # 1D version
-        $f(gx::AbstractKernel, dst, src, kx::AbstractVector) =
-            $f((gx,), dst, src, (kx,))
-
-        # In-place version
-        $f(gs, src, ks) = $f(gs, src, src, ks)
+function PlanNUFFT(::Type{K}, h::HalfSupport, σ_in::Real, Ns::Dims; kws...) where {K <: AbstractKernel}
+    σ = float(σ_in)
+    T = typeof(σ)
+    L = T(2π)  # assume 2π period
+    kernels = map(Ns) do N
+        Δx̃ = L / N / σ
+        Kernels.optimal_kernel(K, h, Δx̃, σ)
     end
+    PlanNUFFT(kernels, σ, Ns; kws...)
+end
+
+# 1D case
+function PlanNUFFT(::Type{K}, h::HalfSupport, σ::Real, N::Integer; kws...) where {K <: AbstractKernel}
+    PlanNUFFT(K, h, σ, (N,); kws...)
+end
+
+# More general constructor allowing to explicitly specify floating point precision.
+function PlanNUFFT(::Type{T}, ::Type{K}, h::HalfSupport, σ, args...; kws...) where {T <: AbstractFloat, K}
+    PlanNUFFT(K, h, T(σ), args...; kws...) :: PlanNUFFT{T}
+end
+
+function set_points!(p::PlanNUFFT{T, N}, xp::AbstractVector{<:NTuple{N}}) where {T, N}
+    (; points,) = p
+    resize!(points, length(xp))
+    Base.require_one_based_indexing(points)
+    @inbounds for (i, x) ∈ enumerate(xp)
+        points[i] = x
+    end
+    p
+end
+
+function set_points!(p::PlanNUFFT{T, N}, xp::NTuple{N, AbstractVector}) where {T, N}
+    set_points!(p, StructVector(xp))
+end
+
+# 1D case
+function set_points!(p::PlanNUFFT{T, 1}, xp::AbstractVector{<:Real}) where {T}
+    set_points!(p, StructVector((xp,)))
+end
+
+function exec_type1!(ûs_k::AbstractArray{<:Complex}, p::PlanNUFFT, charges)
+    (; points, kernels, us, ûs, ks, plan_fw,) = p
+    fill!(us, zero(eltype(us)))
+    spread_from_points!(kernels, us, points, charges)
+    mul!(ûs, plan_fw, us)  # perform FFT
+    D = length(ks)  # number of dimensions
+    ndims(ûs_k) == D || throw(DimensionMismatch(lazy"wrong dimensions of output array (expected $D-dimensional array)"))
+    Nk_expected = map(length, ks)
+    size(ûs_k) == Nk_expected || throw(DimensionMismatch(lazy"wrong dimensions of output array (expected dimensions $Nk_expected)"))
+    # TODO combine copy + deconvolution?
+    normfactor = 1 / length(us)  # FFT normalisation factor
+    copy_non_oversampled_coefs!(ûs_k, ûs, ks, normfactor)  # truncate to original grid + normalise
+    deconvolve_fourier!(kernels, ûs_k, ks)
+    ûs_k
+end
+
+function non_oversampled_indices(ks::AbstractVector, ax::AbstractUnitRange)
+    @assert length(ks) ≤ length(ax)
+    Nk = length(ks)
+    r2c = last(ks) > 0  # true if real-to-complex transform is performed in this dimension
+    inds = if r2c
+        (ax[begin:(begin + Nk - 1)], ax[1:0])  # include second empty iterator for type stability
+    elseif iseven(Nk)
+        h = Nk ÷ 2
+        (ax[begin:(begin + h - 1)], ax[(end - h + 1):end])
+    else
+        h = (Nk - 1) ÷ 2
+        (ax[begin:(begin + h)], ax[(end - h + 1):end])
+    end
+    Iterators.flatten(inds)
+end
+
+function copy_non_oversampled_coefs!(ûs_k, ûs, ks, normfactor)
+    inds = map(non_oversampled_indices, ks, axes(ûs))
+    n = firstindex(ûs_k) - 1
+    for I ∈ Iterators.product(inds...)
+        ûs_k[n += 1] = ûs[I...] * normfactor
+    end
+    @assert n == length(ûs_k)
+    ûs_k
 end
 
 end

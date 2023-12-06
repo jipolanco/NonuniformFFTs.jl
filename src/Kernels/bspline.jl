@@ -17,10 +17,10 @@ be equal to the grid step ``Δx``.
 This means that the resulting variance of the B-spline kernels is fixed to
 ``σ^2 = (n / 12) Δt^2 = (M / 6) Δx^2``.
 """
-struct BSplineKernel{M, T <: AbstractFloat} <: AbstractKernel{M}
+struct BSplineKernel{M, T <: AbstractFloat} <: AbstractKernel{M, T}
     σ  :: T
-    Δt :: T  # knot separation
-    gk :: Vector{T}     # values in uniform Fourier grid
+    Δt :: T          # knot separation
+    gk :: Vector{T}  # values in uniform Fourier grid
     function BSplineKernel{M}(Δx::Real) where {M}
         Δt = Δx
         σ = sqrt(M / 6) * Δt
@@ -33,6 +33,10 @@ end
 gridstep(g::BSplineKernel) = g.Δt  # assume Δx = Δt
 
 BSplineKernel(::HalfSupport{M}, args...) where {M} = BSplineKernel{M}(args...)
+
+# Here we ignore the oversampling factor, this kernel is not very adjustable...
+optimal_kernel(::Type{BSplineKernel}, h::HalfSupport, Δx, σ) =
+    BSplineKernel(h, Δx)
 
 """
     order(::BSplineKernel{M})

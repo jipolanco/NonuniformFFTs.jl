@@ -40,7 +40,7 @@ size of the grid of interest.
 """
 struct KaiserBesselKernel{
         M, T <: AbstractFloat, ChebyshevCoefs <: AbstractVector{T},
-    } <: AbstractKernel{M}
+    } <: AbstractKernel{M, T}
     Δx :: T  # grid spacing
     σ  :: T  # equivalent kernel width (for comparison with Gaussian)
     w  :: T  # actual kernel half-width (= M * Δx)
@@ -66,6 +66,13 @@ end
 
 KaiserBesselKernel(::HalfSupport{M}, args...) where {M} =
     KaiserBesselKernel{M}(args...)
+
+function optimal_kernel(::Type{KaiserBesselKernel}, h::HalfSupport{M}, Δx, σ) where {M}
+    # Set the optimal kernel shape parameter given the wanted support M and the oversampling
+    # factor σ. See Potts & Steidl 2003, eq. (5.12).
+    β = oftype(Δx, M * π * (2 - 1 / σ))
+    KaiserBesselKernel(h, Δx, β)
+end
 
 function evaluate_fourier(g::KaiserBesselKernel, k::Number)
     (; β², w, I₀_at_β,) = g

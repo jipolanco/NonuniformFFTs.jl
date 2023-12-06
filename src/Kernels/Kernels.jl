@@ -6,14 +6,15 @@ struct HalfSupport{M} end
 HalfSupport(M) = HalfSupport{M}()
 
 """
-    AbstractKernel{M}
+    AbstractKernel{M, T}
 
-Abstract type representing a smoothing kernel with half-support `M` (an integer value).
+Abstract type representing a smoothing kernel with half-support `M` (an integer value) and
+element type `T`.
 """
-abstract type AbstractKernel{M} end
+abstract type AbstractKernel{M, T <: AbstractFloat} end
 
 """
-    scale(g::AbstractKernel) -> AbstractFloat
+    scale(g::AbstractKernel{M, T}) -> T
 
 Returns the scale ``σ`` (typically the standard deviation) of the kernel.
 """
@@ -59,11 +60,7 @@ function init_fourier_coefficients!(g::AbstractKernel, ks::AbstractVector)
     resize!(gk, Nk)
     @assert eachindex(gk) == eachindex(ks)
     @inbounds for (i, k) ∈ pairs(ks)
-        ck = evaluate_fourier(g, k)
-        if ck isa Complex
-            @assert abs(imag(ck)) < abs(real(ck)) * 1e-16
-        end
-        gk[i] = real(ck)
+        gk[i] = evaluate_fourier(g, k)
     end
     gk
 end

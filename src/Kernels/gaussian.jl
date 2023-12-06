@@ -9,7 +9,7 @@ export GaussianKernel
 Constructs a Gaussian kernel with standard deviation `σ = α Δx` and half-support `M`, for a
 grid of step `Δx`.
 """
-struct GaussianKernel{M, T <: AbstractFloat} <: AbstractKernel{M}
+struct GaussianKernel{M, T <: AbstractFloat} <: AbstractKernel{M, T}
     Δx :: T
     σ  :: T
     τ  :: T
@@ -29,8 +29,12 @@ end
 
 GaussianKernel(::HalfSupport{M}, args...) where {M} = GaussianKernel{M}(args...)
 
-# TODO is this used?
-(g::GaussianKernel)(r::Number) = exp(-r^2 / g.τ)
+function optimal_kernel(::Type{GaussianKernel}, h::HalfSupport{M}, Δx, σ) where {M}
+    # Set the optimal kernel shape parameter given the wanted support M and the oversampling
+    # factor σ. See Potts & Steidl 2003, eq. (5.9).
+    α² = oftype(Δx, σ * M / (2 * σ - 1) / π)
+    GaussianKernel(h, Δx, sqrt(α²))
+end
 
 function evaluate_fourier(g::GaussianKernel, k::Number)
     (; τ,) = g

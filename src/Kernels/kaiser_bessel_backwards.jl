@@ -4,7 +4,7 @@ using Bessels: besseli0
 
 backwards_kb_equivalent_variance(β) = sinh(β) / (β * cosh(β) - sinh(β))
 
-struct BackwardsKaiserBesselKernel{M, T <: AbstractFloat} <: AbstractKernel{M}
+struct BackwardsKaiserBesselKernel{M, T <: AbstractFloat} <: AbstractKernel{M, T}
     Δx :: T  # grid spacing
     σ  :: T  # equivalent kernel width (for comparison with Gaussian)
     w  :: T  # actual kernel half-width (= M * Δx)
@@ -23,11 +23,17 @@ end
 BackwardsKaiserBesselKernel(::HalfSupport{M}, args...) where {M} =
     BackwardsKaiserBesselKernel{M}(args...)
 
+function optimal_kernel(::Type{BackwardsKaiserBesselKernel}, h::HalfSupport{M}, Δx, σ) where {M}
+    # Set the optimal kernel shape parameter given the wanted support M and the oversampling
+    # factor σ. See Potts & Steidl 2003, eq. (5.12).
+    β = oftype(Δx, M * π * (2 - 1 / σ))
+    BackwardsKaiserBesselKernel(h, Δx, β)
+end
+
 function evaluate_fourier(g::BackwardsKaiserBesselKernel, k::Number)
     (; β, w,) = g
     q = w * k
-    # s = sqrt(complex(β^2 - q^2))  # TODO is this always real?
-    s = sqrt(β^2 - q^2)  # we assume this is always real (requires large enough β)
+    s = sqrt(β^2 - q^2)  # this is always real (assuming β ≥ Mπ)
     w * π * besseli0(s) / sinh(β)
 end
 
