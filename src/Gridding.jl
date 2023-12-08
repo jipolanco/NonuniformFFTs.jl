@@ -5,6 +5,10 @@ Module for spreading point data onto a grid using smoothing filters.
 """
 module Gridding
 
+# TODO
+# - include 2π factor or not? (compatibility with FINUFFT? with regular FFT?)
+# - try piecewise polynomial approximation?
+
 using StaticArrays: StaticArrays
 using StructArrays: StructVector
 using FFTW: FFTW
@@ -113,20 +117,35 @@ function set_points!(p::PlanNUFFT{T, 1}, xp::AbstractVector{<:Real}) where {T}
     set_points!(p, StructVector((xp,)))
 end
 
-function exec_type1!(ûs_k::AbstractArray{<:Complex}, p::PlanNUFFT, charges)
-    (; points, kernels, us, ûs, ks, plan_fw,) = p
-    fill!(us, zero(eltype(us)))
-    spread_from_points!(kernels, us, points, charges)
-    mul!(ûs, plan_fw, us)  # perform FFT
+function check_nufft_uniform_data(p::PlanNUFFT, ûs_k::AbstractArray{<:Complex})
+    (; ks,) = p
     D = length(ks)  # number of dimensions
     ndims(ûs_k) == D || throw(DimensionMismatch(lazy"wrong dimensions of output array (expected $D-dimensional array)"))
     Nk_expected = map(length, ks)
     size(ûs_k) == Nk_expected || throw(DimensionMismatch(lazy"wrong dimensions of output array (expected dimensions $Nk_expected)"))
-    # TODO combine copy + deconvolution?
+    nothing
+end
+
+function exec_type1!(ûs_k::AbstractArray{<:Complex}, p::PlanNUFFT, charges)
+    (; points, kernels, us, ûs, ks, plan_fw,) = p
+    check_nufft_uniform_data(p, ûs_k)
+    fill!(us, zero(eltype(us)))
+    spread_from_points!(kernels, us, points, charges)
+    mul!(ûs, plan_fw, us)  # perform FFT
     normfactor = 1 / length(us)  # FFT normalisation factor
-    copy_non_oversampled_coefs!(ûs_k, ûs, ks, normfactor)  # truncate to original grid + normalise
-    deconvolve_fourier!(kernels, ûs_k, ks)
+    ϕ̂s = map(init_fourier_coefficients!, kernels, ks)  # this takes time only the first time it's called
+    copy_deconvolve_to_non_oversampled!(ûs_k, ûs, ks, ϕ̂s, normfactor)  # truncate to original grid + normalise
     ûs_k
+end
+
+function exec_type2!(vp::AbstractVector, p::PlanNUFFT, ûs_k::AbstractArray{<:Complex})
+    (; points, kernels, us, ûs, ks, plan_bw,) = p
+    check_nufft_uniform_data(p, ûs_k)
+    ϕ̂s = map(init_fourier_coefficients!, kernels, ks)  # this takes time only the first time it's called
+    copy_deconvolve_to_oversampled!(ûs, ûs_k, ks, ϕ̂s)
+    mul!(us, plan_bw, ûs)  # perform inverse FFT
+    interpolate!(kernels, vp, us, points)
+    vp
 end
 
 function non_oversampled_indices(ks::AbstractVector, ax::AbstractUnitRange)
@@ -145,13 +164,27 @@ function non_oversampled_indices(ks::AbstractVector, ax::AbstractUnitRange)
     Iterators.flatten(inds)
 end
 
-function copy_non_oversampled_coefs!(ûs_k, ûs, ks, normfactor)
-    inds = map(non_oversampled_indices, ks, axes(ûs))
-    n = firstindex(ûs_k) - 1
-    for I ∈ Iterators.product(inds...)
-        ûs_k[n += 1] = ûs[I...] * normfactor
+function copy_deconvolve_to_non_oversampled!(ûs_k, ûs, ks, ϕ̂s, normfactor)
+    subindices = map(non_oversampled_indices, ks, axes(ûs))
+    inds = Iterators.product(subindices...)  # indices of oversampled array
+    inds_k = CartesianIndices(ûs_k)    # indices of non-oversampled array
+    for (I, J) ∈ zip(inds_k, inds)
+        ϕ̂ = map(getindex, ϕ̂s, Tuple(I))  # Fourier coefficient of kernel
+        ûs_k[I] = ûs[J...] * (normfactor / prod(ϕ̂))
     end
-    @assert n == length(ûs_k)
+    ûs_k
+end
+
+function copy_deconvolve_to_oversampled!(ûs, ûs_k, ks, ϕ̂s)
+    fill!(ûs, zero(eltype(ûs)))  # make sure the padding region is set to zero
+    # Note: both these indices should have the same lengths.
+    subindices = map(non_oversampled_indices, ks, axes(ûs))
+    inds = Iterators.product(subindices...)  # indices of oversampled array
+    inds_k = CartesianIndices(ûs_k)    # indices of non-oversampled array
+    for (I, J) ∈ zip(inds_k, inds)
+        ϕ̂ = map(getindex, ϕ̂s, Tuple(I))  # Fourier coefficient of kernel
+        ûs[J...] = ûs_k[I] / prod(ϕ̂)
+    end
     ûs_k
 end
 

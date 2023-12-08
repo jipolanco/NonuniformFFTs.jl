@@ -23,7 +23,7 @@ function deconvolve_fourier!(
     ) where {D, M, T <: Complex}
     @assert M > 0
     gks = map(init_fourier_coefficients!, gs, ks)  # this takes time only the first time it's called
-    inds = CartesianIndices(first(dst))
+    inds = CartesianIndices(first(src))
     @inbounds for I ∈ inds
         g⃗ = map(getindex, gks, Tuple(I))
         gdiv = 1 / prod(g⃗)
