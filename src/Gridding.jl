@@ -6,26 +6,34 @@ Module for spreading point data onto a grid using smoothing filters.
 module Gridding
 
 # TODO
-# - include 2π factor or not? (compatibility with FINUFFT? with regular FFT?)
 # - try piecewise polynomial approximation?
 
 using StaticArrays: StaticArrays
 using StructArrays: StructVector
 using FFTW: FFTW
 using LinearAlgebra: mul!
-using Reexport
 
 include("Kernels/Kernels.jl")
-@reexport using .Kernels
+
 using .Kernels:
     Kernels,
     AbstractKernel,
+    HalfSupport,
+    GaussianKernel,
+    BSplineKernel,
+    KaiserBesselKernel,
+    BackwardsKaiserBesselKernel,
     scale,
     gridstep,
     init_fourier_coefficients!
 
 export
     PlanNUFFT,
+    HalfSupport,
+    GaussianKernel,
+    BSplineKernel,
+    KaiserBesselKernel,
+    BackwardsKaiserBesselKernel,
     spread_from_point!,
     spread_from_points!,
     deconvolve_fourier!
@@ -55,7 +63,10 @@ struct PlanNUFFT{
 end
 
 # This constructor is generally not called directly.
-function PlanNUFFT(kernels, σ_wanted, Ns::Dims{D}; fftw_flags = FFTW.MEASURE) where {D}
+function PlanNUFFT(
+        kernels::NTuple{D, <:AbstractKernel}, σ_wanted, Ns::Dims{D};
+        fftw_flags = FFTW.MEASURE,
+    ) where {D}
     T = typeof(σ_wanted)
     ks = ntuple(Val(length(Ns))) do i
         N = Ns[i]
@@ -71,15 +82,18 @@ function PlanNUFFT(kernels, σ_wanted, Ns::Dims{D}; fftw_flags = FFTW.MEASURE) w
     σ::T = maximum(Ñs ./ Ns)  # actual oversampling factor
     points = StructVector(ntuple(_ -> T[], Val(D)))
     us = Array{T}(undef, Ñs)
+    dims_out = (Ñs[1] ÷ 2 + 1, Base.tail(Ñs)...)
+    ûs = Array{Complex{T}}(undef, dims_out)
     plan_fw = FFTW.plan_rfft(us; flags = fftw_flags)
-    ûs = plan_fw * us
     plan_bw = FFTW.plan_brfft(ûs, size(us, 1); flags = fftw_flags)
     PlanNUFFT(kernels, ks, σ, points, us, ûs, plan_fw, plan_bw)
 end
 
-function PlanNUFFT(::Type{K}, h::HalfSupport, σ_in::Real, Ns::Dims; kws...) where {K <: AbstractKernel}
-    σ = float(σ_in)
-    T = typeof(σ)
+function PlanNUFFT(
+        ::Type{T}, ::Type{K}, h::HalfSupport, σ_in::Real, Ns::Dims;
+        kws...,
+    ) where {T <: AbstractFloat, K <: AbstractKernel}
+    σ = T(σ_in)
     L = T(2π)  # assume 2π period
     kernels = map(Ns) do N
         Δx̃ = L / N / σ
@@ -89,13 +103,16 @@ function PlanNUFFT(::Type{K}, h::HalfSupport, σ_in::Real, Ns::Dims; kws...) whe
 end
 
 # 1D case
-function PlanNUFFT(::Type{K}, h::HalfSupport, σ::Real, N::Integer; kws...) where {K <: AbstractKernel}
-    PlanNUFFT(K, h, σ, (N,); kws...)
+function PlanNUFFT(
+        ::Type{T}, ::Type{K}, h::HalfSupport, σ::Real, N::Integer; kws...,
+    ) where {T <: AbstractFloat, K <: AbstractKernel}
+    PlanNUFFT(T, K, h, σ, (N,); kws...)
 end
 
-# More general constructor allowing to explicitly specify floating point precision.
-function PlanNUFFT(::Type{T}, ::Type{K}, h::HalfSupport, σ, args...; kws...) where {T <: AbstractFloat, K}
-    PlanNUFFT(K, h, T(σ), args...; kws...) :: PlanNUFFT{T}
+# Alternative constructor: infer floating point type from type of σ.
+function PlanNUFFT(::Type{K}, h::HalfSupport, σ::Real, args...; kws...) where {K <: AbstractKernel}
+    T = typeof(float(σ))
+    PlanNUFFT(T, K, h, σ, args...; kws...) :: PlanNUFFT{T}
 end
 
 function set_points!(p::PlanNUFFT{T, N}, xp::AbstractVector{<:NTuple{N}}) where {T, N}
@@ -131,8 +148,8 @@ function exec_type1!(ûs_k::AbstractArray{<:Complex}, p::PlanNUFFT, charges)
     check_nufft_uniform_data(p, ûs_k)
     fill!(us, zero(eltype(us)))
     spread_from_points!(kernels, us, points, charges)
-    mul!(ûs, plan_fw, us)  # perform FFT
-    normfactor = 1 / length(us)  # FFT normalisation factor
+    mul!(ûs, plan_fw, us)         # perform FFT
+    normfactor = 2π / length(us)  # FFT normalisation factor
     ϕ̂s = map(init_fourier_coefficients!, kernels, ks)  # this takes time only the first time it's called
     copy_deconvolve_to_non_oversampled!(ûs_k, ûs, ks, ϕ̂s, normfactor)  # truncate to original grid + normalise
     ûs_k
