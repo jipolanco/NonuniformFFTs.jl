@@ -56,9 +56,23 @@ to_ntuple(xs::NTuple) = xs
 
 function spread_from_points!(gs, us, x⃗s::AbstractVector, vs::AbstractVector)
     for (x⃗, v) ∈ zip(x⃗s, vs)
-        spread_from_point!(gs, us, x⃗, v)
+        y⃗ = to_unit_cell(x⃗)  # fold coordinates to [0, 2π] unit cell
+        spread_from_point!(gs, us, y⃗, v)
     end
     us
+end
+
+to_unit_cell(x⃗) = map(_to_unit_cell, x⃗)
+
+function _to_unit_cell(x::Real)
+    L = oftype(x, 2π)
+    while x < 0
+        x += L
+    end
+    while x ≥ L
+        x -= L
+    end
+    x
 end
 
 function spread_onto_arrays!(

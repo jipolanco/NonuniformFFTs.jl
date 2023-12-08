@@ -63,7 +63,7 @@ struct PlanNUFFT{
 end
 
 # This constructor is generally not called directly.
-function PlanNUFFT(
+function _PlanNUFFT(
         kernels::NTuple{D, <:AbstractKernel}, σ_wanted, Ns::Dims{D};
         fftw_flags = FFTW.MEASURE,
     ) where {D}
@@ -90,29 +90,30 @@ function PlanNUFFT(
 end
 
 function PlanNUFFT(
-        ::Type{T}, ::Type{K}, h::HalfSupport, σ_in::Real, Ns::Dims;
-        kws...,
+        ::Type{T}, ::Type{K}, Ns::Dims, h::HalfSupport;
+        σ::Real = T(2), kws...,
     ) where {T <: AbstractFloat, K <: AbstractKernel}
-    σ = T(σ_in)
-    L = T(2π)  # assume 2π period
-    kernels = map(Ns) do N
-        Δx̃ = L / N / σ
-        Kernels.optimal_kernel(K, h, Δx̃, σ)
+    let σ = T(σ)
+        L = T(2π)  # assume 2π period
+        kernels = map(Ns) do N
+            Δx̃ = L / N / σ
+            Kernels.optimal_kernel(K, h, Δx̃, σ)
+        end
+        _PlanNUFFT(kernels, σ, Ns; kws...)
     end
-    PlanNUFFT(kernels, σ, Ns; kws...)
 end
 
 # 1D case
 function PlanNUFFT(
-        ::Type{T}, ::Type{K}, h::HalfSupport, σ::Real, N::Integer; kws...,
+        ::Type{T}, ::Type{K}, N::Integer, args...;
+        kws...,
     ) where {T <: AbstractFloat, K <: AbstractKernel}
-    PlanNUFFT(T, K, h, σ, (N,); kws...)
+    PlanNUFFT(T, K, (N,), args...; kws...)
 end
 
-# Alternative constructor: infer floating point type from type of σ.
-function PlanNUFFT(::Type{K}, h::HalfSupport, σ::Real, args...; kws...) where {K <: AbstractKernel}
-    T = typeof(float(σ))
-    PlanNUFFT(T, K, h, σ, args...; kws...) :: PlanNUFFT{T}
+# Alternative constructor: use default floating point type.
+function PlanNUFFT(::Type{K}, args...; kws...) where {K <: AbstractKernel}
+    PlanNUFFT(Float64, K, args...; kws...)
 end
 
 function set_points!(p::PlanNUFFT{T, N}, xp::AbstractVector{<:NTuple{N}}) where {T, N}
@@ -149,7 +150,8 @@ function exec_type1!(ûs_k::AbstractArray{<:Complex}, p::PlanNUFFT, charges)
     fill!(us, zero(eltype(us)))
     spread_from_points!(kernels, us, points, charges)
     mul!(ûs, plan_fw, us)         # perform FFT
-    normfactor = 2π / length(us)  # FFT normalisation factor
+    T = real(eltype(us))
+    normfactor::T = prod(N -> 2π / N, size(us))  # FFT normalisation factor
     ϕ̂s = map(init_fourier_coefficients!, kernels, ks)  # this takes time only the first time it's called
     copy_deconvolve_to_non_oversampled!(ûs_k, ûs, ks, ϕ̂s, normfactor)  # truncate to original grid + normalise
     ûs_k
