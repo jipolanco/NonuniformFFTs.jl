@@ -8,7 +8,6 @@ module Gridding
 # TODO
 # - try piecewise polynomial approximation?
 
-using StaticArrays: StaticArrays
 using StructArrays: StructVector
 using FFTW: FFTW
 using LinearAlgebra: mul!

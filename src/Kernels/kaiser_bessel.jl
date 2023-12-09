@@ -39,7 +39,7 @@ In other words, FFTs must be performed over a grid of size ``Ñ = σN`` where ``
 size of the grid of interest.
 """
 struct KaiserBesselKernel{
-        M, T <: AbstractFloat, ChebyshevCoefs <: AbstractVector{T},
+        M, T <: AbstractFloat, ApproxCoefs <: AbstractArray{T},
     } <: AbstractKernel{M, T}
     Δx :: T  # grid spacing
     σ  :: T  # equivalent kernel width (for comparison with Gaussian)
@@ -47,7 +47,7 @@ struct KaiserBesselKernel{
     β  :: T  # KB parameter
     β² :: T
     I₀_at_β :: T
-    cs :: ChebyshevCoefs  # coefficients of Chebyshev approximation
+    cs :: ApproxCoefs  # coefficients of polynomial approximation
     gk :: Vector{T}
 
     function KaiserBesselKernel{M}(Δx::T, β::T) where {M, T <: AbstractFloat}
@@ -56,8 +56,8 @@ struct KaiserBesselKernel{
         β² = β * β
         I₀_at_β = besseli0(β)
         gk = Vector{T}(undef, 0)
-        cs = Vector{T}(undef, 32)  # 32 Chebyshev modes are enough when using Float64
-        chebyshev_approximate!(cs) do x
+        Npoly = M + 4  # degree of polynomial is d = Npoly - 1
+        cs = solve_piecewise_polynomial_coefficients(T, Val(M), Val(Npoly)) do x
             besseli0(β * sqrt(1 - x^2)) / I₀_at_β
         end
         new{M, T, typeof(cs)}(Δx, σ, w, β, β², I₀_at_β, cs, gk)
@@ -81,16 +81,12 @@ function evaluate_fourier(g::KaiserBesselKernel, k::Number)
     2 * w * sinh(s) / (I₀_at_β * s)
 end
 
-# For some reason things are faster with @noinline.
-@noinline function evaluate_kernel(g::KaiserBesselKernel{M}, x, i::Integer) where {M}
+function evaluate_kernel(g::KaiserBesselKernel{M}, x, i::Integer) where {M}
     # Evaluate in-between grid points xs[(i - M):(i + M)].
     # Note: xs[j] = (j - 1) * Δx
     (; w,) = g
     X = x / w - (i - 1) / M  # source position relative to xs[i]
     # @assert 0 ≤ X < 1 / M
-    xs = evaluation_points_chebyshev(Val(M), X)  # locations in [0, 1]
-    # Both evaluation functions give the same results and have roughly the same performance:
-    values = chebyshev_evaluate_clenshaw(g.cs, xs)
-    # values = chebyshev_evaluate(g.cs, xs)
+    values = evaluate_piecewise(X, g.cs)
     (; i, values,)
 end

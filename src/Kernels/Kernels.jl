@@ -95,6 +95,8 @@ function evaluation_points(::Val{M}, X) where {M}
 end
 
 include("chebyshev.jl")
+include("piecewise_polynomial.jl")
+
 include("gaussian.jl")
 include("bspline.jl")
 include("kaiser_bessel.jl")
