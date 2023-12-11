@@ -84,8 +84,9 @@ function _PlanNUFFT(
 end
 
 function PlanNUFFT(
-        ::Type{T}, ::Type{K}, Ns::Dims, h::HalfSupport;
-        σ::Real = T(2), kws...,
+        ::Type{T}, Ns::Dims, h::HalfSupport;
+        kernel::Type{K} = BackwardsKaiserBesselKernel,
+        σ::Real = real(T)(2), kws...,
     ) where {T <: AbstractFloat, K <: AbstractKernel}
     let σ = T(σ)
         L = T(2π)  # assume 2π period
@@ -97,17 +98,20 @@ function PlanNUFFT(
     end
 end
 
+# This constructor relies on constant propagation to make the output fully inferred.
+function PlanNUFFT(::Type{T}, Ns::Dims; m::Integer = 8, kws...) where {T}
+    h = HalfSupport(m)
+    PlanNUFFT(T, Ns, h; kws...)
+end
+
 # 1D case
-function PlanNUFFT(
-        ::Type{T}, ::Type{K}, N::Integer, args...;
-        kws...,
-    ) where {T <: AbstractFloat, K <: AbstractKernel}
-    PlanNUFFT(T, K, (N,), args...; kws...)
+function PlanNUFFT(::Type{T}, N::Integer, args...; kws...) where {T <: AbstractFloat}
+    PlanNUFFT(T, (N,), args...; kws...)
 end
 
 # Alternative constructor: use default floating point type.
-function PlanNUFFT(::Type{K}, args...; kws...) where {K <: AbstractKernel}
-    PlanNUFFT(Float64, K, args...; kws...)
+function PlanNUFFT(N::Union{Integer, Dims}, args...; kws...)
+    PlanNUFFT(Float64, N, args...; kws...)
 end
 
 function set_points!(p::PlanNUFFT{T, N}, xp::AbstractVector{<:NTuple{N}}) where {T, N}
