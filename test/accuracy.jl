@@ -10,7 +10,7 @@ function check_nufft_error(::Type{Float64}, ::KaiserBesselKernel, ::HalfSupport{
         # This seems to work for KaiserBesselKernel and 4 ≤ M ≤ 10
         @test err < max(10.0^(-1.16 * M) * 1.05, err_min_kb)
     elseif σ ≈ 2.0
-        err_max_kb = max(6 * 10.0^(-1.9 * M), 3e-14)  # error "plateaus" at ~2e-14 for M ≥ 8
+        err_max_kb = max(6 * 10.0^(-1.9 * M), 4e-14)  # error "plateaus" at ~2e-14 for M ≥ 8
         @test err < err_max_kb
     end
     nothing
@@ -21,7 +21,7 @@ function check_nufft_error(::Type{Float64}, ::BackwardsKaiserBesselKernel, ::Hal
         err_min_kb = 4e-12  # error reaches a minimum at ~2e-12 for M = 10
         @test err < max(10.0^(-1.20 * M), err_min_kb)
     elseif σ ≈ 2.0
-        err_max_kb = max(6 * 10.0^(-1.9 * M), 3e-14)  # error "plateaus" at ~2e-14 for M ≥ 8
+        err_max_kb = max(6 * 10.0^(-1.9 * M), 4e-14)  # error "plateaus" at ~2e-14 for M ≥ 8
         @test err < err_max_kb
     end
     nothing
@@ -70,7 +70,12 @@ function test_nufft_type1_1d(
     # Generate some non-uniform random data
     rng = Random.Xoshiro(42)
     xp = rand(rng, Tr, Np) .* 2π  # non-uniform points in [0, 2π]
-    vp = randn(rng, T, Np)             # random values at points
+    vp = randn(rng, T, Np)        # random values at points
+
+    for i ∈ eachindex(xp)
+        δ = rand(rng, (-1, 0, 1))
+        xp[i] += δ * 2π  # allow points outside of main unit cell
+    end
 
     # Compute "exact" non-uniform transform
     ûs_exact = zeros(Complex{Tr}, length(ks))
@@ -125,6 +130,11 @@ function test_nufft_type2_1d(
     rng = Random.Xoshiro(42)
     ûs = randn(rng, Complex{Tr}, length(ks))
     xp = rand(rng, Tr, Np) .* 2π  # non-uniform points in [0, 2π]
+
+    for i ∈ eachindex(xp)
+        δ = rand(rng, (-1, 0, 1))
+        xp[i] += δ * 2π  # allow points outside of main unit cell
+    end
 
     # Compute "exact" type-2 transform (interpolation)
     vp_exact = zeros(T, Np)

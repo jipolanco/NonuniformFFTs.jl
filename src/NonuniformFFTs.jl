@@ -1,8 +1,5 @@
 module NonuniformFFTs
 
-# TODO
-# - try piecewise polynomial approximation?
-
 using StructArrays: StructVector
 using FFTW: FFTW
 using LinearAlgebra: mul!

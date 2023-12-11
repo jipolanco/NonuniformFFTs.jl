@@ -41,19 +41,6 @@ function spread_from_point!(gs::NTuple, u::AbstractArray, x⃗₀, v::Number)
     spread_from_point!(gs, (u,), x⃗₀, (v,))
 end
 
-spread_from_point!(g::AbstractKernelData, u::AbstractVector, args...) =
-    spread_from_point!((g,), (u,), args...)
-
-# This accounts for the case where x⃗₀ or vs is not a tuple (e.g. it's an SVector).
-function spread_from_point!(gs::Tuple, us::NTuple, x⃗₀, vs)
-    @assert length(x⃗₀) == length(gs)
-    @assert length(vs) == length(us)
-    spread_from_point!(gs, us, to_ntuple(x⃗₀), to_ntuple(vs))
-end
-
-to_ntuple(xs) = promote(xs...)
-to_ntuple(xs::NTuple) = xs
-
 function spread_from_points!(gs, us, x⃗s::AbstractVector, vs::AbstractVector)
     for (x⃗, v) ∈ zip(x⃗s, vs)
         y⃗ = to_unit_cell(x⃗)  # fold coordinates to [0, 2π] unit cell

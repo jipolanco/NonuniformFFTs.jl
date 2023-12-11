@@ -1,7 +1,8 @@
 function interpolate!(gs, vp::AbstractArray, us, xp::AbstractArray)
     @assert axes(vp) === axes(xp)
     for i ∈ eachindex(vp)
-        vp[i] = interpolate(gs, us, xp[i])
+        x⃗ = to_unit_cell(xp[i])
+        vp[i] = interpolate(gs, us, x⃗)
     end
     vp
 end
@@ -9,7 +10,7 @@ end
 function interpolate(
         gs::NTuple{D, AbstractKernelData},
         us::NTuple{M, AbstractArray{T, D}} where {T},
-        x⃗::NTuple{D},
+        x⃗::NTuple{D},  # coordinates are assumed to be in [0, 2π]
     ) where {D, M}
     @assert M > 0
     map(Base.require_one_based_indexing, us)
