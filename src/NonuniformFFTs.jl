@@ -35,31 +35,52 @@ export
 include("spreading.jl")
 include("interpolation.jl")
 
-# TODO
-# - allow complex non-uniform values?
-struct PlanNUFFT{
-        T <: AbstractFloat, N, M,
-        Kernels <: NTuple{N, AbstractKernelData{<:AbstractKernel, M, T}},
+abstract type AbstractNUFFTData{T <: Number, N} end
+
+struct RealNUFFTData{
+        T <: AbstractFloat, N,
         WaveNumbers <: NTuple{N, AbstractVector{T}},
-        Points <: StructVector{NTuple{N, T}},
         PlanFFT_fw <: FFTW.Plan{T},
         PlanFFT_bw <: FFTW.Plan{Complex{T}},
-    }
-    kernels :: Kernels
+    } <: AbstractNUFFTData{T, N}
     ks      :: WaveNumbers  # wavenumbers in *non-oversampled* Fourier grid
-    σ       :: T            # oversampling factor (≥ 1)
-    points  :: Points       # non-uniform points (real values)
     us      :: Array{T, N}  # values in oversampled grid
     ûs      :: Array{Complex{T}, N}  # Fourier coefficients in oversampled grid
     plan_fw :: PlanFFT_fw
     plan_bw :: PlanFFT_bw
 end
 
+struct ComplexNUFFTData{
+        T <: AbstractFloat, N,
+        WaveNumbers <: NTuple{N, AbstractVector{T}},
+        PlanFFT_fw <: FFTW.Plan{Complex{T}},
+        PlanFFT_bw <: FFTW.Plan{Complex{T}},
+    } <: AbstractNUFFTData{Complex{T}, N}
+    ks      :: WaveNumbers
+    us      :: Array{Complex{T}, N}
+    plan_fw :: PlanFFT_fw  # in-place transform
+    plan_bw :: PlanFFT_bw  # inverse in-place transform
+end
+
+struct PlanNUFFT{
+        T <: Number, N, M,
+        Treal <: AbstractFloat,  # this is real(T)
+        Kernels <: NTuple{N, AbstractKernelData{<:AbstractKernel, M, Treal}},
+        Points <: StructVector{NTuple{N, Treal}},
+        Data <: AbstractNUFFTData{T, N},
+    }
+    kernels :: Kernels
+    σ       :: Treal   # oversampling factor (≥ 1)
+    points  :: Points  # non-uniform points (real values)
+    data    :: Data
+end
+
+# Case of real-to-complex transform.
 # This constructor is generally not called directly.
 function _PlanNUFFT(
         ::Type{T}, kernel::AbstractKernel, h::HalfSupport, σ_wanted, Ns::Dims{D};
         fftw_flags = FFTW.MEASURE,
-    ) where {T, D}
+    ) where {T <: AbstractFloat, D}
     ks = ntuple(Val(length(Ns))) do i
         N = Ns[i]
         # This assumes L = 2π:
@@ -71,9 +92,9 @@ function _PlanNUFFT(
         # which is good for FFT performance.
         nextprod((2, 3, 5), floor(Int, σ_wanted * N))
     end
-    R = real(T)
-    σ::R = maximum(Ñs ./ Ns)  # actual oversampling factor
+    σ::T = maximum(Ñs ./ Ns)  # actual oversampling factor
     kernel_data = map(Ns, Ñs) do N, Ñ
+        @inline
         L = T(2π)  # assume 2π period
         Δx̃ = L / Ñ
         Kernels.optimal_kernel(kernel, h, Δx̃, Ñ / N)
@@ -84,32 +105,64 @@ function _PlanNUFFT(
     ûs = Array{Complex{T}}(undef, dims_out)
     plan_fw = FFTW.plan_rfft(us; flags = fftw_flags)
     plan_bw = FFTW.plan_brfft(ûs, size(us, 1); flags = fftw_flags)
-    PlanNUFFT(kernel_data, ks, σ, points, us, ûs, plan_fw, plan_bw)
+    nufft_data = RealNUFFTData(ks, us, ûs, plan_fw, plan_bw)
+    PlanNUFFT(kernel_data, σ, points, nufft_data)
+end
+
+# Case of complex-to-complex transform.
+# This constructor is generally not called directly.
+function _PlanNUFFT(
+        ::Type{S}, kernel::AbstractKernel, h::HalfSupport, σ_wanted, Ns::Dims{D};
+        fftw_flags = FFTW.MEASURE,
+    ) where {S <: Complex, D}
+    T = real(S)
+    ks = map(Ns) do N
+        FFTW.fftfreq(N, T(N))  # this assumes L = 2π
+    end
+    # Determine dimensions of oversampled grid.
+    Ñs = map(Ns) do N
+        # We try to make sure that each dimension is a product of powers of small primes,
+        # which is good for FFT performance.
+        nextprod((2, 3, 5), floor(Int, σ_wanted * N))
+    end
+    σ::T = maximum(Ñs ./ Ns)  # actual oversampling factor
+    kernel_data = map(Ns, Ñs) do N, Ñ
+        @inline
+        L = T(2π)  # assume 2π period
+        Δx̃ = L / Ñ
+        Kernels.optimal_kernel(kernel, h, Δx̃, Ñ / N)
+    end
+    points = StructVector(ntuple(_ -> T[], Val(D)))
+    us = Array{Complex{T}}(undef, Ñs)
+    plan_fw = FFTW.plan_fft!(us; flags = fftw_flags)
+    plan_bw = FFTW.plan_bfft!(us; flags = fftw_flags)
+    nufft_data = ComplexNUFFTData(ks, us, plan_fw, plan_bw)
+    PlanNUFFT(kernel_data, σ, points, nufft_data)
 end
 
 function PlanNUFFT(
         ::Type{T}, Ns::Dims, h::HalfSupport;
         kernel::AbstractKernel = BackwardsKaiserBesselKernel(),
         σ::Real = real(T)(2), kws...,
-    ) where {T <: AbstractFloat}
+    ) where {T <: Number}
     R = real(T)
     _PlanNUFFT(T, kernel, h, R(σ), Ns; kws...)
 end
 
 # This constructor relies on constant propagation to make the output fully inferred.
-function PlanNUFFT(::Type{T}, Ns::Dims; m::Integer = 8, kws...) where {T}
+function PlanNUFFT(::Type{T}, Ns::Dims; m::Integer = 8, kws...) where {T <: Number}
     h = HalfSupport(m)
     PlanNUFFT(T, Ns, h; kws...)
 end
 
 # 1D case
-function PlanNUFFT(::Type{T}, N::Integer, args...; kws...) where {T <: AbstractFloat}
+function PlanNUFFT(::Type{T}, N::Integer, args...; kws...) where {T <: Number}
     PlanNUFFT(T, (N,), args...; kws...)
 end
 
-# Alternative constructor: use default floating point type.
+# Alternative constructor: use ComplexF64 data by default.
 function PlanNUFFT(N::Union{Integer, Dims}, args...; kws...)
-    PlanNUFFT(Float64, N, args...; kws...)
+    PlanNUFFT(ComplexF64, N, args...; kws...)
 end
 
 function set_points!(p::PlanNUFFT{T, N}, xp::AbstractVector{<:NTuple{N}}) where {T, N}
@@ -132,7 +185,7 @@ function set_points!(p::PlanNUFFT{T, 1}, xp::AbstractVector{<:Real}) where {T}
 end
 
 function check_nufft_uniform_data(p::PlanNUFFT, ûs_k::AbstractArray{<:Complex})
-    (; ks,) = p
+    (; ks,) = p.data
     D = length(ks)  # number of dimensions
     ndims(ûs_k) == D || throw(DimensionMismatch(lazy"wrong dimensions of output array (expected $D-dimensional array)"))
     Nk_expected = map(length, ks)
@@ -141,11 +194,12 @@ function check_nufft_uniform_data(p::PlanNUFFT, ûs_k::AbstractArray{<:Complex}
 end
 
 function exec_type1!(ûs_k::AbstractArray{<:Complex}, p::PlanNUFFT, charges)
-    (; points, kernels, us, ûs, ks, plan_fw,) = p
+    (; points, kernels, data,) = p
+    (; us, ks,) = data
     check_nufft_uniform_data(p, ûs_k)
     fill!(us, zero(eltype(us)))
     spread_from_points!(kernels, us, points, charges)
-    mul!(ûs, plan_fw, us)         # perform FFT
+    ûs = _type1_fft!(data)
     T = real(eltype(us))
     normfactor::T = prod(N -> 2π / N, size(us))  # FFT normalisation factor
     ϕ̂s = map(init_fourier_coefficients!, kernels, ks)  # this takes time only the first time it's called
@@ -153,14 +207,40 @@ function exec_type1!(ûs_k::AbstractArray{<:Complex}, p::PlanNUFFT, charges)
     ûs_k
 end
 
+function _type1_fft!(data::RealNUFFTData)
+    (; us, ûs, plan_fw,) = data
+    mul!(ûs, plan_fw, us)  # perform r2c FFT
+    ûs
+end
+
+function _type1_fft!(data::ComplexNUFFTData)
+    (; us, plan_fw,) = data
+    plan_fw * us   # perform in-place c2c FFT
+    us
+end
+
 function exec_type2!(vp::AbstractVector, p::PlanNUFFT, ûs_k::AbstractArray{<:Complex})
-    (; points, kernels, us, ûs, ks, plan_bw,) = p
+    (; points, kernels, data,) = p
+    (; us, ks,) = data
     check_nufft_uniform_data(p, ûs_k)
     ϕ̂s = map(init_fourier_coefficients!, kernels, ks)  # this takes time only the first time it's called
-    copy_deconvolve_to_oversampled!(ûs, ûs_k, ks, ϕ̂s)
-    mul!(us, plan_bw, ûs)  # perform inverse FFT
+    _type2_copy_and_fft!(ûs_k, ϕ̂s, data)
     interpolate!(kernels, vp, us, points)
     vp
+end
+
+function _type2_copy_and_fft!(ûs_k, ϕ̂s, data::RealNUFFTData)
+    (; us, ûs, ks, plan_bw,) = data
+    copy_deconvolve_to_oversampled!(ûs, ûs_k, ks, ϕ̂s)
+    mul!(us, plan_bw, ûs)  # perform inverse r2c FFT
+    nothing
+end
+
+function _type2_copy_and_fft!(ûs_k, ϕ̂s, data::ComplexNUFFTData)
+    (; us, ks, plan_bw,) = data
+    copy_deconvolve_to_oversampled!(us, ûs_k, ks, ϕ̂s)
+    plan_bw * us  # perform in-place inverse c2c FFT
+    nothing
 end
 
 function non_oversampled_indices(ks::AbstractVector, ax::AbstractUnitRange)
