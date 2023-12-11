@@ -90,8 +90,15 @@ function test_nufft_type1_1d(
     err = l2_error(ûs, ûs_exact)
 
     # Inference tests
-    JET.@test_opt NonuniformFFTs.set_points!(plan_nufft, xp)
-    JET.@test_opt NonuniformFFTs.exec_type1!(ûs, plan_nufft, vp)
+    if VERSION < v"1.10-"
+        # On Julia 1.9, there seems to be a runtime dispatch related to throwing a
+        # DimensionMismatch error using LazyStrings (in NonuniformFFTs.check_nufft_uniform_data).
+        JET.@test_opt ignored_modules=(Base,) NonuniformFFTs.set_points!(plan_nufft, xp)
+        JET.@test_opt ignored_modules=(Base,) NonuniformFFTs.exec_type1!(ûs, plan_nufft, vp)
+    else
+        JET.@test_opt NonuniformFFTs.set_points!(plan_nufft, xp)
+        JET.@test_opt NonuniformFFTs.exec_type1!(ûs, plan_nufft, vp)
+    end
 
     check_nufft_error(T, kernel, m, σ, err)
 
