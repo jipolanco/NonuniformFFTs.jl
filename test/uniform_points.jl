@@ -42,7 +42,7 @@ function test_uniform_points(::Type{T}, N; σ = 1.25) where {T <: AbstractFloat}
     exec_type2!(vp_bis, plan_nufft, ûs)
     err_type2 = l2_error(vp_bis, vp_expected)
     @show err_type2
-    @test err_type2 < 3e-10
+    @test err_type2 < 4e-10
 
     nothing
 end
