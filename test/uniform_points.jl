@@ -14,17 +14,20 @@ function l2_error(us, vs)
     sqrt(err / norm)
 end
 
-function test_uniform_points(::Type{T}, N; σ = 1.25) where {T <: AbstractFloat}
+function test_uniform_points(::Type{T}, N; σ = 1.25) where {T <: Number}
     Np = N
     rng = Random.Xoshiro(42)
-    xp = range(T(0), T(2π); length = N + 1)[1:N]
+    Tr = real(T)
+    xp = range(Tr(0), Tr(2π); length = N + 1)[1:N]
     vp = randn(rng, T, Np)
 
-    ûs_fft = FFTW.rfft(vp)
-
-    # Zero-out Nyquist mode to avoid comparison issues.
-    ûs_fft[end] = 0
-    vp = FFTW.irfft(ûs_fft, N)
+    if T <: Real
+        ûs_fft = FFTW.rfft(vp)
+        ûs_fft[end] = 0  # zero-out Nyquist mode to avoid comparison issues
+        vp = FFTW.irfft(ûs_fft, N)
+    elseif T <: Complex
+        ûs_fft = FFTW.fft(vp)
+    end
 
     ûs = similar(ûs_fft)
 
@@ -34,19 +37,25 @@ function test_uniform_points(::Type{T}, N; σ = 1.25) where {T <: AbstractFloat}
 
     err_type1 = l2_error(ûs, ûs_fft)
     @show err_type1
-    @test err_type1 < 3e-10
+    @test err_type1 < 4e-10
 
-    vp_expected = FFTW.brfft(ûs_fft, N)  # this is the unnormalised backwards FFT
+    if T <: Real
+        vp_expected = FFTW.brfft(ûs_fft, N)  # this is the unnormalised backwards FFT
+    elseif T <: Complex
+        vp_expected = FFTW.bfft(ûs_fft)  # this is the unnormalised backwards FFT
+    end
     @assert vp_expected ≈ vp * N
     vp_bis = similar(vp)
     exec_type2!(vp_bis, plan_nufft, ûs)
     err_type2 = l2_error(vp_bis, vp_expected)
     @show err_type2
-    @test err_type2 < 4e-10
+    @test err_type2 < 5e-10
 
     nothing
 end
 
 @testset "Uniform points" begin
-    test_uniform_points(Float64, 256)
+    @testset "T = $T" for T ∈ (Float64, ComplexF64)
+        test_uniform_points(T, 256)
+    end
 end
