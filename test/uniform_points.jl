@@ -1,6 +1,7 @@
 # Check that a transform on uniform points is equal to the corresponding output from FFTW.
 # Note that this equivalence is somewhat arbitrary and is a choice we make.
 
+using Test
 using Random: Random
 using FFTW: FFTW
 using NonuniformFFTs
