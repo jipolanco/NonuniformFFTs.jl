@@ -1,9 +1,4 @@
-"""
-    Gridding
-
-Module for spreading point data onto a grid using smoothing filters.
-"""
-module Gridding
+module NonuniformFFTs
 
 # TODO
 # - try piecewise polynomial approximation?
@@ -70,7 +65,7 @@ function _PlanNUFFT(
     ks = ntuple(Val(length(Ns))) do i
         N = Ns[i]
         # This assumes L = 2π:
-        i == 1 ? FFTW.rfftfreq(N, N) : FFTW.fftfreq(N, N)
+        i == 1 ? FFTW.rfftfreq(N, T(N)) : FFTW.fftfreq(N, T(N))
     end
     # Determine dimensions of oversampled grid.
     Ñs = map(Ns) do N

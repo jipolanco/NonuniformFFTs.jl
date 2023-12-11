@@ -4,6 +4,7 @@ export HalfSupport
 
 struct HalfSupport{M} end
 HalfSupport(M) = HalfSupport{M}()
+half_support(::HalfSupport{M}) where {M} = M::Int
 
 """
     AbstractKernel{M, T}

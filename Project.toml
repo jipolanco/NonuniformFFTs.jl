@@ -1,6 +1,6 @@
-name = "Gridding"
+name = "NonuniformFFTs"
 uuid = "cd96f58b-6017-4a02-bb9e-f4d81626177f"
-authors = ["Juan Ignacio Polanco <jipolanc@gmail.com>"]
+authors = ["Juan Ignacio Polanco <juan-ignacio.polanco@cnrs.fr>"]
 version = "0.1.0"
 
 [deps]
