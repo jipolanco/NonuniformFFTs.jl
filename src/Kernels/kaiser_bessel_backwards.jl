@@ -4,19 +4,27 @@ using Bessels: besseli0
 
 backwards_kb_equivalent_variance(β) = sinh(β) / (β * cosh(β) - sinh(β))
 
-struct BackwardsKaiserBesselKernel{M, T <: AbstractFloat} <: AbstractKernel{M, T}
+struct BackwardsKaiserBesselKernel{
+        M, T <: AbstractFloat, ApproxCoefs <: AbstractArray{T},
+    } <: AbstractKernel{M, T}
     Δx :: T  # grid spacing
     σ  :: T  # equivalent kernel width (for comparison with Gaussian)
     w  :: T  # actual kernel half-width (= M * Δx)
     β  :: T  # KB parameter
     sinh_β :: T
+    cs :: ApproxCoefs  # coefficients of polynomial approximation
     gk :: Vector{T}
     function BackwardsKaiserBesselKernel{M}(Δx::T, β::T) where {M, T <: AbstractFloat}
         w = M * Δx
         σ = sqrt(backwards_kb_equivalent_variance(β)) * w
         sinh_β = sinh(β)
         gk = Vector{T}(undef, 0)
-        new{M, T}(Δx, σ, w, β, sinh_β, gk)
+        Npoly = M + 4  # degree of polynomial is d = Npoly - 1
+        cs = solve_piecewise_polynomial_coefficients(T, Val(M), Val(Npoly)) do x
+            s = sqrt(1 - x^2)
+            sinh(β * s) / (s * sinh(β))
+        end
+        new{M, T, typeof(cs)}(Δx, σ, w, β, sinh_β, cs, gk)
     end
 end
 
@@ -43,14 +51,6 @@ function evaluate_kernel(g::BackwardsKaiserBesselKernel{M}, x, i::Integer) where
     (; β, w, sinh_β,) = g
     X = x / w - (i - 1) / M  # source position relative to xs[i]
     # @assert 0 ≤ X < 1 / M
-    # We take advantage of (automatic) SIMD vectorisation by computing sqrt and exp at once
-    # over all points.
-    # Note that we explicitly compute sinh(z) = (exp(z) + exp(-z)) / 2 instead of Julia's
-    # sinh, which might be more accurate for some z's but creates branches and is thus
-    # slower.
-    xs = evaluation_points(Val(M), X)
-    sq = @. sqrt(1 - xs^2)
-    es = @. exp(β * sq)
-    values = @. (es + 1/es) / (2 * sinh_β * sq)
+    values = evaluate_piecewise(X, g.cs)
     (; i, values,)
 end
