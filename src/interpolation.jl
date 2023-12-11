@@ -33,19 +33,7 @@ function interpolate(
     interpolate_from_arrays(us, inds, vals)
 end
 
-interpolate(gs::AbstractKernelData, us, x) = interpolate((gs,), us, x)
 interpolate(gs::NTuple, u::AbstractArray, x⃗) = only(interpolate(gs, (u,), x⃗))
-interpolate(gs::NTuple, us, x::Number) = interpolate(gs, us, (x,))
-interpolate(gs::NTuple, u::AbstractArray, x::Number) = only(interpolate(gs, (u,), (x,)))
-
-function interpolate(
-        gs::NTuple{D, AbstractKernelData},
-        us::NTuple{M, AbstractArray{T, D}} where {T},
-        x⃗,
-    ) where {D, M}
-    @assert !(x⃗ isa NTuple{D})
-    interpolate(gs, us, NTuple{D}(x⃗))
-end
 
 function interpolate_from_arrays(
         us::NTuple{C, AbstractArray{T, D}} where {T},
