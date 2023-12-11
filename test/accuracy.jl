@@ -4,7 +4,7 @@ using AbstractFFTs: fftfreq, rfftfreq
 using JET: JET
 using NonuniformFFTs
 
-function check_nufft_error(::Type{Float64}, ::Type{KaiserBesselKernel}, ::HalfSupport{M}, σ, err) where {M}
+function check_nufft_error(::Type{Float64}, ::KaiserBesselKernel, ::HalfSupport{M}, σ, err) where {M}
     if σ ≈ 1.25
         err_min_kb = 4e-12  # error reaches a minimum at ~2e-12 for M = 10
         # This seems to work for KaiserBesselKernel and 4 ≤ M ≤ 10
@@ -16,7 +16,7 @@ function check_nufft_error(::Type{Float64}, ::Type{KaiserBesselKernel}, ::HalfSu
     nothing
 end
 
-function check_nufft_error(::Type{Float64}, ::Type{BackwardsKaiserBesselKernel}, ::HalfSupport{M}, σ, err) where {M}
+function check_nufft_error(::Type{Float64}, ::BackwardsKaiserBesselKernel, ::HalfSupport{M}, σ, err) where {M}
     if σ ≈ 1.25
         err_min_kb = 4e-12  # error reaches a minimum at ~2e-12 for M = 10
         @test err < max(10.0^(-1.20 * M), err_min_kb)
@@ -27,29 +27,37 @@ function check_nufft_error(::Type{Float64}, ::Type{BackwardsKaiserBesselKernel},
     nothing
 end
 
-function check_nufft_error(::Type{Float64}, ::Type{GaussianKernel}, ::HalfSupport{M}, σ, err) where {M}
+function check_nufft_error(::Type{Float64}, ::GaussianKernel, ::HalfSupport{M}, σ, err) where {M}
     if σ ≈ 2.0
         @test err < 10.0^(-0.95 * M) * 0.8
     end
     nothing
 end
 
-function check_nufft_error(::Type{Float64}, ::Type{BSplineKernel}, ::HalfSupport{M}, σ, err) where {M}
+function check_nufft_error(::Type{Float64}, ::BSplineKernel, ::HalfSupport{M}, σ, err) where {M}
     if σ ≈ 2.0
         @test err < 10.0^(-0.98 * M) * 0.4
     end
     nothing
 end
 
+function l2_error(us, vs)
+    err = sum(zip(us, vs)) do (u, v)
+        abs2(u - v)
+    end
+    norm = sum(abs2, vs)
+    sqrt(err / norm)
+end
+
 # TODO support T <: Complex
 function test_nufft_type1_1d(
         ::Type{T};
-        kernel::Type{KernelType} = KaiserBesselKernel,
+        kernel = KaiserBesselKernel(),
         N = 256,
         Np = 2 * N,
         m = HalfSupport(8),
         σ = 1.25,
-    ) where {T <: AbstractFloat, KernelType}
+    ) where {T <: AbstractFloat}
     ks = rfftfreq(N, N)  # wavenumbers (= [0, 1, 2, ..., N÷2])
 
     # Generate some non-uniform random data
@@ -67,12 +75,12 @@ function test_nufft_type1_1d(
 
     # Compute NUFFT
     ûs = Array{Complex{T}}(undef, length(ks))
-    plan_nufft = PlanNUFFT(T, N, m; σ, kernel = KernelType)
+    plan_nufft = @inferred PlanNUFFT(T, N, m; σ, kernel)
     NonuniformFFTs.set_points!(plan_nufft, xp)
     NonuniformFFTs.exec_type1!(ûs, plan_nufft, vp)
 
     # Check results
-    err = sqrt(sum(splat((a, b) -> abs2(a - b)), zip(ûs, ûs_exact)) / sum(abs2, ûs_exact))
+    err = l2_error(ûs, ûs_exact)
 
     # Inference tests
     JET.@test_opt NonuniformFFTs.set_points!(plan_nufft, xp)
@@ -85,12 +93,12 @@ end
 
 function test_nufft_type2_1d(
         ::Type{T};
-        kernel::Type{KernelType} = KaiserBesselKernel,
+        kernel = KaiserBesselKernel(),
         N = 256,
         Np = 2 * N,
         m = HalfSupport(8),
         σ = 1.25,
-    ) where {T <: AbstractFloat, KernelType}
+    ) where {T <: AbstractFloat}
     ks = rfftfreq(N, N)  # wavenumbers (= [0, 1, 2, ..., N÷2])
 
     # Generate some uniform random data + non-uniform points
@@ -111,11 +119,11 @@ function test_nufft_type2_1d(
 
     # Compute NUFFT
     vp = Array{T}(undef, Np)
-    plan_nufft = PlanNUFFT(T, N, m; σ, kernel = KernelType)
+    plan_nufft = PlanNUFFT(T, N, m; σ, kernel)
     NonuniformFFTs.set_points!(plan_nufft, xp)
     NonuniformFFTs.exec_type2!(vp, plan_nufft, ûs)
 
-    err = sqrt(sum(splat((a, b) -> abs2(a - b)), zip(vp, vp_exact)) / sum(abs2, vp_exact))
+    err = l2_error(vp, vp_exact)
 
     check_nufft_error(T, kernel, m, σ, err)
 
@@ -126,11 +134,11 @@ end
     for M ∈ 4:10
         m = HalfSupport(M)
         σ = 1.25
-        @testset "$kernel (m = $M, σ = $σ)" for kernel ∈ (KaiserBesselKernel, BackwardsKaiserBesselKernel)
+        @testset "$kernel (m = $M, σ = $σ)" for kernel ∈ (KaiserBesselKernel(), BackwardsKaiserBesselKernel())
             test_nufft_type1_1d(Float64; m, σ, kernel)
         end
         σ = 2.0
-        @testset "$kernel (m = $M, σ = $σ)" for kernel ∈ (KaiserBesselKernel, BackwardsKaiserBesselKernel, GaussianKernel, BSplineKernel)
+        @testset "$kernel (m = $M, σ = $σ)" for kernel ∈ (KaiserBesselKernel(), BackwardsKaiserBesselKernel(), GaussianKernel(), BSplineKernel())
             test_nufft_type1_1d(Float64; m, σ, kernel)
         end
     end
@@ -140,11 +148,11 @@ end
     for M ∈ 4:10
         m = HalfSupport(M)
         σ = 1.25
-        @testset "$kernel (m = $M, σ = $σ)" for kernel ∈ (KaiserBesselKernel, BackwardsKaiserBesselKernel)
+        @testset "$kernel (m = $M, σ = $σ)" for kernel ∈ (KaiserBesselKernel(), BackwardsKaiserBesselKernel())
             test_nufft_type2_1d(Float64; m, σ, kernel)
         end
         σ = 2.0
-        @testset "$kernel (m = $M, σ = $σ)" for kernel ∈ (KaiserBesselKernel, BackwardsKaiserBesselKernel, GaussianKernel, BSplineKernel)
+        @testset "$kernel (m = $M, σ = $σ)" for kernel ∈ (KaiserBesselKernel(), BackwardsKaiserBesselKernel(), GaussianKernel(), BSplineKernel())
             test_nufft_type2_1d(Float64; m, σ, kernel)
         end
     end

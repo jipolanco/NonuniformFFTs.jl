@@ -6,8 +6,10 @@ using Bessels: besseli0, besseli1
 # Should be compared to the variance of a Gaussian window.
 kb_equivalent_variance(β) = besseli0(β) / (β * besseli1(β))
 
+struct KaiserBesselKernel <: AbstractKernel end
+
 """
-    KaiserBesselKernel(HalfSupport(M), Δx, β)
+    KaiserBesselKernelData(HalfSupport(M), Δx, β)
 
 Create a [Kaiser–Bessel](https://en.wikipedia.org/wiki/Kaiser_window#Definition) kernel.
 
@@ -38,9 +40,9 @@ See for instance Potts & Steidl, SIAM J. Sci. Comput. 2003, eq. (5.12).
 In other words, FFTs must be performed over a grid of size ``Ñ = σN`` where ``N`` is the
 size of the grid of interest.
 """
-struct KaiserBesselKernel{
+struct KaiserBesselKernelData{
         M, T <: AbstractFloat, ApproxCoefs <: AbstractArray{T},
-    } <: AbstractKernel{M, T}
+    } <: AbstractKernelData{KaiserBesselKernel, M, T}
     Δx :: T  # grid spacing
     σ  :: T  # equivalent kernel width (for comparison with Gaussian)
     w  :: T  # actual kernel half-width (= M * Δx)
@@ -50,7 +52,7 @@ struct KaiserBesselKernel{
     cs :: ApproxCoefs  # coefficients of polynomial approximation
     gk :: Vector{T}
 
-    function KaiserBesselKernel{M}(Δx::T, β::T) where {M, T <: AbstractFloat}
+    function KaiserBesselKernelData{M}(Δx::T, β::T) where {M, T <: AbstractFloat}
         w = M * Δx
         σ = sqrt(kb_equivalent_variance(β)) * w
         β² = β * β
@@ -64,25 +66,25 @@ struct KaiserBesselKernel{
     end
 end
 
-KaiserBesselKernel(::HalfSupport{M}, args...) where {M} =
-    KaiserBesselKernel{M}(args...)
+KaiserBesselKernelData(::HalfSupport{M}, args...) where {M} =
+    KaiserBesselKernelData{M}(args...)
 
-function optimal_kernel(::Type{KaiserBesselKernel}, h::HalfSupport{M}, Δx, σ) where {M}
+function optimal_kernel(::KaiserBesselKernel, h::HalfSupport{M}, Δx, σ) where {M}
     # Set the optimal kernel shape parameter given the wanted support M and the oversampling
     # factor σ. See Potts & Steidl 2003, eq. (5.12).
     γ = 0.980  # empirical "safety factor" which slightly improves accuracy, as in FINUFFT (where γ = 0.976)
     β = oftype(Δx, M * π * (2 - 1 / σ)) * γ
-    KaiserBesselKernel(h, Δx, β)
+    KaiserBesselKernelData(h, Δx, β)
 end
 
-function evaluate_fourier(g::KaiserBesselKernel, k::Number)
+function evaluate_fourier(g::KaiserBesselKernelData, k::Number)
     (; β², w, I₀_at_β,) = g
     q = w * k
     s = sqrt(β² - q^2)  # this is always real (assuming β ≥ Mπ)
     2 * w * sinh(s) / (I₀_at_β * s)
 end
 
-function evaluate_kernel(g::KaiserBesselKernel{M}, x, i::Integer) where {M}
+function evaluate_kernel(g::KaiserBesselKernelData{M}, x, i::Integer) where {M}
     # Evaluate in-between grid points xs[(i - M):(i + M)].
     # Note: xs[j] = (j - 1) * Δx
     (; w,) = g

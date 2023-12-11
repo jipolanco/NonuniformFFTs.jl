@@ -3,19 +3,21 @@ using Base.Cartesian: @ntuple
 
 export GaussianKernel
 
+struct GaussianKernel <: AbstractKernel end
+
 """
-    GaussianKernel(HalfSupport(M), Δx, α)
+    GaussianKernelData(HalfSupport(M), Δx, α)
 
 Constructs a Gaussian kernel with standard deviation `σ = α Δx` and half-support `M`, for a
 grid of step `Δx`.
 """
-struct GaussianKernel{M, T <: AbstractFloat} <: AbstractKernel{M, T}
+struct GaussianKernelData{M, T <: AbstractFloat} <: AbstractKernelData{GaussianKernel, M, T}
     Δx :: T
     σ  :: T
     τ  :: T
     cs :: NTuple{M, T}  # precomputed exponentials
     gk :: Vector{T}     # values in uniform Fourier grid
-    function GaussianKernel{M}(Δx::T, α::T) where {M, T <: AbstractFloat}
+    function GaussianKernelData{M}(Δx::T, α::T) where {M, T <: AbstractFloat}
         σ = α * Δx
         τ = 2 * σ^2
         cs = ntuple(Val(M)) do i
@@ -27,22 +29,22 @@ struct GaussianKernel{M, T <: AbstractFloat} <: AbstractKernel{M, T}
     end
 end
 
-GaussianKernel(::HalfSupport{M}, args...) where {M} = GaussianKernel{M}(args...)
+GaussianKernelData(::HalfSupport{M}, args...) where {M} = GaussianKernelData{M}(args...)
 
-function optimal_kernel(::Type{GaussianKernel}, h::HalfSupport{M}, Δx, σ) where {M}
+function optimal_kernel(::GaussianKernel, h::HalfSupport{M}, Δx, σ) where {M}
     # Set the optimal kernel shape parameter given the wanted support M and the oversampling
     # factor σ. See Potts & Steidl 2003, eq. (5.9).
     α² = oftype(Δx, σ * M / (2 * σ - 1) / π)
-    GaussianKernel(h, Δx, sqrt(α²))
+    GaussianKernelData(h, Δx, sqrt(α²))
 end
 
-function evaluate_fourier(g::GaussianKernel, k::Number)
+function evaluate_fourier(g::GaussianKernelData, k::Number)
     (; τ,) = g
     exp(-τ * k^2 / 4) * sqrt(π * τ)  # = exp(-σ² k² / 2) * sqrt(2πσ²)
 end
 
 # Fast Gaussian gridding following Greengard & Lee, SIAM Rev. 2004.
-@inline @fastmath function evaluate_kernel(g::GaussianKernel{M}, x, i::Integer) where {M}
+@inline @fastmath function evaluate_kernel(g::GaussianKernelData{M}, x, i::Integer) where {M}
     # Evaluate in-between grid points xs[(i - M):(i + M)].
     # Note: xs[j] = (j - 1) * Δx
     (; τ, Δx, cs,) = g

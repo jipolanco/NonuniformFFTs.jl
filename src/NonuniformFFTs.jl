@@ -12,12 +12,12 @@ include("Kernels/Kernels.jl")
 using .Kernels:
     Kernels,
     AbstractKernel,
+    AbstractKernelData,
     HalfSupport,
     GaussianKernel,
     BSplineKernel,
     KaiserBesselKernel,
     BackwardsKaiserBesselKernel,
-    scale,
     gridstep,
     init_fourier_coefficients!
 
@@ -28,9 +28,9 @@ export
     BSplineKernel,
     KaiserBesselKernel,
     BackwardsKaiserBesselKernel,
-    spread_from_point!,
-    spread_from_points!,
-    deconvolve_fourier!
+    set_points!,
+    exec_type1!,
+    exec_type2!
 
 include("spreading.jl")
 include("interpolation.jl")
@@ -40,7 +40,7 @@ include("convolution.jl")
 # - allow complex non-uniform values?
 struct PlanNUFFT{
         T <: AbstractFloat, N, M,
-        Kernels <: NTuple{N, AbstractKernel{M, T}},
+        Kernels <: NTuple{N, AbstractKernelData{<:AbstractKernel, M, T}},
         WaveNumbers <: NTuple{N, AbstractVector{T}},
         Points <: StructVector{NTuple{N, T}},
         PlanFFT_fw <: FFTW.Plan{T},
@@ -58,7 +58,7 @@ end
 
 # This constructor is generally not called directly.
 function _PlanNUFFT(
-        kernels::NTuple{D, <:AbstractKernel}, σ_wanted, Ns::Dims{D};
+        kernels::NTuple{D, <:AbstractKernelData}, σ_wanted, Ns::Dims{D};
         fftw_flags = FFTW.MEASURE,
     ) where {D}
     T = typeof(σ_wanted)
@@ -85,14 +85,14 @@ end
 
 function PlanNUFFT(
         ::Type{T}, Ns::Dims, h::HalfSupport;
-        kernel::Type{K} = BackwardsKaiserBesselKernel,
+        kernel::AbstractKernel = BackwardsKaiserBesselKernel(),
         σ::Real = real(T)(2), kws...,
-    ) where {T <: AbstractFloat, K <: AbstractKernel}
+    ) where {T <: AbstractFloat}
     let σ = T(σ)
         L = T(2π)  # assume 2π period
         kernels = map(Ns) do N
             Δx̃ = L / N / σ
-            Kernels.optimal_kernel(K, h, Δx̃, σ)
+            Kernels.optimal_kernel(kernel, h, Δx̃, σ)
         end
         _PlanNUFFT(kernels, σ, Ns; kws...)
     end

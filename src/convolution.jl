@@ -1,6 +1,6 @@
 """
     deconvolve_fourier!(
-        gs::NTuple{D, AbstractKernel},
+        gs::NTuple{D, AbstractKernelData},
         [dest::AbstractArray{T, D}],
         src::AbstractArray{T, D},
         ks::NTuple{D, AbstractVector},
@@ -16,7 +16,7 @@ If `dest` is not passed, then `src` will be overwritten.
 As with [`spread_from_point!`](@ref), `dest` and `src` can also be tuples of arrays.
 """
 function deconvolve_fourier!(
-        gs::NTuple{D, AbstractKernel},
+        gs::NTuple{D, AbstractKernelData},
         dst::NTuple{M, AbstractArray{T, D}},
         src::NTuple{M, AbstractArray{T, D}},
         ks::NTuple{D, AbstractVector},
@@ -40,7 +40,7 @@ deconvolve_fourier!(
 ) where {D} = only(deconvolve_fourier!(gs, (dst,), (src,), ks))
 
 # 1D version
-deconvolve_fourier!(gx::AbstractKernel, dst, src, kx::AbstractVector) =
+deconvolve_fourier!(gx::AbstractKernelData, dst, src, kx::AbstractVector) =
     deconvolve_fourier!((gx,), dst, src, (kx,))
 
 # In-place version

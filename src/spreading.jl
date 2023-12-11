@@ -1,5 +1,5 @@
 """
-    spread_from_point!(gs::NTuple{D, AbstractKernel}, u::AbstractArray{T, D}, x⃗₀, v)
+    spread_from_point!(gs::NTuple{D, AbstractKernelData}, u::AbstractArray{T, D}, x⃗₀, v)
 
 Spread value `v` at point `x⃗₀` onto neighbouring grid points.
 
@@ -14,7 +14,7 @@ in which case each value `vᵢ` will be spread to its corresponding array `uᵢ`
 This can be useful for spreading vector fields, for instance.
 """
 function spread_from_point!(
-        gs::NTuple{D, AbstractKernel},
+        gs::NTuple{D, AbstractKernelData},
         us::NTuple{C, AbstractArray{T,D}} where {T},
         x⃗₀::NTuple{D, Number},
         vs::NTuple{C, Number},
@@ -41,7 +41,7 @@ function spread_from_point!(gs::NTuple, u::AbstractArray, x⃗₀, v::Number)
     spread_from_point!(gs, (u,), x⃗₀, (v,))
 end
 
-spread_from_point!(g::AbstractKernel, u::AbstractVector, args...) =
+spread_from_point!(g::AbstractKernelData, u::AbstractVector, args...) =
     spread_from_point!((g,), (u,), args...)
 
 # This accounts for the case where x⃗₀ or vs is not a tuple (e.g. it's an SVector).

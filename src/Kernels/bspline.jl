@@ -3,6 +3,8 @@ export
 
 using Base.Cartesian: @ntuple, @nexprs
 
+struct BSplineKernel <: AbstractKernel end
+
 """
     BSplineKernel(HalfSupport(M), Δx)
 
@@ -17,11 +19,11 @@ be equal to the grid step ``Δx``.
 This means that the resulting variance of the B-spline kernels is fixed to
 ``σ^2 = (n / 12) Δt^2 = (M / 6) Δx^2``.
 """
-struct BSplineKernel{M, T <: AbstractFloat} <: AbstractKernel{M, T}
+struct BSplineKernelData{M, T <: AbstractFloat} <: AbstractKernelData{BSplineKernel, M, T}
     σ  :: T
     Δt :: T          # knot separation
     gk :: Vector{T}  # values in uniform Fourier grid
-    function BSplineKernel{M}(Δx::Real) where {M}
+    function BSplineKernelData{M}(Δx::Real) where {M}
         Δt = Δx
         σ = sqrt(M / 6) * Δt
         T = eltype(Δt)
@@ -30,24 +32,24 @@ struct BSplineKernel{M, T <: AbstractFloat} <: AbstractKernel{M, T}
     end
 end
 
-gridstep(g::BSplineKernel) = g.Δt  # assume Δx = Δt
+gridstep(g::BSplineKernelData) = g.Δt  # assume Δx = Δt
 
-BSplineKernel(::HalfSupport{M}, args...) where {M} = BSplineKernel{M}(args...)
+BSplineKernelData(::HalfSupport{M}, args...) where {M} = BSplineKernelData{M}(args...)
 
 # Here we ignore the oversampling factor, this kernel is not very adjustable...
-optimal_kernel(::Type{BSplineKernel}, h::HalfSupport, Δx, σ) =
-    BSplineKernel(h, Δx)
+optimal_kernel(::BSplineKernel, h::HalfSupport, Δx, σ) =
+    BSplineKernelData(h, Δx)
 
 """
-    order(::BSplineKernel{M})
+    order(::BSplineKernelData{M})
 
 Returns the order `n = 2M` of the B-spline kernel.
 
 Note: the polynomial degree is `n - 1`.
 """
-order(::BSplineKernel{M}) where {M} = 2M
+order(::BSplineKernelData{M}) where {M} = 2M
 
-function evaluate_kernel(g::BSplineKernel{M}, x, i::Integer) where {M}
+function evaluate_kernel(g::BSplineKernelData{M}, x, i::Integer) where {M}
     # The integral of a single B-spline, using its standard definition, is Δt.
     # This can be shown using the partition of unity property.
     (; Δt,) = g
@@ -58,29 +60,13 @@ function evaluate_kernel(g::BSplineKernel{M}, x, i::Integer) where {M}
     (; i, values,)
 end
 
-function evaluate_fourier_base(g::BSplineKernel{M}, k) where {M}
+function evaluate_fourier(g::BSplineKernelData{M}, k) where {M}
     (; Δt,) = g
     kh = k * Δt / 2
     s = sin(kh) / kh
     n = 2M
     ifelse(iszero(k), one(s), s^n) * Δt
 end
-
-# TESTING
-function evaluate_fourier_test(g::BSplineKernel{M}, k) where {M}
-    (; Δt,) = g
-    u₀ = evaluate_fourier_base(g, k)
-    u = u₀^2
-    # Not sure if this really improves things...
-    for n ∈ 1:1
-        u₊ = evaluate_fourier_base(g, k + 2π * n / Δt)
-        u₋ = evaluate_fourier_base(g, k - 2π * n / Δt)
-        u += u₊^2 + u₋^2
-    end
-    u / u₀
-end
-
-evaluate_fourier(g::BSplineKernel, k) = evaluate_fourier_base(g, k)
 
 # Adapted from BSplineKit.jl.
 #
