@@ -58,10 +58,9 @@ end
 
 # This constructor is generally not called directly.
 function _PlanNUFFT(
-        kernels::NTuple{D, <:AbstractKernelData}, σ_wanted, Ns::Dims{D};
+        ::Type{T}, kernel::AbstractKernel, h::HalfSupport, σ_wanted, Ns::Dims{D};
         fftw_flags = FFTW.MEASURE,
-    ) where {D}
-    T = typeof(σ_wanted)
+    ) where {T, D}
     ks = ntuple(Val(length(Ns))) do i
         N = Ns[i]
         # This assumes L = 2π:
@@ -73,14 +72,20 @@ function _PlanNUFFT(
         # which is good for FFT performance.
         nextprod((2, 3, 5), floor(Int, σ_wanted * N))
     end
-    σ::T = maximum(Ñs ./ Ns)  # actual oversampling factor
+    R = real(T)
+    σ::R = maximum(Ñs ./ Ns)  # actual oversampling factor
+    kernel_data = map(Ns, Ñs) do N, Ñ
+        L = T(2π)  # assume 2π period
+        Δx̃ = L / Ñ
+        Kernels.optimal_kernel(kernel, h, Δx̃, Ñ / N)
+    end
     points = StructVector(ntuple(_ -> T[], Val(D)))
     us = Array{T}(undef, Ñs)
     dims_out = (Ñs[1] ÷ 2 + 1, Base.tail(Ñs)...)
     ûs = Array{Complex{T}}(undef, dims_out)
     plan_fw = FFTW.plan_rfft(us; flags = fftw_flags)
     plan_bw = FFTW.plan_brfft(ûs, size(us, 1); flags = fftw_flags)
-    PlanNUFFT(kernels, ks, σ, points, us, ûs, plan_fw, plan_bw)
+    PlanNUFFT(kernel_data, ks, σ, points, us, ûs, plan_fw, plan_bw)
 end
 
 function PlanNUFFT(
@@ -88,14 +93,8 @@ function PlanNUFFT(
         kernel::AbstractKernel = BackwardsKaiserBesselKernel(),
         σ::Real = real(T)(2), kws...,
     ) where {T <: AbstractFloat}
-    let σ = T(σ)
-        L = T(2π)  # assume 2π period
-        kernels = map(Ns) do N
-            Δx̃ = L / N / σ
-            Kernels.optimal_kernel(kernel, h, Δx̃, σ)
-        end
-        _PlanNUFFT(kernels, σ, Ns; kws...)
-    end
+    R = real(T)
+    _PlanNUFFT(T, kernel, h, R(σ), Ns; kws...)
 end
 
 # This constructor relies on constant propagation to make the output fully inferred.
