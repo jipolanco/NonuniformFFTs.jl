@@ -34,7 +34,6 @@ export
 
 include("spreading.jl")
 include("interpolation.jl")
-include("convolution.jl")
 
 # TODO
 # - allow complex non-uniform values?
