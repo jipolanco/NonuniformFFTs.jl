@@ -17,5 +17,5 @@ macro includetest(path::String)
 end
 
 @testset "NonuniformFFTs.jl" begin
-    @includetest "type1.jl"
+    @includetest "accuracy.jl"
 end
