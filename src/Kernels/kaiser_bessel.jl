@@ -70,7 +70,8 @@ KaiserBesselKernel(::HalfSupport{M}, args...) where {M} =
 function optimal_kernel(::Type{KaiserBesselKernel}, h::HalfSupport{M}, Δx, σ) where {M}
     # Set the optimal kernel shape parameter given the wanted support M and the oversampling
     # factor σ. See Potts & Steidl 2003, eq. (5.12).
-    β = oftype(Δx, M * π * (2 - 1 / σ))
+    γ = 0.980  # empirical "safety factor" which slightly improves accuracy, as in FINUFFT (where γ = 0.976)
+    β = oftype(Δx, M * π * (2 - 1 / σ)) * γ
     KaiserBesselKernel(h, Δx, β)
 end
 
