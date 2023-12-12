@@ -33,7 +33,7 @@ exec_type1!(ûs, plan_nufft, vp)
 
 ### Type-2 (or *direct*) NUFFT in one dimension
 
-```
+```julia
 using NonuniformFFTs
 
 N = 256   # number of Fourier modes
