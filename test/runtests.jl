@@ -18,5 +18,6 @@ end
 
 @testset "NonuniformFFTs.jl" begin
     @includetest "accuracy.jl"
+    @includetest "multidimensional.jl"
     @includetest "uniform_points.jl"
 end
