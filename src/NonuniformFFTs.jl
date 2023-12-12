@@ -72,6 +72,15 @@ struct PlanNUFFT{
     data    :: Data
 end
 
+"""
+    size(p::PlanNUFFT) -> (N₁, N₂, ...)
+
+Return the dimensions of arrays containing uniform values.
+
+This corresponds to the number of Fourier modes in each direction.
+"""
+Base.size(p::PlanNUFFT) = map(length, p.data.ks)
+
 # Case of real-to-complex transform.
 # This constructor is generally not called directly.
 function _PlanNUFFT(

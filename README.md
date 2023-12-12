@@ -5,6 +5,87 @@
 
 Yet another package for computing multidimensional [non-uniform fast Fourier transforms (NUFFTs)](https://en.wikipedia.org/wiki/NUFFT) in Julia.
 
+## Basic usage
+
+### Type-1 (or *adjoint*) NUFFT in one dimension
+
+```julia
+using NonuniformFFTs
+
+N = 256   # number of Fourier modes
+Np = 100  # number of non-uniform points
+
+# Generate some non-uniform random data
+T = Float64             # non-uniform data is real (can also be complex)
+xp = rand(T, Np) .* 2π  # non-uniform points in [0, 2π]
+vp = randn(T, Np)       # random values at points
+
+# Create plan for data of type T
+plan_nufft = PlanNUFFT(T, N, HalfSupport(8))  # larger support increases accuracy
+
+# Set non-uniform points
+set_points!(plan_nufft, xp)
+
+# Perform type-1 NUFFT on preallocated output
+ûs = Array{Complex{T}}(undef, size(plan_nufft))
+exec_type1!(ûs, plan_nufft, vp)
+```
+
+### Type-2 (or *direct*) NUFFT in one dimension
+
+```
+using NonuniformFFTs
+
+N = 256   # number of Fourier modes
+Np = 100  # number of non-uniform points
+
+# Generate some uniform random data
+T = Float64                        # non-uniform data is real (can also be complex)
+xp = rand(T, Np) .* 2π             # non-uniform points in [0, 2π]
+ûs = randn(Complex{T}, N ÷ 2 + 1)  # random values at points (we need to store roughly half the Fourier modes for complex-to-real transform)
+
+# Create plan for data of type T
+plan_nufft = PlanNUFFT(T, N, HalfSupport(8))
+
+# Set non-uniform points
+set_points!(plan_nufft, xp)
+
+# Perform type-2 NUFFT on preallocated output
+vp = Array{T}(undef, Np)
+exec_type2!(vp, plan_nufft, ûs)
+```
+
+### Multidimensional transforms
+
+```julia
+using NonuniformFFTs
+using StaticArrays: SVector  # for convenience
+
+Ns = (256, 256)  # number of Fourier modes in each direction
+Np = 1000        # number of non-uniform points
+
+# Generate some non-uniform random data
+T = Float64                                   # non-uniform data is real (can also be complex)
+d = length(Ns)                                # number of dimensions (d = 2 here)
+xp = [2π * rand(SVector{d, T}) for _ ∈ 1:Np]  # non-uniform points in [0, 2π]ᵈ
+vp = randn(T, Np)                             # random values at points
+
+# Create plan for data of type T
+plan_nufft = PlanNUFFT(T, Ns, HalfSupport(8))
+
+# Set non-uniform points
+set_points!(plan_nufft, xp)
+
+# Perform type-1 NUFFT on preallocated output
+ûs = Array{Complex{T}}(undef, size(plan_nufft))
+exec_type1!(ûs, plan_nufft, vp)
+
+# Perform type-2 NUFFT on preallocated output
+exec_type2!(vp, plan_nufft, ûs)
+```
+
+More details on optional parameters and on tuning accuracy is coming soon.
+
 ## Differences with other packages
 
 This package roughly follows the same notation and conventions of the [FINUFFT library](https://finufft.readthedocs.io/en/latest/)
@@ -50,3 +131,5 @@ In particular, this means that:
 - A different smoothing kernel function is used (backwards Kaiser–Bessel kernel by default).
 
 - Unlike the FINUFFT.jl interface, this package guarantees zero allocations when setting non-uniform points and executing plans.
+
+- It is possible to use the same plan for type-1 and type-2 transforms, reducing memory requirements in cases where one wants to perform both.
