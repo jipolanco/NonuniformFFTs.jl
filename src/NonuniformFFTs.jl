@@ -41,9 +41,22 @@ function set_points!(p::PlanNUFFT{T, N}, xp::AbstractVector) where {T, N}
     resize!(points, length(xp))
     Base.require_one_based_indexing(points)
     @inbounds for (i, x) ∈ enumerate(xp)
-        points[i] = NTuple{N}(x)  # converts `x` to Tuple if it's an SVector
+        points[i] = to_unit_cell(NTuple{N}(x))  # converts `x` to Tuple if it's an SVector
     end
     p
+end
+
+to_unit_cell(x⃗) = map(_to_unit_cell, x⃗)
+
+function _to_unit_cell(x::Real)
+    L = oftype(x, 2π)
+    while x < 0
+        x += L
+    end
+    while x ≥ L
+        x -= L
+    end
+    x
 end
 
 type_length(::Type{T}) where {T} = length(T)  # usually for SVector

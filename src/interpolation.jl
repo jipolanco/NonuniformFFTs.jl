@@ -1,8 +1,7 @@
 function interpolate!(gs, vp::AbstractArray, us, xp::AbstractArray)
     @assert axes(vp) === axes(xp)
     for i ∈ eachindex(vp)
-        x⃗ = to_unit_cell(xp[i])
-        vp[i] = interpolate(gs, us, x⃗)
+        vp[i] = interpolate(gs, us, xp[i])
     end
     vp
 end
