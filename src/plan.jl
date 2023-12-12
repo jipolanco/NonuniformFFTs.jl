@@ -25,6 +25,24 @@ struct ComplexNUFFTData{
     plan_bw :: PlanFFT_bw  # inverse in-place transform
 end
 
+# Case of real data
+function init_plan_data(::Type{T}, Ñs::Dims, ks::NTuple; fftw_flags) where {T <: AbstractFloat}
+    us = Array{T}(undef, Ñs)
+    dims_out = (Ñs[1] ÷ 2 + 1, Base.tail(Ñs)...)
+    ûs = Array{Complex{T}}(undef, dims_out)
+    plan_fw = FFTW.plan_rfft(us; flags = fftw_flags)
+    plan_bw = FFTW.plan_brfft(ûs, Ñs[1]; flags = fftw_flags)
+    RealNUFFTData(ks, us, ûs, plan_fw, plan_bw)
+end
+
+# Case of complex data
+function init_plan_data(::Type{Complex{T}}, Ñs::Dims, ks::NTuple; fftw_flags) where {T <: AbstractFloat}
+    us = Array{Complex{T}}(undef, Ñs)
+    plan_fw = FFTW.plan_fft!(us; flags = fftw_flags)
+    plan_bw = FFTW.plan_bfft!(us; flags = fftw_flags)
+    ComplexNUFFTData(ks, us, plan_fw, plan_bw)
+end
+
 struct PlanNUFFT{
         T <: Number, N, M,
         Treal <: AbstractFloat,  # this is real(T)
@@ -52,64 +70,35 @@ Base.size(p::PlanNUFFT) = map(length, p.data.ks)
 function _PlanNUFFT(
         ::Type{T}, kernel::AbstractKernel, h::HalfSupport, σ_wanted, Ns::Dims{D};
         fftw_flags = FFTW.MEASURE,
-    ) where {T <: AbstractFloat, D}
-    ks = ntuple(Val(length(Ns))) do i
-        N = Ns[i]
-        # This assumes L = 2π:
-        i == 1 ? FFTW.rfftfreq(N, T(N)) : FFTW.fftfreq(N, T(N))
-    end
+    ) where {T <: Number, D}
+    ks = init_wavenumbers(T, Ns)
     # Determine dimensions of oversampled grid.
     Ñs = map(Ns) do N
         # We try to make sure that each dimension is a product of powers of small primes,
         # which is good for FFT performance.
         nextprod((2, 3, 5), floor(Int, σ_wanted * N))
     end
-    σ::T = maximum(Ñs ./ Ns)  # actual oversampling factor
+    Tr = real(T)
+    σ::Tr = maximum(Ñs ./ Ns)  # actual oversampling factor
     kernel_data = map(Ns, Ñs) do N, Ñ
         @inline
-        L = T(2π)  # assume 2π period
+        L = Tr(2π)  # assume 2π period
         Δx̃ = L / Ñ
         Kernels.optimal_kernel(kernel, h, Δx̃, Ñ / N)
     end
-    points = StructVector(ntuple(_ -> T[], Val(D)))
-    us = Array{T}(undef, Ñs)
-    dims_out = (Ñs[1] ÷ 2 + 1, Base.tail(Ñs)...)
-    ûs = Array{Complex{T}}(undef, dims_out)
-    plan_fw = FFTW.plan_rfft(us; flags = fftw_flags)
-    plan_bw = FFTW.plan_brfft(ûs, size(us, 1); flags = fftw_flags)
-    nufft_data = RealNUFFTData(ks, us, ûs, plan_fw, plan_bw)
+    points = StructVector(ntuple(_ -> Tr[], Val(D)))
+    nufft_data = init_plan_data(T, Ñs, ks; fftw_flags)
     PlanNUFFT(kernel_data, σ, points, nufft_data)
 end
 
-# Case of complex-to-complex transform.
-# This constructor is generally not called directly.
-function _PlanNUFFT(
-        ::Type{S}, kernel::AbstractKernel, h::HalfSupport, σ_wanted, Ns::Dims{D};
-        fftw_flags = FFTW.MEASURE,
-    ) where {S <: Complex, D}
-    T = real(S)
-    ks = map(Ns) do N
-        FFTW.fftfreq(N, T(N))  # this assumes L = 2π
-    end
-    # Determine dimensions of oversampled grid.
-    Ñs = map(Ns) do N
-        # We try to make sure that each dimension is a product of powers of small primes,
-        # which is good for FFT performance.
-        nextprod((2, 3, 5), floor(Int, σ_wanted * N))
-    end
-    σ::T = maximum(Ñs ./ Ns)  # actual oversampling factor
-    kernel_data = map(Ns, Ñs) do N, Ñ
-        @inline
-        L = T(2π)  # assume 2π period
-        Δx̃ = L / Ñ
-        Kernels.optimal_kernel(kernel, h, Δx̃, Ñ / N)
-    end
-    points = StructVector(ntuple(_ -> T[], Val(D)))
-    us = Array{Complex{T}}(undef, Ñs)
-    plan_fw = FFTW.plan_fft!(us; flags = fftw_flags)
-    plan_bw = FFTW.plan_bfft!(us; flags = fftw_flags)
-    nufft_data = ComplexNUFFTData(ks, us, plan_fw, plan_bw)
-    PlanNUFFT(kernel_data, σ, points, nufft_data)
+init_wavenumbers(::Type{T}, Ns::Dims) where {T <: AbstractFloat} = ntuple(Val(length(Ns))) do i
+    N = Ns[i]
+    # This assumes L = 2π:
+    i == 1 ? FFTW.rfftfreq(N, T(N)) : FFTW.fftfreq(N, T(N))
+end
+
+init_wavenumbers(::Type{Complex{T}}, Ns::Dims) where {T <: AbstractFloat} = map(Ns) do N
+    FFTW.fftfreq(N, T(N))  # this assumes L = 2π
 end
 
 function PlanNUFFT(
