@@ -49,11 +49,13 @@ struct PlanNUFFT{
         Kernels <: NTuple{N, AbstractKernelData{<:AbstractKernel, M, Treal}},
         Points <: StructVector{NTuple{N, Treal}},
         Data <: AbstractNUFFTData{T, N},
+        Blocks <: BlockData,
     }
     kernels :: Kernels
     σ       :: Treal   # oversampling factor (≥ 1)
     points  :: Points  # non-uniform points (real values)
     data    :: Data
+    blocks  :: Blocks
 end
 
 """
@@ -61,15 +63,31 @@ end
 
 Return the dimensions of arrays containing uniform values.
 
-This corresponds to the number of Fourier modes in each direction.
+This corresponds to the number of Fourier modes in each direction (in the non-oversampled grid).
 """
 Base.size(p::PlanNUFFT) = map(length, p.data.ks)
 
-# Case of real-to-complex transform.
+default_block_size() = 4096  # in number of linear elements
+
+function get_block_dims(Ñs::Dims, bsize::Int)
+    d = length(Ñs)
+    bdims = @. false * Ñs + 1  # size along each direction (initially 1 in each direction)
+    bprod = 1                  # product of sizes
+    i = 1                      # current dimension
+    while bprod < bsize
+        # Multiply block size by 2 in the current dimension.
+        bdims = Base.setindex(bdims, bdims[i] << 1, i)
+        bprod <<= 1
+        i = ifelse(i == d, 1, i + 1)
+    end
+    bdims
+end
+
 # This constructor is generally not called directly.
 function _PlanNUFFT(
         ::Type{T}, kernel::AbstractKernel, h::HalfSupport, σ_wanted, Ns::Dims{D};
         fftw_flags = FFTW.MEASURE,
+        block_size = default_block_size(),
     ) where {T <: Number, D}
     ks = init_wavenumbers(T, Ns)
     # Determine dimensions of oversampled grid.
@@ -87,8 +105,11 @@ function _PlanNUFFT(
         Kernels.optimal_kernel(kernel, h, Δx̃, Ñ / N)
     end
     points = StructVector(ntuple(_ -> Tr[], Val(D)))
+    FFTW.set_num_threads(Threads.nthreads())
     nufft_data = init_plan_data(T, Ñs, ks; fftw_flags)
-    PlanNUFFT(kernel_data, σ, points, nufft_data)
+    block_dims = get_block_dims(Ñs, block_size)
+    blocks = BlockData(T, block_dims, Ñs, h)
+    PlanNUFFT(kernel_data, σ, points, nufft_data, blocks)
 end
 
 init_wavenumbers(::Type{T}, Ns::Dims) where {T <: AbstractFloat} = ntuple(Val(length(Ns))) do i

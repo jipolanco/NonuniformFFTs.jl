@@ -89,6 +89,12 @@ function kernel_indices(i, ::AbstractKernelData{K, M}, N::Integer) where {K, M}
     end
 end
 
+# This variant can be used when periodic wrapping is not needed.
+# (Used when doing block partitioning for parallelisation using threads.)
+function kernel_indices(i, ::AbstractKernelData{K, M}) where {K, M}
+    (i - M + 1):(i + M)
+end
+
 # Returns evaluation points around the normalised location X ∈ [0, 1/M).
 # Note that points are returned in decreasing order.
 function evaluation_points(::Val{M}, X) where {M}

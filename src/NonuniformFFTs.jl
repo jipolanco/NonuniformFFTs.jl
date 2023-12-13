@@ -3,6 +3,7 @@ module NonuniformFFTs
 using StructArrays: StructVector
 using FFTW: FFTW
 using LinearAlgebra: mul!
+using Polyester: @batch
 
 include("Kernels/Kernels.jl")
 
@@ -29,9 +30,10 @@ export
     exec_type1!,
     exec_type2!
 
+include("blocking.jl")
+include("plan.jl")
 include("spreading.jl")
 include("interpolation.jl")
-include("plan.jl")
 
 # Here the element type of `xp` can either be an NTuple{N, <:Real}, an SVector{N, <:Real},
 # or anything else which has length `N`.
@@ -81,11 +83,15 @@ function check_nufft_uniform_data(p::PlanNUFFT, ûs_k::AbstractArray{<:Complex}
 end
 
 function exec_type1!(ûs_k::AbstractArray{<:Complex}, p::PlanNUFFT, charges)
-    (; points, kernels, data,) = p
+    (; points, kernels, data, blocks,) = p
     (; us, ks,) = data
     check_nufft_uniform_data(p, ûs_k)
     fill!(us, zero(eltype(us)))
-    spread_from_points!(kernels, us, points, charges)
+    if isempty(blocks.buffers)
+        spread_from_points!(kernels, us, points, charges)  # single-threaded case?
+    else
+        spread_from_points_blocked!(kernels, blocks, us, points, charges)
+    end
     ûs = _type1_fft!(data)
     T = real(eltype(us))
     normfactor::T = prod(N -> 2π / N, size(us))  # FFT normalisation factor

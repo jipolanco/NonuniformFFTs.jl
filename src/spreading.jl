@@ -48,6 +48,92 @@ function spread_from_points!(gs, us, x⃗s::AbstractVector, vs::AbstractVector)
     us
 end
 
+function spread_from_point_blocked!(gs::NTuple, u::AbstractArray, x⃗₀, v::Number, istart::NTuple)
+    # Evaluate 1D kernels.
+    gs_eval = map(Kernels.evaluate_kernel, gs, x⃗₀)
+
+    Ms = map(Kernels.half_support, gs)
+    δs = Ms .- istart  # index offset
+
+    # Determine indices to write in `u` arrays.
+    inds = map(gs_eval, gs, δs) do gdata, g, δ
+        is = Kernels.kernel_indices(gdata.i, g)  # note: this variant doesn't perform periodic wrapping
+        is .+ δ  # shift to beginning of current block
+    end
+    Is = CartesianIndices(inds)
+    # Base.checkbounds(u, Is)  # check that indices fall inside the output array
+
+    vals = map(g -> g.values, gs_eval)
+    spread_onto_arrays_blocked!((u,), Is, vals, (v,))
+
+    u
+end
+
+function spread_from_points_blocked!(
+        gs, blocks::BlockData, us::AbstractArray, x⃗s::AbstractVector, vs::AbstractVector,
+    )
+    (; buffers, indices,) = blocks
+    Ms = map(Kernels.half_support, gs)
+    block_dims = size(first(buffers)) .- 2 .* Ms  # size of block (not including padding)
+    fill!(us, zero(eltype(us)))
+    Nt = length(buffers)  # usually equal to the number of threads
+    nblocks = length(indices)
+    Ñs = size(us)
+    Base.require_one_based_indexing(buffers)
+    Base.require_one_based_indexing(indices)
+    lck = ReentrantLock()
+    @batch for i ∈ 1:Nt
+        j_start = (i - 1) * nblocks ÷ Nt + 1
+        j_end = i * nblocks ÷ Nt
+        # @show i, j_start, j_end, nblocks
+        for j ∈ j_start:j_end
+            block = buffers[i]
+            fill!(block, zero(eltype(block)))
+            I₀ = indices[j]
+            # Indices of the current block (not including padding)
+            inds = (I₀ + one(I₀)):(I₀ + CartesianIndex(block_dims))
+            # TODO precompute point locations in each block
+            x⃗_start = Tuple(I₀) .* 2π ./ Ñs
+            x⃗_end = Tuple(last(inds)) .* 2π ./ Ñs
+            for (x⃗, v) ∈ zip(x⃗s, vs)
+                is_in_block = true
+                for i ∈ eachindex(x⃗)
+                    if !(x⃗_start[i] ≤ x⃗[i] < x⃗_end[i])
+                        is_in_block = false
+                        break
+                    end
+                end
+                is_in_block || continue
+                spread_from_point_blocked!(gs, block, x⃗, v, Tuple(I₀))
+            end
+            inds_output = (first(inds) - CartesianIndex(Ms)):(last(inds) + CartesianIndex(Ms))
+            # Copy data to output
+            @lock lck copy_from_block!(us, block, inds_output)
+        end
+    end
+    us
+end
+
+function copy_from_block!(us::AbstractArray, block::AbstractArray, inds_output::CartesianIndices)
+    @assert size(block) == size(inds_output)
+    Base.require_one_based_indexing(us)
+    Ñs = size(us)
+    for i ∈ eachindex(block, inds_output)
+        I = inds_output[i]
+        is = map(Tuple(I), Ñs) do i, Ñ
+            while i ≤ 0
+                i += Ñ
+            end
+            while i > Ñ
+                i -= Ñ
+            end
+            i
+        end
+        @inbounds us[is...] += block[i]
+    end
+    us
+end
+
 function spread_onto_arrays!(
         us::NTuple{C, AbstractArray{T, D}} where {T},
         inds::NTuple{D, Tuple},
@@ -66,3 +152,22 @@ function spread_onto_arrays!(
     us
 end
 
+# This is basically the same as the non-blocked version, but uses CartesianIndices instead
+# of tuples (since indices don't "jump" due to periodic wrapping).
+function spread_onto_arrays_blocked!(
+        us::NTuple{C, AbstractArray{T, D}} where {T},
+        Is::CartesianIndices,
+        vals::NTuple{D, Tuple},
+        vs::NTuple{C},
+    ) where {C, D}
+    inds_iter = CartesianIndices(map(eachindex, vals))
+    @inbounds for ns ∈ inds_iter  # ns = (ni, nj, ...)
+        I = Is[ns]
+        gs = map(getindex, vals, Tuple(ns))
+        gprod = prod(gs)
+        for (u, v) ∈ zip(us, vs)
+            u[I] += v * gprod
+        end
+    end
+    us
+end
