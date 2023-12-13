@@ -43,23 +43,96 @@ end
 
 function spread_from_points!(gs, us, x⃗s::AbstractVector, vs::AbstractVector)
     for (x⃗, v) ∈ zip(x⃗s, vs)
-        y⃗ = to_unit_cell(x⃗)  # fold coordinates to [0, 2π] unit cell
-        spread_from_point!(gs, us, y⃗, v)
+        spread_from_point!(gs, us, x⃗, v)
     end
     us
 end
 
-to_unit_cell(x⃗) = map(_to_unit_cell, x⃗)
+function spread_from_point_blocked!(gs::NTuple, u::AbstractArray, x⃗₀, v::Number, I₀::NTuple)
+    # Evaluate 1D kernels.
+    gs_eval = map(Kernels.evaluate_kernel, gs, x⃗₀)
 
-function _to_unit_cell(x::Real)
-    L = oftype(x, 2π)
-    while x < 0
-        x += L
+    Ms = map(Kernels.half_support, gs)
+    δs = Ms .- I₀  # index offset
+
+    # Determine indices to write in `u` arrays.
+    inds = map(gs_eval, gs, δs) do gdata, g, δ
+        is = Kernels.kernel_indices(gdata.i, g)  # note: this variant doesn't perform periodic wrapping
+        is .+ δ  # shift to beginning of current block
     end
-    while x ≥ L
-        x -= L
+    Is = CartesianIndices(inds)
+    # Base.checkbounds(u, Is)  # check that indices fall inside the output array
+
+    vals = map(g -> g.values, gs_eval)
+    spread_onto_arrays_blocked!((u,), Is, vals, (v,))
+
+    u
+end
+
+function spread_from_points_blocked!(
+        gs, blocks::BlockData, us::AbstractArray, xp::AbstractVector, vp::AbstractVector,
+    )
+    (; block_dims, cumulative_npoints_per_block, pointperm, buffers, indices,) = blocks
+    Ms = map(Kernels.half_support, gs)
+    fill!(us, zero(eltype(us)))
+    Nt = length(buffers)  # usually equal to the number of threads
+    nblocks = length(indices)
+    Base.require_one_based_indexing(buffers)
+    Base.require_one_based_indexing(indices)
+    lck = ReentrantLock()
+    Threads.@threads :static for i ∈ 1:Nt
+        j_start = (i - 1) * nblocks ÷ Nt + 1
+        j_end = i * nblocks ÷ Nt
+        @inbounds for j ∈ j_start:j_end
+            block = buffers[i]
+            fill!(block, zero(eltype(block)))
+            I₀ = indices[j]
+
+            # Iterate over all points in the current block
+            a = cumulative_npoints_per_block[j] + 1
+            b = cumulative_npoints_per_block[j + 1]
+            for k ∈ a:b
+                l = pointperm[k]
+                # @assert blocks.blockidx[l] == j  # check that point is really in the current block
+                x⃗ = xp[l]  # if points have not been permuted
+                # x⃗ = xp[k]  # if points have been permuted (may be slightly faster here, but requires permutation in sort_points!)
+                v = vp[l]
+                spread_from_point_blocked!(gs, block, x⃗, v, Tuple(I₀))
+            end
+
+            # Indices of current block including padding
+            inds_output = (I₀ + oneunit(I₀) - CartesianIndex(Ms)):(I₀ + CartesianIndex(block_dims) + CartesianIndex(Ms))
+
+            # Add data from block to output array.
+            # Note that only one thread can write at a time.
+            lock(lck) do
+                add_from_block!(us, block, inds_output)
+            end
+        end
     end
-    x
+    us
+end
+
+function add_from_block!(us::AbstractArray, block::AbstractArray, inds::CartesianIndices)
+    @assert size(block) == size(inds)
+    Base.require_one_based_indexing(us)
+    Ñs = size(us)
+    @inbounds for i ∈ eachindex(block, inds)
+        I = inds[i]
+        is = map(wrap_periodic, Tuple(I), Ñs)
+        us[is...] += block[i]
+    end
+    us
+end
+
+@inline function wrap_periodic(i::Integer, N::Integer)
+    while i ≤ 0
+        i += N
+    end
+    while i > N
+        i -= N
+    end
+    i
 end
 
 function spread_onto_arrays!(
@@ -80,3 +153,22 @@ function spread_onto_arrays!(
     us
 end
 
+# This is basically the same as the non-blocked version, but uses CartesianIndices instead
+# of tuples (since indices don't "jump" due to periodic wrapping).
+function spread_onto_arrays_blocked!(
+        us::NTuple{C, AbstractArray{T, D}} where {T},
+        Is::CartesianIndices{D},
+        vals::NTuple{D, Tuple},
+        vs::NTuple{C},
+    ) where {C, D}
+    inds_iter = CartesianIndices(map(eachindex, vals))
+    @inbounds for ns ∈ inds_iter  # ns = (ni, nj, ...)
+        I = Is[ns]
+        gs = map(getindex, vals, Tuple(ns))
+        gprod = prod(gs)
+        for (u, v) ∈ zip(us, vs)
+            u[I] += v * gprod
+        end
+    end
+    us
+end

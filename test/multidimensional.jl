@@ -1,7 +1,6 @@
 using Test
 using Random: Random
 using AbstractFFTs: fftfreq, rfftfreq
-using JET: JET
 using StaticArrays: SVector
 using LinearAlgebra: ⋅
 using NonuniformFFTs
@@ -33,6 +32,7 @@ function test_nufft_type1(
         Np = 2 * first(Ns),
         m = HalfSupport(8),
         σ = 1.25,
+        block_size = NonuniformFFTs.default_block_size(),
     ) where {T <: Number}
     Tr = real(T)
     ks = map(N -> fftfreq(N, Tr(N)), Ns)
@@ -60,23 +60,12 @@ function test_nufft_type1(
 
     # Compute NUFFT
     ûs = Array{Complex{Tr}}(undef, map(length, ks))
-    plan_nufft = @inferred PlanNUFFT(T, Ns, m; σ, kernel)
+    plan_nufft = @inferred PlanNUFFT(T, Ns, m; σ, kernel, block_size)
     NonuniformFFTs.set_points!(plan_nufft, xp)
     NonuniformFFTs.exec_type1!(ûs, plan_nufft, vp)
 
     # Check results
     err = l2_error(ûs, ûs_exact)
-
-    # Inference tests
-    if VERSION < v"1.10-"
-        # On Julia 1.9, there seems to be a runtime dispatch related to throwing a
-        # DimensionMismatch error using LazyStrings (in NonuniformFFTs.check_nufft_uniform_data).
-        JET.@test_opt ignored_modules=(Base,) NonuniformFFTs.set_points!(plan_nufft, xp)
-        JET.@test_opt ignored_modules=(Base,) NonuniformFFTs.exec_type1!(ûs, plan_nufft, vp)
-    else
-        JET.@test_opt NonuniformFFTs.set_points!(plan_nufft, xp)
-        JET.@test_opt NonuniformFFTs.exec_type1!(ûs, plan_nufft, vp)
-    end
 
     check_nufft_error(T, kernel, m, σ, err)
 
@@ -89,6 +78,7 @@ function test_nufft_type2(
         Np = 2 * first(Ns),
         m = HalfSupport(8),
         σ = 1.25,
+        block_size = NonuniformFFTs.default_block_size(),
     ) where {T <: Number}
     Tr = real(T)
     ks = map(N -> fftfreq(N, Tr(N)), Ns)
@@ -127,22 +117,11 @@ function test_nufft_type2(
 
     # Compute NUFFT
     vp = Array{T}(undef, Np)
-    plan_nufft = @inferred PlanNUFFT(T, Ns, m; σ, kernel)
+    plan_nufft = @inferred PlanNUFFT(T, Ns, m; σ, kernel, block_size)
     NonuniformFFTs.set_points!(plan_nufft, xp)
     NonuniformFFTs.exec_type2!(vp, plan_nufft, ûs)
 
     err = l2_error(vp, vp_exact)
-
-    # Inference tests
-    if VERSION < v"1.10-"
-        # On Julia 1.9, there seems to be a runtime dispatch related to throwing a
-        # DimensionMismatch error using LazyStrings (in NonuniformFFTs.check_nufft_uniform_data).
-        JET.@test_opt ignored_modules=(Base,) NonuniformFFTs.set_points!(plan_nufft, xp)
-        JET.@test_opt ignored_modules=(Base,) NonuniformFFTs.exec_type2!(vp, plan_nufft, ûs)
-    else
-        JET.@test_opt NonuniformFFTs.set_points!(plan_nufft, xp)
-        JET.@test_opt NonuniformFFTs.exec_type2!(vp, plan_nufft, ûs)
-    end
 
     check_nufft_error(T, kernel, m, σ, err)
 
@@ -151,12 +130,13 @@ end
 
 @testset "2D NUFFTs: $T" for T ∈ (Float64, ComplexF64)
     Ns = (64, 64)
+    block_size = 32  # small just to make sure that there are several blocks in the domain
     @testset "Type 1 NUFFTs" begin
         for M ∈ 4:8  # for σ = 1.25, going beyond M = 8 gives no improvements
             m = HalfSupport(M)
             σ = 1.25
             @testset "$kernel (m = $M, σ = $σ)" for kernel ∈ (BackwardsKaiserBesselKernel(),)
-                test_nufft_type1(T, Ns; m, σ, kernel)
+                test_nufft_type1(T, Ns; m, σ, kernel, block_size)
             end
         end
     end
@@ -165,8 +145,22 @@ end
             m = HalfSupport(M)
             σ = 1.25
             @testset "$kernel (m = $M, σ = $σ)" for kernel ∈ (BackwardsKaiserBesselKernel(),)
-                test_nufft_type2(T, Ns; m, σ, kernel)
+                test_nufft_type2(T, Ns; m, σ, kernel, block_size)
             end
         end
+    end
+    @testset "Blocking disabled" begin
+        @testset "Type 1 NUFFT" test_nufft_type1(T, Ns; block_size = nothing)
+        @testset "Type 2 NUFFT" test_nufft_type2(T, Ns; block_size = nothing)
+    end
+    @testset "Non-multiple of block size" begin
+        # This gives an oversampled grid size Ñs = (80, 80) (when σ = 2.0).
+        # For a block_size = 128, the block dimensions are Nb = (16, 8), so that Ñs[1] (80)
+        # is not a multiple of Nb[1] (16).
+        block_size = 128
+        Ns′ = (37, 37)
+        σ = 2.0
+        @testset "Type 1 NUFFT" test_nufft_type1(T, Ns′; σ, block_size)
+        @testset "Type 2 NUFFT" test_nufft_type2(T, Ns′; σ, block_size)
     end
 end

@@ -29,34 +29,11 @@ export
     exec_type1!,
     exec_type2!
 
+include("blocking.jl")
+include("plan.jl")
+include("set_points.jl")
 include("spreading.jl")
 include("interpolation.jl")
-include("plan.jl")
-
-# Here the element type of `xp` can either be an NTuple{N, <:Real}, an SVector{N, <:Real},
-# or anything else which has length `N`.
-function set_points!(p::PlanNUFFT{T, N}, xp::AbstractVector) where {T, N}
-    (; points,) = p
-    type_length(eltype(xp)) == N || throw(DimensionMismatch(lazy"expected $N-dimensional points"))
-    resize!(points, length(xp))
-    Base.require_one_based_indexing(points)
-    @inbounds for (i, x) ∈ enumerate(xp)
-        points[i] = NTuple{N}(x)  # converts `x` to Tuple if it's an SVector
-    end
-    p
-end
-
-type_length(::Type{T}) where {T} = length(T)  # usually for SVector
-type_length(::Type{<:NTuple{N}}) where {N} = N
-
-function set_points!(p::PlanNUFFT{T, N}, xp::NTuple{N, AbstractVector}) where {T, N}
-    set_points!(p, StructVector(xp))
-end
-
-# 1D case
-function set_points!(p::PlanNUFFT{T, 1}, xp::AbstractVector{<:Real}) where {T}
-    set_points!(p, StructVector((xp,)))
-end
 
 function check_nufft_uniform_data(p::PlanNUFFT, ûs_k::AbstractArray{<:Complex})
     (; ks,) = p.data
@@ -68,11 +45,15 @@ function check_nufft_uniform_data(p::PlanNUFFT, ûs_k::AbstractArray{<:Complex}
 end
 
 function exec_type1!(ûs_k::AbstractArray{<:Complex}, p::PlanNUFFT, charges)
-    (; points, kernels, data,) = p
+    (; points, kernels, data, blocks,) = p
     (; us, ks,) = data
     check_nufft_uniform_data(p, ûs_k)
     fill!(us, zero(eltype(us)))
-    spread_from_points!(kernels, us, points, charges)
+    if with_blocking(blocks)
+        spread_from_points_blocked!(kernels, blocks, us, points, charges)
+    else
+        spread_from_points!(kernels, us, points, charges)  # single-threaded case?
+    end
     ûs = _type1_fft!(data)
     T = real(eltype(us))
     normfactor::T = prod(N -> 2π / N, size(us))  # FFT normalisation factor
@@ -94,12 +75,16 @@ function _type1_fft!(data::ComplexNUFFTData)
 end
 
 function exec_type2!(vp::AbstractVector, p::PlanNUFFT, ûs_k::AbstractArray{<:Complex})
-    (; points, kernels, data,) = p
+    (; points, kernels, data, blocks,) = p
     (; us, ks,) = data
     check_nufft_uniform_data(p, ûs_k)
     ϕ̂s = map(init_fourier_coefficients!, kernels, ks)  # this takes time only the first time it's called
     _type2_copy_and_fft!(ûs_k, ϕ̂s, data)
-    interpolate!(kernels, vp, us, points)
+    if with_blocking(blocks)
+        interpolate_blocked!(kernels, blocks, vp, us, points)
+    else
+        interpolate!(kernels, vp, us, points)
+    end
     vp
 end
 
