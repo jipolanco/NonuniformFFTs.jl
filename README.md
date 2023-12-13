@@ -91,9 +91,6 @@ More details on optional parameters and on tuning accuracy is coming soon.
 This package roughly follows the same notation and conventions of the [FINUFFT library](https://finufft.readthedocs.io/en/latest/)
 and its [Julia interface](https://github.com/ludvigak/FINUFFT.jl), with a few differences detailed below.
 
-For now, parallelism is not supported by this package, but this will come in the near future.
-On a single thread, performance is comparable (and often better) than other libraries, including those mentioned below.
-
 ### Conventions used by this package
 
 We try to preserve as much as possible the conventions used in FFTW3.
