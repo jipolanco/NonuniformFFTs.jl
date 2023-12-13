@@ -24,7 +24,7 @@ end
 
 function BlockData(::Type{T}, block_dims::Dims{D}, Ñs::Dims{D}, ::HalfSupport{M}) where {T, D, M}
     Nt = Threads.nthreads()
-    Nt = ifelse(Nt == 1, zero(Nt), Nt)  # this disables blocking if running on single thread
+    # Nt = ifelse(Nt == 1, zero(Nt), Nt)  # this disables blocking if running on single thread
     dims = block_dims .+ 2M  # include padding for values outside of block
     Tr = real(T)
     block_sizes = map(Ñs, block_dims) do N, B

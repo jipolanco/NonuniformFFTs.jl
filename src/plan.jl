@@ -105,14 +105,15 @@ function _PlanNUFFT(
         Kernels.optimal_kernel(kernel, h, Δx̃, Ñ / N)
     end
     points = StructVector(ntuple(_ -> Tr[], Val(D)))
-    FFTW.set_num_threads(Threads.nthreads())
-    nufft_data = init_plan_data(T, Ñs, ks; fftw_flags)
     if block_size === nothing
         blocks = NullBlockData()  # disable blocking (→ can't use multithreading when spreading)
+        FFTW.set_num_threads(1)   # also disable FFTW threading (avoids allocations)
     else
         block_dims = get_block_dims(Ñs, block_size)
         blocks = BlockData(T, block_dims, Ñs, h)
+        FFTW.set_num_threads(Threads.nthreads())
     end
+    nufft_data = init_plan_data(T, Ñs, ks; fftw_flags)
     PlanNUFFT(kernel_data, σ, points, nufft_data, blocks)
 end
 
