@@ -3,7 +3,6 @@ module NonuniformFFTs
 using StructArrays: StructVector
 using FFTW: FFTW
 using LinearAlgebra: mul!
-using Polyester: @batch
 
 include("Kernels/Kernels.jl")
 
@@ -32,46 +31,9 @@ export
 
 include("blocking.jl")
 include("plan.jl")
+include("set_points.jl")
 include("spreading.jl")
 include("interpolation.jl")
-
-# Here the element type of `xp` can either be an NTuple{N, <:Real}, an SVector{N, <:Real},
-# or anything else which has length `N`.
-function set_points!(p::PlanNUFFT{T, N}, xp::AbstractVector) where {T, N}
-    (; points,) = p
-    type_length(eltype(xp)) == N || throw(DimensionMismatch(lazy"expected $N-dimensional points"))
-    resize!(points, length(xp))
-    Base.require_one_based_indexing(points)
-    @inbounds for (i, x) ∈ enumerate(xp)
-        points[i] = to_unit_cell(NTuple{N}(x))  # converts `x` to Tuple if it's an SVector
-    end
-    p
-end
-
-to_unit_cell(x⃗) = map(_to_unit_cell, x⃗)
-
-function _to_unit_cell(x::Real)
-    L = oftype(x, 2π)
-    while x < 0
-        x += L
-    end
-    while x ≥ L
-        x -= L
-    end
-    x
-end
-
-type_length(::Type{T}) where {T} = length(T)  # usually for SVector
-type_length(::Type{<:NTuple{N}}) where {N} = N
-
-function set_points!(p::PlanNUFFT{T, N}, xp::NTuple{N, AbstractVector}) where {T, N}
-    set_points!(p, StructVector(xp))
-end
-
-# 1D case
-function set_points!(p::PlanNUFFT{T, 1}, xp::AbstractVector{<:Real}) where {T}
-    set_points!(p, StructVector((xp,)))
-end
 
 function check_nufft_uniform_data(p::PlanNUFFT, ûs_k::AbstractArray{<:Complex})
     (; ks,) = p.data
@@ -87,10 +49,10 @@ function exec_type1!(ûs_k::AbstractArray{<:Complex}, p::PlanNUFFT, charges)
     (; us, ks,) = data
     check_nufft_uniform_data(p, ûs_k)
     fill!(us, zero(eltype(us)))
-    if isempty(blocks.buffers)
-        spread_from_points!(kernels, us, points, charges)  # single-threaded case?
-    else
+    if with_blocking(blocks)
         spread_from_points_blocked!(kernels, blocks, us, points, charges)
+    else
+        spread_from_points!(kernels, us, points, charges)  # single-threaded case?
     end
     ûs = _type1_fft!(data)
     T = real(eltype(us))

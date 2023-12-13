@@ -48,12 +48,12 @@ function spread_from_points!(gs, us, x⃗s::AbstractVector, vs::AbstractVector)
     us
 end
 
-function spread_from_point_blocked!(gs::NTuple, u::AbstractArray, x⃗₀, v::Number, istart::NTuple)
+function spread_from_point_blocked!(gs::NTuple, u::AbstractArray, x⃗₀, v::Number, I₀::NTuple)
     # Evaluate 1D kernels.
     gs_eval = map(Kernels.evaluate_kernel, gs, x⃗₀)
 
     Ms = map(Kernels.half_support, gs)
-    δs = Ms .- istart  # index offset
+    δs = Ms .- I₀  # index offset
 
     # Determine indices to write in `u` arrays.
     inds = map(gs_eval, gs, δs) do gdata, g, δ
@@ -72,43 +72,44 @@ end
 function spread_from_points_blocked!(
         gs, blocks::BlockData, us::AbstractArray, x⃗s::AbstractVector, vs::AbstractVector,
     )
-    (; buffers, indices,) = blocks
+    (; block_dims, cumulative_npoints_per_block, pointperm, buffers, indices,) = blocks
     Ms = map(Kernels.half_support, gs)
-    block_dims = size(first(buffers)) .- 2 .* Ms  # size of block (not including padding)
     fill!(us, zero(eltype(us)))
     Nt = length(buffers)  # usually equal to the number of threads
     nblocks = length(indices)
-    Ñs = size(us)
     Base.require_one_based_indexing(buffers)
     Base.require_one_based_indexing(indices)
     lck = ReentrantLock()
-    @batch for i ∈ 1:Nt
+    Threads.@threads for i ∈ 1:Nt
         j_start = (i - 1) * nblocks ÷ Nt + 1
         j_end = i * nblocks ÷ Nt
-        # @show i, j_start, j_end, nblocks
-        for j ∈ j_start:j_end
+        @inbounds for j ∈ j_start:j_end
             block = buffers[i]
             fill!(block, zero(eltype(block)))
             I₀ = indices[j]
-            # Indices of the current block (not including padding)
-            inds = (I₀ + one(I₀)):(I₀ + CartesianIndex(block_dims))
-            # TODO precompute point locations in each block
-            x⃗_start = Tuple(I₀) .* 2π ./ Ñs
-            x⃗_end = Tuple(last(inds)) .* 2π ./ Ñs
-            for (x⃗, v) ∈ zip(x⃗s, vs)
-                is_in_block = true
-                for i ∈ eachindex(x⃗)
-                    if !(x⃗_start[i] ≤ x⃗[i] < x⃗_end[i])
-                        is_in_block = false
-                        break
-                    end
-                end
-                is_in_block || continue
+
+            # Iterate over all points in the current block
+            a = cumulative_npoints_per_block[j] + 1
+            b = cumulative_npoints_per_block[j + 1]
+            for k ∈ a:b
+                l = pointperm[k]
+                # @assert blocks.blockidx[l] == j  # check that point is really in the current block
+                x⃗ = x⃗s[l]
+                v = vs[l]
                 spread_from_point_blocked!(gs, block, x⃗, v, Tuple(I₀))
             end
+
+            # Indices of the current block (not including padding)
+            inds = (I₀ + one(I₀)):(I₀ + CartesianIndex(block_dims))
+
+            # Indices including padding
             inds_output = (first(inds) - CartesianIndex(Ms)):(last(inds) + CartesianIndex(Ms))
-            # Copy data to output
-            @lock lck copy_from_block!(us, block, inds_output)
+
+            # Copy data to output array.
+            # Note that only one thread can write at a time.
+            lock(lck) do
+                copy_from_block!(us, block, inds_output)
+            end
         end
     end
     us
@@ -118,20 +119,22 @@ function copy_from_block!(us::AbstractArray, block::AbstractArray, inds_output::
     @assert size(block) == size(inds_output)
     Base.require_one_based_indexing(us)
     Ñs = size(us)
-    for i ∈ eachindex(block, inds_output)
+    @inbounds for i ∈ eachindex(block, inds_output)
         I = inds_output[i]
-        is = map(Tuple(I), Ñs) do i, Ñ
-            while i ≤ 0
-                i += Ñ
-            end
-            while i > Ñ
-                i -= Ñ
-            end
-            i
-        end
-        @inbounds us[is...] += block[i]
+        is = map(wrap_periodic, Tuple(I), Ñs)
+        us[is...] += block[i]
     end
     us
+end
+
+@inline function wrap_periodic(i::Integer, N::Integer)
+    while i ≤ 0
+        i += N
+    end
+    while i > N
+        i -= N
+    end
+    i
 end
 
 function spread_onto_arrays!(
