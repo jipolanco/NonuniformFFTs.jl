@@ -49,7 +49,7 @@ struct PlanNUFFT{
         Kernels <: NTuple{N, AbstractKernelData{<:AbstractKernel, M, Treal}},
         Points <: StructVector{NTuple{N, Treal}},
         Data <: AbstractNUFFTData{T, N},
-        Blocks <: BlockData,
+        Blocks <: AbstractBlockData,
     }
     kernels :: Kernels
     σ       :: Treal   # oversampling factor (≥ 1)
@@ -87,7 +87,7 @@ end
 function _PlanNUFFT(
         ::Type{T}, kernel::AbstractKernel, h::HalfSupport, σ_wanted, Ns::Dims{D};
         fftw_flags = FFTW.MEASURE,
-        block_size = default_block_size(),
+        block_size::Union{Integer, Nothing} = default_block_size(),
     ) where {T <: Number, D}
     ks = init_wavenumbers(T, Ns)
     # Determine dimensions of oversampled grid.
@@ -107,8 +107,12 @@ function _PlanNUFFT(
     points = StructVector(ntuple(_ -> Tr[], Val(D)))
     FFTW.set_num_threads(Threads.nthreads())
     nufft_data = init_plan_data(T, Ñs, ks; fftw_flags)
-    block_dims = get_block_dims(Ñs, block_size)
-    blocks = BlockData(T, block_dims, Ñs, h)
+    if block_size === nothing
+        blocks = NullBlockData()  # disable blocking (→ can't use multithreading when spreading)
+    else
+        block_dims = get_block_dims(Ñs, block_size)
+        blocks = BlockData(T, block_dims, Ñs, h)
+    end
     PlanNUFFT(kernel_data, σ, points, nufft_data, blocks)
 end
 

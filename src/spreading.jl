@@ -80,7 +80,7 @@ function spread_from_points_blocked!(
     Base.require_one_based_indexing(buffers)
     Base.require_one_based_indexing(indices)
     lck = ReentrantLock()
-    Threads.@threads for i ∈ 1:Nt
+    Threads.@threads :static for i ∈ 1:Nt
         j_start = (i - 1) * nblocks ÷ Nt + 1
         j_end = i * nblocks ÷ Nt
         @inbounds for j ∈ j_start:j_end
@@ -100,11 +100,8 @@ function spread_from_points_blocked!(
                 spread_from_point_blocked!(gs, block, x⃗, v, Tuple(I₀))
             end
 
-            # Indices of the current block (not including padding)
-            inds = (I₀ + one(I₀)):(I₀ + CartesianIndex(block_dims))
-
-            # Indices including padding
-            inds_output = (first(inds) - CartesianIndex(Ms)):(last(inds) + CartesianIndex(Ms))
+            # Indices of current block including padding
+            inds_output = (I₀ + one(I₀) - CartesianIndex(Ms)):(I₀ + CartesianIndex(block_dims) + CartesianIndex(Ms))
 
             # Copy data to output array.
             # Note that only one thread can write at a time.

@@ -1,11 +1,18 @@
 using ThreadsX: ThreadsX
 
+abstract type AbstractBlockData end
+
+# Dummy type used when blocking has been disabled in the NUFFT plan.
+struct NullBlockData <: AbstractBlockData end
+with_blocking(::NullBlockData) = false
+sort_points!(::NullBlockData, xp) = nothing
+
 struct BlockData{
         T, N,
         Tr,  # = real(T)
         Buffers <: AbstractVector{<:AbstractArray{T, N}},
         Indices <: CartesianIndices{N},
-    }
+    } <: AbstractBlockData
     block_dims  :: Dims{N}        # size of each block (in number of elements)
     block_sizes :: NTuple{N, Tr}  # size of each block (in units of length)
     buffers :: Buffers
