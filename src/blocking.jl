@@ -33,13 +33,15 @@ function BlockData(::Type{T}, block_dims::Dims{D}, Ñs::Dims{D}, ::HalfSupport{M
         B * Δx
     end
     buffers = map(_ -> Array{T}(undef, dims), 1:Nt)
-    indices = map(Ñs, block_dims) do N, B
+    indices_tup = map(Ñs, block_dims) do N, B
         range(0, N - 1; step = B)
     end
-    cumulative_npoints_per_block = Vector{Int}(undef, prod(block_dims) + 1)
+    indices = CartesianIndices(indices_tup)
+    nblocks = length(indices)  # total number of blocks
+    cumulative_npoints_per_block = Vector{Int}(undef, nblocks + 1)
     blockidx = Int[]
     pointperm = Int[]
-    BlockData(block_dims, block_sizes, buffers, CartesianIndices(indices), cumulative_npoints_per_block, blockidx, pointperm)
+    BlockData(block_dims, block_sizes, buffers, indices, cumulative_npoints_per_block, blockidx, pointperm)
 end
 
 # Blocking is considered to be disabled if there are no allocated buffers.

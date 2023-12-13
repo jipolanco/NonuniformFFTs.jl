@@ -75,12 +75,16 @@ function _type1_fft!(data::ComplexNUFFTData)
 end
 
 function exec_type2!(vp::AbstractVector, p::PlanNUFFT, ûs_k::AbstractArray{<:Complex})
-    (; points, kernels, data,) = p
+    (; points, kernels, data, blocks,) = p
     (; us, ks,) = data
     check_nufft_uniform_data(p, ûs_k)
     ϕ̂s = map(init_fourier_coefficients!, kernels, ks)  # this takes time only the first time it's called
     _type2_copy_and_fft!(ûs_k, ϕ̂s, data)
-    interpolate!(kernels, vp, us, points)
+    if with_blocking(blocks)
+        interpolate_blocked!(kernels, blocks, vp, us, points)
+    else
+        interpolate!(kernels, vp, us, points)
+    end
     vp
 end
 

@@ -70,7 +70,7 @@ function spread_from_point_blocked!(gs::NTuple, u::AbstractArray, x⃗₀, v::Nu
 end
 
 function spread_from_points_blocked!(
-        gs, blocks::BlockData, us::AbstractArray, x⃗s::AbstractVector, vs::AbstractVector,
+        gs, blocks::BlockData, us::AbstractArray, xp::AbstractVector, vp::AbstractVector,
     )
     (; block_dims, cumulative_npoints_per_block, pointperm, buffers, indices,) = blocks
     Ms = map(Kernels.half_support, gs)
@@ -94,31 +94,31 @@ function spread_from_points_blocked!(
             for k ∈ a:b
                 l = pointperm[k]
                 # @assert blocks.blockidx[l] == j  # check that point is really in the current block
-                x⃗ = x⃗s[l]  # if points have not been permuted
-                # x⃗ = x⃗s[k]  # if points have been permuted (may be slightly faster here, but requires permutation in sort_points!)
-                v = vs[l]
+                x⃗ = xp[l]  # if points have not been permuted
+                # x⃗ = xp[k]  # if points have been permuted (may be slightly faster here, but requires permutation in sort_points!)
+                v = vp[l]
                 spread_from_point_blocked!(gs, block, x⃗, v, Tuple(I₀))
             end
 
             # Indices of current block including padding
-            inds_output = (I₀ + one(I₀) - CartesianIndex(Ms)):(I₀ + CartesianIndex(block_dims) + CartesianIndex(Ms))
+            inds_output = (I₀ + oneunit(I₀) - CartesianIndex(Ms)):(I₀ + CartesianIndex(block_dims) + CartesianIndex(Ms))
 
-            # Copy data to output array.
+            # Add data from block to output array.
             # Note that only one thread can write at a time.
             lock(lck) do
-                copy_from_block!(us, block, inds_output)
+                add_from_block!(us, block, inds_output)
             end
         end
     end
     us
 end
 
-function copy_from_block!(us::AbstractArray, block::AbstractArray, inds_output::CartesianIndices)
-    @assert size(block) == size(inds_output)
+function add_from_block!(us::AbstractArray, block::AbstractArray, inds::CartesianIndices)
+    @assert size(block) == size(inds)
     Base.require_one_based_indexing(us)
     Ñs = size(us)
-    @inbounds for i ∈ eachindex(block, inds_output)
-        I = inds_output[i]
+    @inbounds for i ∈ eachindex(block, inds)
+        I = inds[i]
         is = map(wrap_periodic, Tuple(I), Ñs)
         us[is...] += block[i]
     end
@@ -157,7 +157,7 @@ end
 # of tuples (since indices don't "jump" due to periodic wrapping).
 function spread_onto_arrays_blocked!(
         us::NTuple{C, AbstractArray{T, D}} where {T},
-        Is::CartesianIndices,
+        Is::CartesianIndices{D},
         vals::NTuple{D, Tuple},
         vs::NTuple{C},
     ) where {C, D}
