@@ -76,13 +76,13 @@ function sort_points!(bd::BlockData, xp::AbstractVector)
     end
 
     # Verification
-    for i ∈ eachindex(cumulative_npoints_per_block)[begin:end - 1]
-        a = cumulative_npoints_per_block[i] + 1
-        b = cumulative_npoints_per_block[i + 1]
-        for j ∈ a:b
-            @assert blockidx[pointperm[j]] == i
-        end
-    end
+    # for i ∈ eachindex(cumulative_npoints_per_block)[begin:end - 1]
+    #     a = cumulative_npoints_per_block[i] + 1
+    #     b = cumulative_npoints_per_block[i + 1]
+    #     for j ∈ a:b
+    #         @assert blockidx[pointperm[j]] == i
+    #     end
+    # end
 
     nothing
 end

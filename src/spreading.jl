@@ -94,7 +94,8 @@ function spread_from_points_blocked!(
             for k ∈ a:b
                 l = pointperm[k]
                 # @assert blocks.blockidx[l] == j  # check that point is really in the current block
-                x⃗ = x⃗s[l]
+                x⃗ = x⃗s[l]  # if points have not been permuted
+                # x⃗ = x⃗s[k]  # if points have been permuted (may be slightly faster here, but requires permutation in sort_points!)
                 v = vs[l]
                 spread_from_point_blocked!(gs, block, x⃗, v, Tuple(I₀))
             end
