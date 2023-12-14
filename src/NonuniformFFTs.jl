@@ -134,7 +134,7 @@ function copy_deconvolve_to_non_oversampled!(ûs_k, ûs, ks, ϕ̂s, normfactor
     subindices = map(non_oversampled_indices, ks, axes(ûs))
     inds = Iterators.product(subindices...)  # indices of oversampled array
     inds_k = CartesianIndices(ûs_k)    # indices of non-oversampled array
-    for (I, J) ∈ zip(inds_k, inds)
+    @inbounds for (I, J) ∈ zip(inds_k, inds)
         ϕ̂ = map(getindex, ϕ̂s, Tuple(I))  # Fourier coefficient of kernel
         ûs_k[I] = ûs[J...] * (normfactor / prod(ϕ̂))
     end
@@ -147,7 +147,7 @@ function copy_deconvolve_to_oversampled!(ûs, ûs_k, ks, ϕ̂s)
     subindices = map(non_oversampled_indices, ks, axes(ûs))
     inds = Iterators.product(subindices...)  # indices of oversampled array
     inds_k = CartesianIndices(ûs_k)    # indices of non-oversampled array
-    for (I, J) ∈ zip(inds_k, inds)
+    @inbounds for (I, J) ∈ zip(inds_k, inds)
         ϕ̂ = map(getindex, ϕ̂s, Tuple(I))  # Fourier coefficient of kernel
         ûs[J...] = ûs_k[I] / prod(ϕ̂)
     end
