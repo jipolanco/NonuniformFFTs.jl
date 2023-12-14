@@ -3,6 +3,7 @@ module NonuniformFFTs
 using StructArrays: StructVector
 using FFTW: FFTW
 using LinearAlgebra: mul!
+using TimerOutputs: TimerOutput, @timeit
 
 include("Kernels/Kernels.jl")
 
@@ -16,7 +17,8 @@ using .Kernels:
     KaiserBesselKernel,
     BackwardsKaiserBesselKernel,
     gridstep,
-    init_fourier_coefficients!
+    init_fourier_coefficients!,
+    fourier_coefficients
 
 export
     PlanNUFFT,
@@ -45,20 +47,24 @@ function check_nufft_uniform_data(p::PlanNUFFT, ûs_k::AbstractArray{<:Complex}
 end
 
 function exec_type1!(ûs_k::AbstractArray{<:Complex}, p::PlanNUFFT, charges)
-    (; points, kernels, data, blocks,) = p
+    (; points, kernels, data, blocks, timer,) = p
     (; us, ks,) = data
-    check_nufft_uniform_data(p, ûs_k)
-    fill!(us, zero(eltype(us)))
-    if with_blocking(blocks)
-        spread_from_points_blocked!(kernels, blocks, us, points, charges)
-    else
-        spread_from_points!(kernels, us, points, charges)  # single-threaded case?
+    @timeit timer "Execute type 1" begin
+        check_nufft_uniform_data(p, ûs_k)
+        fill!(us, zero(eltype(us)))
+        @timeit timer "Spreading" if with_blocking(blocks)
+            spread_from_points_blocked!(kernels, blocks, us, points, charges)
+        else
+            spread_from_points!(kernels, us, points, charges)  # single-threaded case?
+        end
+        @timeit timer "Forward FFT" ûs = _type1_fft!(data)
+        @timeit timer "Deconvolution" begin
+            T = real(eltype(us))
+            normfactor::T = prod(N -> 2π / N, size(us))  # FFT normalisation factor
+            ϕ̂s = map(fourier_coefficients, kernels)
+            copy_deconvolve_to_non_oversampled!(ûs_k, ûs, ks, ϕ̂s, normfactor)  # truncate to original grid + normalise
+        end
     end
-    ûs = _type1_fft!(data)
-    T = real(eltype(us))
-    normfactor::T = prod(N -> 2π / N, size(us))  # FFT normalisation factor
-    ϕ̂s = map(init_fourier_coefficients!, kernels, ks)  # this takes time only the first time it's called
-    copy_deconvolve_to_non_oversampled!(ûs_k, ûs, ks, ϕ̂s, normfactor)  # truncate to original grid + normalise
     ûs_k
 end
 
@@ -75,31 +81,37 @@ function _type1_fft!(data::ComplexNUFFTData)
 end
 
 function exec_type2!(vp::AbstractVector, p::PlanNUFFT, ûs_k::AbstractArray{<:Complex})
-    (; points, kernels, data, blocks,) = p
+    (; points, kernels, data, blocks, timer,) = p
     (; us, ks,) = data
-    check_nufft_uniform_data(p, ûs_k)
-    ϕ̂s = map(init_fourier_coefficients!, kernels, ks)  # this takes time only the first time it's called
-    _type2_copy_and_fft!(ûs_k, ϕ̂s, data)
-    if with_blocking(blocks)
-        interpolate_blocked!(kernels, blocks, vp, us, points)
-    else
-        interpolate!(kernels, vp, us, points)
+    @timeit timer "Execute type 2" begin
+        check_nufft_uniform_data(p, ûs_k)
+        @timeit timer "Deconvolution" begin
+            ϕ̂s = map(fourier_coefficients, kernels)
+            ûs = output_field(data)
+            copy_deconvolve_to_oversampled!(ûs, ûs_k, ks, ϕ̂s)
+        end
+        @timeit timer "Backward FFT" _type2_fft!(data)
+        @timeit timer "Interpolate" begin
+            if with_blocking(blocks)
+                interpolate_blocked!(kernels, blocks, vp, us, points)
+            else
+                interpolate!(kernels, vp, us, points)
+            end
+        end
     end
     vp
 end
 
-function _type2_copy_and_fft!(ûs_k, ϕ̂s, data::RealNUFFTData)
-    (; us, ûs, ks, plan_bw,) = data
-    copy_deconvolve_to_oversampled!(ûs, ûs_k, ks, ϕ̂s)
+function _type2_fft!(data::RealNUFFTData)
+    (; us, ûs, plan_bw,) = data
     mul!(us, plan_bw, ûs)  # perform inverse r2c FFT
-    nothing
+    us
 end
 
-function _type2_copy_and_fft!(ûs_k, ϕ̂s, data::ComplexNUFFTData)
-    (; us, ks, plan_bw,) = data
-    copy_deconvolve_to_oversampled!(us, ûs_k, ks, ϕ̂s)
+function _type2_fft!(data::ComplexNUFFTData)
+    (; us, plan_bw,) = data
     plan_bw * us  # perform in-place inverse c2c FFT
-    nothing
+    us
 end
 
 function non_oversampled_indices(ks::AbstractVector, ax::AbstractUnitRange)

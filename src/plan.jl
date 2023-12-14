@@ -25,6 +25,11 @@ struct ComplexNUFFTData{
     plan_bw :: PlanFFT_bw  # inverse in-place transform
 end
 
+# Here the "input" means the gridded data in "physical" space, while the "output"
+# corresponds to its Fourier coefficients.
+output_field(data::RealNUFFTData) = data.ûs
+output_field(data::ComplexNUFFTData) = data.us  # output === input
+
 # Case of real data
 function init_plan_data(::Type{T}, Ñs::Dims, ks::NTuple; fftw_flags) where {T <: AbstractFloat}
     us = Array{T}(undef, Ñs)
@@ -50,12 +55,14 @@ struct PlanNUFFT{
         Points <: StructVector{NTuple{N, Treal}},
         Data <: AbstractNUFFTData{T, N},
         Blocks <: AbstractBlockData,
+        Timer <: TimerOutput,
     }
     kernels :: Kernels
     σ       :: Treal   # oversampling factor (≥ 1)
     points  :: Points  # non-uniform points (real values)
     data    :: Data
     blocks  :: Blocks
+    timer   :: Timer
 end
 
 """
@@ -86,6 +93,7 @@ end
 # This constructor is generally not called directly.
 function _PlanNUFFT(
         ::Type{T}, kernel::AbstractKernel, h::HalfSupport, σ_wanted, Ns::Dims{D};
+        timer = TimerOutput(),
         fftw_flags = FFTW.MEASURE,
         block_size::Union{Integer, Nothing} = default_block_size(),
     ) where {T <: Number, D}
@@ -104,6 +112,10 @@ function _PlanNUFFT(
         Δx̃ = L / Ñ
         Kernels.optimal_kernel(kernel, h, Δx̃, Ñ / N)
     end
+    # Precompute Fourier coefficients of the kernels.
+    # After doing this, one can call `fourier_coefficients` to get the precomputed
+    # coefficients.
+    foreach(init_fourier_coefficients!, kernel_data, ks)
     points = StructVector(ntuple(_ -> Tr[], Val(D)))
     if block_size === nothing
         blocks = NullBlockData()  # disable blocking (→ can't use multithreading when spreading)
@@ -114,7 +126,7 @@ function _PlanNUFFT(
         FFTW.set_num_threads(Threads.nthreads())
     end
     nufft_data = init_plan_data(T, Ñs, ks; fftw_flags)
-    PlanNUFFT(kernel_data, σ, points, nufft_data, blocks)
+    PlanNUFFT(kernel_data, σ, points, nufft_data, blocks, timer)
 end
 
 init_wavenumbers(::Type{T}, Ns::Dims) where {T <: AbstractFloat} = ntuple(Val(length(Ns))) do i
