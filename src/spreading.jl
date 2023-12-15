@@ -83,13 +83,14 @@ function spread_from_points_blocked!(
     Threads.@threads :static for i ∈ 1:Nt
         j_start = (i - 1) * nblocks ÷ Nt + 1
         j_end = i * nblocks ÷ Nt
+        block = buffers[i]
+        inds_wrapped = blocks.buffers_for_indices[i]
         @inbounds for j ∈ j_start:j_end
             a = cumulative_npoints_per_block[j]
             b = cumulative_npoints_per_block[j + 1]
             a == b && continue  # no points in this block (otherwise b > a)
 
             # Iterate over all points in the current block
-            block = buffers[i]
             I₀ = indices[j]
             fill!(block, zero(eltype(block)))
             for k ∈ (a + 1):b
@@ -102,31 +103,35 @@ function spread_from_points_blocked!(
             end
 
             # Indices of current block including padding
-            inds_output = (I₀ + oneunit(I₀) - CartesianIndex(Ms)):(I₀ + CartesianIndex(block_dims) + CartesianIndex(Ms))
+            Ia = I₀ + oneunit(I₀) - CartesianIndex(Ms)
+            Ib = I₀ + CartesianIndex(block_dims) + CartesianIndex(Ms)
+            wrap_periodic!(inds_wrapped, Ia, Ib, size(us))
 
             # Add data from block to output array.
             # Note that only one thread can write at a time.
             lock(lck) do
-                add_from_block!(us, block, inds_output)
+                add_from_block!(us, block, inds_wrapped)
             end
         end
     end
     us
 end
 
-function add_from_block!(us::AbstractArray, block::AbstractArray, inds::CartesianIndices)
-    @assert size(block) == size(inds)
-    Base.require_one_based_indexing(us)
-    Ñs = size(us)
-    @inbounds for i ∈ eachindex(block, inds)
-        I = inds[i]
-        is = map(wrap_periodic, Tuple(I), Ñs)
-        us[is...] += block[i]
+function wrap_periodic!(inds::NTuple{D}, Ia::CartesianIndex{D}, Ib::CartesianIndex{D}, Ns::Dims{D}) where {D}
+    for j ∈ 1:D
+        wrap_periodic!(inds[j], Ia[j]:Ib[j], Ns[j])
     end
-    us
+    inds
 end
 
-@inline function wrap_periodic(i::Integer, N::Integer)
+function wrap_periodic!(inds::AbstractVector, irange::AbstractRange, N)
+    for j ∈ eachindex(inds, irange)
+        inds[j] = wrap_periodic(irange[j], N)
+    end
+    inds
+end
+
+function wrap_periodic(i::Integer, N::Integer)
     while i ≤ 0
         i += N
     end
@@ -134,6 +139,17 @@ end
         i -= N
     end
     i
+end
+
+function add_from_block!(us::AbstractArray, block::AbstractArray, inds_wrapped::Tuple)
+    @assert size(block) == map(length, inds_wrapped)
+    Base.require_one_based_indexing(us)
+    Base.require_one_based_indexing(block)
+    @inbounds for I ∈ CartesianIndices(block)
+        js = map(getindex, inds_wrapped, Tuple(I))
+        us[js...] += block[I]
+    end
+    us
 end
 
 function spread_onto_arrays!(

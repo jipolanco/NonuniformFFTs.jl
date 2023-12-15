@@ -15,9 +15,10 @@ struct BlockData{
     } <: AbstractBlockData
     block_dims  :: Dims{N}        # size of each block (in number of elements)
     block_sizes :: NTuple{N, Tr}  # size of each block (in units of length)
-    buffers :: Buffers
-    indices :: Indices
-    cumulative_npoints_per_block :: Vector{Int}  # cumulative sum of number of points in each block (length = 1 + num_blocks, initial value is 0)
+    buffers :: Buffers    # length = nthreads()
+    indices :: Indices    # index associated to each block (length = num_blocks)
+    buffers_for_indices :: Vector{NTuple{N, Vector{Int}}}  # maps values of current buffer to indices in global array (length = nthreads())
+    cumulative_npoints_per_block :: Vector{Int}    # cumulative sum of number of points in each block (length = 1 + num_blocks, initial value is 0)
     blockidx  :: Vector{Int}  # linear index of block associated to each point (length = Np)
     pointperm :: Vector{Int}  # index permutation for sorting points according to their block (length = Np)
 end
@@ -38,10 +39,17 @@ function BlockData(::Type{T}, block_dims::Dims{D}, Ñs::Dims{D}, ::HalfSupport{M
     end
     indices = CartesianIndices(indices_tup)
     nblocks = length(indices)  # total number of blocks
+    buffers_for_indices = Vector{NTuple{D, Vector{Int}}}(undef, Nt)
+    for i ∈ eachindex(buffers_for_indices)
+        buffers_for_indices[i] = map(N -> Vector{Int}(undef, N), dims)
+    end
     cumulative_npoints_per_block = Vector{Int}(undef, nblocks + 1)
     blockidx = Int[]
     pointperm = Int[]
-    BlockData(block_dims, block_sizes, buffers, indices, cumulative_npoints_per_block, blockidx, pointperm)
+    BlockData(
+        block_dims, block_sizes, buffers, indices, buffers_for_indices,
+        cumulative_npoints_per_block, blockidx, pointperm,
+    )
 end
 
 # Blocking is considered to be disabled if there are no allocated buffers.
