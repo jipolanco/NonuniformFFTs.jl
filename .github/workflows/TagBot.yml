@@ -29,5 +29,4 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           # Edit the following line to reflect the actual name of the GitHub Secret containing your private key
-          # ssh: ${{ secrets.DOCUMENTER_KEY }}
-          ssh: ${{ secrets.SSH_KEY }}
+          ssh: ${{ secrets.DOCUMENTER_KEY }}
