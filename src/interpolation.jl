@@ -120,17 +120,19 @@ function interpolate_blocked!(gs, blocks::BlockData, vp::AbstractArray, us, xp::
     Threads.@threads :static for i ∈ 1:Nt
         j_start = (i - 1) * nblocks ÷ Nt + 1
         j_end = i * nblocks ÷ Nt
+        block = buffers[i]
+        inds_wrapped = blocks.buffers_for_indices[i]
         @inbounds for j ∈ j_start:j_end
             a = cumulative_npoints_per_block[j]
             b = cumulative_npoints_per_block[j + 1]
             a == b && continue  # no points in this block (otherwise b > a)
 
-            block = buffers[i]
-            I₀ = indices[j]
-
             # Indices of current block including padding
-            inds_block = (I₀ + oneunit(I₀) - CartesianIndex(Ms)):(I₀ + CartesianIndex(block_dims) + CartesianIndex(Ms))
-            copy_to_block!(block, us, inds_block)  # copy local data to `block` array
+            I₀ = indices[j]
+            Ia = I₀ + oneunit(I₀) - CartesianIndex(Ms)
+            Ib = I₀ + CartesianIndex(block_dims) + CartesianIndex(Ms)
+            wrap_periodic!(inds_wrapped, Ia, Ib, size(us))
+            copy_to_block!(block, us, inds_wrapped)
 
             # Iterate over all points in the current block
             for k ∈ (a + 1):b
@@ -145,14 +147,13 @@ function interpolate_blocked!(gs, blocks::BlockData, vp::AbstractArray, us, xp::
     vp
 end
 
-function copy_to_block!(block::AbstractArray, us::AbstractArray, inds::CartesianIndices)
-    @assert size(block) == size(inds)
+function copy_to_block!(block::AbstractArray, us::AbstractArray, inds_wrapped::Tuple)
+    @assert size(block) == map(length, inds_wrapped)
     Base.require_one_based_indexing(us)
-    Ñs = size(us)
-    @inbounds for i ∈ eachindex(block, inds)
-        I = inds[i]
-        is = map(wrap_periodic, Tuple(I), Ñs)  # wrap_periodic is defined in spreading.jl
-        block[i] = us[is...]
+    Base.require_one_based_indexing(block)
+    @inbounds for I ∈ CartesianIndices(block)
+        js = map(getindex, inds_wrapped, Tuple(I))
+        block[I] = us[js...]
     end
     us
 end
