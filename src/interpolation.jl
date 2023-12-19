@@ -109,22 +109,24 @@ function interpolate_from_arrays_blocked(
     vs
 end
 
-function interpolate_blocked!(gs, blocks::BlockData, vp::AbstractArray, us, xp::AbstractArray)
+function interpolate_blocked!(gs, bd::BlockData, vp::AbstractArray, us, xp::AbstractArray)
     @assert axes(vp) === axes(xp)
-    (; block_dims, cumulative_npoints_per_block, pointperm, buffers, indices,) = blocks
+    (; block_dims, pointperm, buffers, indices,) = bd
     Ms = map(Kernels.half_support, gs)
     Nt = length(buffers)  # usually equal to the number of threads
-    nblocks = length(indices)
+    # nblocks = length(indices)
     Base.require_one_based_indexing(buffers)
     Base.require_one_based_indexing(indices)
     Threads.@threads :static for i ∈ 1:Nt
-        j_start = (i - 1) * nblocks ÷ Nt + 1
-        j_end = i * nblocks ÷ Nt
+        # j_start = (i - 1) * nblocks ÷ Nt + 1
+        # j_end = i * nblocks ÷ Nt
+        j_start = bd.blocks_per_thread[i] + 1
+        j_end = bd.blocks_per_thread[i + 1]
         block = buffers[i]
-        inds_wrapped = blocks.buffers_for_indices[i]
+        inds_wrapped = bd.buffers_for_indices[i]
         @inbounds for j ∈ j_start:j_end
-            a = cumulative_npoints_per_block[j]
-            b = cumulative_npoints_per_block[j + 1]
+            a = bd.cumulative_npoints_per_block[j]
+            b = bd.cumulative_npoints_per_block[j + 1]
             a == b && continue  # no points in this block (otherwise b > a)
 
             # Indices of current block including padding
@@ -137,7 +139,7 @@ function interpolate_blocked!(gs, blocks::BlockData, vp::AbstractArray, us, xp::
             # Iterate over all points in the current block
             for k ∈ (a + 1):b
                 l = pointperm[k]
-                # @assert blocks.blockidx[l] == j  # check that point is really in the current block
+                # @assert bd.blockidx[l] == j  # check that point is really in the current block
                 x⃗ = xp[l]  # if points have not been permuted
                 # x⃗ = xp[k]  # if points have been permuted (may be slightly faster here, but requires permutation in sort_points!)
                 vp[l] = interpolate_blocked(gs, block, x⃗, Tuple(I₀))

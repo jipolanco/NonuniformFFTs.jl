@@ -15,7 +15,8 @@ struct BlockData{
     } <: AbstractBlockData
     block_dims  :: Dims{N}        # size of each block (in number of elements)
     block_sizes :: NTuple{N, Tr}  # size of each block (in units of length)
-    buffers :: Buffers    # length = nthreads()
+    buffers :: Buffers        # length = nthreads
+    blocks_per_thread :: Vector{Int}  # maps a set of blocks i_start:i_end to a thread (length = nthreads + 1)
     indices :: Indices    # index associated to each block (length = num_blocks)
     buffers_for_indices :: Vector{NTuple{N, Vector{Int}}}  # maps values of current buffer to indices in global array (length = nthreads())
     cumulative_npoints_per_block :: Vector{Int}    # cumulative sum of number of points in each block (length = 1 + num_blocks, initial value is 0)
@@ -46,8 +47,9 @@ function BlockData(::Type{T}, block_dims::Dims{D}, Ñs::Dims{D}, ::HalfSupport{M
     cumulative_npoints_per_block = Vector{Int}(undef, nblocks + 1)
     blockidx = Int[]
     pointperm = Int[]
+    blocks_per_thread = zeros(Int, Nt + 1)
     BlockData(
-        block_dims, block_sizes, buffers, indices, buffers_for_indices,
+        block_dims, block_sizes, buffers, blocks_per_thread, indices, buffers_for_indices,
         cumulative_npoints_per_block, blockidx, pointperm,
     )
 end
@@ -84,6 +86,11 @@ function sort_points!(bd::BlockData, xp::AbstractVector)
     @assert cumulative_npoints_per_block[begin] == 0
     @assert cumulative_npoints_per_block[end] == Np
 
+    # Determine how many blocks each thread will manage. The idea is that, if the point
+    # distribution is inhomogeneous, then more threads are dedicated to areas where points
+    # are concentrated, improving load balance.
+    map_blocks_to_threads!(bd.blocks_per_thread, cumulative_npoints_per_block)
+
     if Threads.nthreads() == 1
         # This is the same as sortperm! but seems to be faster.
         sort!(pointperm; by = i -> @inbounds(blockidx[i]), alg = QuickSort)
@@ -102,4 +109,39 @@ function sort_points!(bd::BlockData, xp::AbstractVector)
     # end
 
     nothing
+end
+
+function map_blocks_to_threads!(blocks_per_thread, cumulative_npoints_per_block)
+    Np = last(cumulative_npoints_per_block)  # total number of points
+    Nt = length(blocks_per_thread) - 1       # number of threads
+    Np_per_thread = Np / Nt  # target number of points per thread
+    blocks_per_thread[begin] = 0
+    @assert cumulative_npoints_per_block[begin] == 0
+    n = firstindex(cumulative_npoints_per_block) - 1
+    nblocks = length(cumulative_npoints_per_block) - 1
+    Base.require_one_based_indexing(cumulative_npoints_per_block)
+    for i ∈ 1:Nt
+        npoints_in_current_thread = 0
+        stop = false
+        while npoints_in_current_thread < Np_per_thread
+            n += 1
+            if n > nblocks
+                stop = true
+                break
+            end
+            npoints_in_block = cumulative_npoints_per_block[n + 1] - cumulative_npoints_per_block[n]
+            npoints_in_current_thread += npoints_in_block
+        end
+        if stop
+            blocks_per_thread[begin + i] = nblocks  # this thread ends at the last block (inclusive)
+            for j ∈ (i + 1):Nt
+                blocks_per_thread[begin + j] = nblocks  # this thread does no work (starts and ends at the last block)
+            end
+            break
+        else
+            blocks_per_thread[begin + i] = n  # this thread ends at block `n` (inclusive)
+        end
+    end
+    blocks_per_thread[end] = nblocks  # make sure the last block is included
+    blocks_per_thread
 end
