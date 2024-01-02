@@ -37,16 +37,20 @@ include("set_points.jl")
 include("spreading.jl")
 include("interpolation.jl")
 
-function check_nufft_uniform_data(p::PlanNUFFT, ûs_k::AbstractArray{<:Complex})
+function check_nufft_uniform_data(p::PlanNUFFT, ûs_all::NTuple{Nc′, AbstractArray{<:Complex}}) where {Nc′}
     (; ks,) = p.data
+    Nc = ntransforms(p)
+    Nc′ == Nc || throw(DimensionMismatch(lazy"wrong amount of arrays (expected a tuple of $Nc arrays)"))
     D = length(ks)  # number of dimensions
-    ndims(ûs_k) == D || throw(DimensionMismatch(lazy"wrong dimensions of output array (expected $D-dimensional array)"))
     Nk_expected = map(length, ks)
-    size(ûs_k) == Nk_expected || throw(DimensionMismatch(lazy"wrong dimensions of output array (expected dimensions $Nk_expected)"))
+    for ûs ∈ ûs_all
+        ndims(ûs) == D || throw(DimensionMismatch(lazy"wrong dimensions of array (expected $D-dimensional array)"))
+        size(ûs) == Nk_expected || throw(DimensionMismatch(lazy"wrong dimensions of array (expected dimensions $Nk_expected)"))
+    end
     nothing
 end
 
-function exec_type1!(ûs_k::AbstractArray{<:Complex}, p::PlanNUFFT, charges)
+function exec_type1!(ûs_k::NTuple{<:Any, AbstractArray{<:Complex}}, p::PlanNUFFT, charges)
     (; points, kernels, data, blocks, timer,) = p
     (; us, ks,) = data
     @timeit timer "Execute type 1" begin
@@ -62,25 +66,37 @@ function exec_type1!(ûs_k::AbstractArray{<:Complex}, p::PlanNUFFT, charges)
             T = real(eltype(us))
             normfactor::T = prod(N -> 2π / N, size(us))  # FFT normalisation factor
             ϕ̂s = map(fourier_coefficients, kernels)
-            copy_deconvolve_to_non_oversampled!(ûs_k, ûs, ks, ϕ̂s, normfactor)  # truncate to original grid + normalise
+            for (û, ŵ) ∈ zip(ûs, ûs_k)
+                copy_deconvolve_to_non_oversampled!(ŵ, û, ks, ϕ̂s, normfactor)  # truncate to original grid + normalise
+            end
         end
     end
     ûs_k
 end
 
+# Case of a single transform
+function exec_type1!(ûs_k::AbstractArray{<:Complex}, p::PlanNUFFT, charges)
+    exec_type1!((ûs_k,), p, charges)
+    ûs_k
+end
+
 function _type1_fft!(data::RealNUFFTData)
     (; us, ûs, plan_fw,) = data
-    mul!(ûs, plan_fw, us)  # perform r2c FFT
+    for (u, û) ∈ zip(us, ûs)
+        mul!(û, plan_fw, u)  # perform r2c FFT
+    end
     ûs
 end
 
 function _type1_fft!(data::ComplexNUFFTData)
     (; us, plan_fw,) = data
-    plan_fw * us   # perform in-place c2c FFT
+    for u ∈ us
+        plan_fw * u   # perform in-place c2c FFT
+    end
     us
 end
 
-function exec_type2!(vp::AbstractVector, p::PlanNUFFT, ûs_k::AbstractArray{<:Complex})
+function exec_type2!(vp::AbstractVector, p::PlanNUFFT, ûs_k::NTuple{<:Any, AbstractArray{<:Complex}})
     (; points, kernels, data, blocks, timer,) = p
     (; us, ks,) = data
     @timeit timer "Execute type 2" begin
@@ -88,7 +104,9 @@ function exec_type2!(vp::AbstractVector, p::PlanNUFFT, ûs_k::AbstractArray{<:C
         @timeit timer "Deconvolution" begin
             ϕ̂s = map(fourier_coefficients, kernels)
             ûs = output_field(data)
-            copy_deconvolve_to_oversampled!(ûs, ûs_k, ks, ϕ̂s)
+            for (û, ŵ) ∈ zip(ûs, ûs_k)
+                copy_deconvolve_to_oversampled!(û, ŵ, ks, ϕ̂s)
+            end
         end
         @timeit timer "Backward FFT" _type2_fft!(data)
         @timeit timer "Interpolate" begin
@@ -102,15 +120,24 @@ function exec_type2!(vp::AbstractVector, p::PlanNUFFT, ûs_k::AbstractArray{<:C
     vp
 end
 
+# Case of a single transform
+function exec_type2!(vp::AbstractVector, p::PlanNUFFT, ûs_k::AbstractArray{<:Complex})
+    exec_type2!(vp, p, (ûs_k,))
+end
+
 function _type2_fft!(data::RealNUFFTData)
     (; us, ûs, plan_bw,) = data
-    mul!(us, plan_bw, ûs)  # perform inverse r2c FFT
+    for (u, û) ∈ zip(us, ûs)
+        mul!(u, plan_bw, û)  # perform inverse r2c FFT
+    end
     us
 end
 
 function _type2_fft!(data::ComplexNUFFTData)
     (; us, plan_bw,) = data
-    plan_bw * us  # perform in-place inverse c2c FFT
+    for u ∈ us
+        plan_bw * u  # perform in-place inverse c2c FFT
+    end
     us
 end
 

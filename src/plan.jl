@@ -1,26 +1,26 @@
-abstract type AbstractNUFFTData{T <: Number, N} end
+abstract type AbstractNUFFTData{T <: Number, N, Nc} end
 
 struct RealNUFFTData{
-        T <: AbstractFloat, N,
+        T <: AbstractFloat, N, Nc,
         WaveNumbers <: NTuple{N, AbstractVector{T}},
         PlanFFT_fw <: FFTW.Plan{T},
         PlanFFT_bw <: FFTW.Plan{Complex{T}},
-    } <: AbstractNUFFTData{T, N}
+    } <: AbstractNUFFTData{T, N, Nc}
     ks      :: WaveNumbers  # wavenumbers in *non-oversampled* Fourier grid
-    us      :: Array{T, N}  # values in oversampled grid
-    ûs      :: Array{Complex{T}, N}  # Fourier coefficients in oversampled grid
+    us      :: NTuple{Nc, Array{T, N}}  # values in oversampled grid
+    ûs      :: NTuple{Nc, Array{Complex{T}, N}}  # Fourier coefficients in oversampled grid
     plan_fw :: PlanFFT_fw
     plan_bw :: PlanFFT_bw
 end
 
 struct ComplexNUFFTData{
-        T <: AbstractFloat, N,
+        T <: AbstractFloat, N, Nc,
         WaveNumbers <: NTuple{N, AbstractVector{T}},
         PlanFFT_fw <: FFTW.Plan{Complex{T}},
         PlanFFT_bw <: FFTW.Plan{Complex{T}},
-    } <: AbstractNUFFTData{Complex{T}, N}
+    } <: AbstractNUFFTData{Complex{T}, N, Nc}
     ks      :: WaveNumbers
-    us      :: Array{Complex{T}, N}
+    us      :: NTuple{Nc, Array{Complex{T}, N}}
     plan_fw :: PlanFFT_fw  # in-place transform
     plan_bw :: PlanFFT_bw  # inverse in-place transform
 end
@@ -31,29 +31,35 @@ output_field(data::RealNUFFTData) = data.ûs
 output_field(data::ComplexNUFFTData) = data.us  # output === input
 
 # Case of real data
-function init_plan_data(::Type{T}, Ñs::Dims, ks::NTuple; fftw_flags) where {T <: AbstractFloat}
-    us = Array{T}(undef, Ñs)
+function init_plan_data(
+        ::Type{T}, Ñs::Dims, ks::NTuple, ::Val{Nc}; fftw_flags,
+    ) where {T <: AbstractFloat, Nc}
+    @assert Nc ≥ 1
+    us = ntuple(_ -> Array{T}(undef, Ñs), Val(Nc))
     dims_out = (Ñs[1] ÷ 2 + 1, Base.tail(Ñs)...)
-    ûs = Array{Complex{T}}(undef, dims_out)
-    plan_fw = FFTW.plan_rfft(us; flags = fftw_flags)
-    plan_bw = FFTW.plan_brfft(ûs, Ñs[1]; flags = fftw_flags)
+    ûs = ntuple(_ -> Array{Complex{T}}(undef, dims_out), Val(Nc))
+    plan_fw = FFTW.plan_rfft(first(us); flags = fftw_flags)
+    plan_bw = FFTW.plan_brfft(first(ûs), Ñs[1]; flags = fftw_flags)
     RealNUFFTData(ks, us, ûs, plan_fw, plan_bw)
 end
 
 # Case of complex data
-function init_plan_data(::Type{Complex{T}}, Ñs::Dims, ks::NTuple; fftw_flags) where {T <: AbstractFloat}
-    us = Array{Complex{T}}(undef, Ñs)
-    plan_fw = FFTW.plan_fft!(us; flags = fftw_flags)
-    plan_bw = FFTW.plan_bfft!(us; flags = fftw_flags)
+function init_plan_data(
+        ::Type{Complex{T}}, Ñs::Dims, ks::NTuple, ::Val{Nc}; fftw_flags,
+    ) where {T <: AbstractFloat, Nc}
+    @assert Nc ≥ 1
+    us = ntuple(_ -> Array{Complex{T}}(undef, Ñs), Val(Nc))
+    plan_fw = FFTW.plan_fft!(first(us); flags = fftw_flags)
+    plan_bw = FFTW.plan_bfft!(first(us); flags = fftw_flags)
     ComplexNUFFTData(ks, us, plan_fw, plan_bw)
 end
 
 struct PlanNUFFT{
-        T <: Number, N, M,
+        T <: Number, N, Nc, M,
         Treal <: AbstractFloat,  # this is real(T)
         Kernels <: NTuple{N, AbstractKernelData{<:AbstractKernel, M, Treal}},
         Points <: StructVector{NTuple{N, Treal}},
-        Data <: AbstractNUFFTData{T, N},
+        Data <: AbstractNUFFTData{T, N, Nc},
         Blocks <: AbstractBlockData,
         Timer <: TimerOutput,
     }
@@ -74,6 +80,13 @@ This corresponds to the number of Fourier modes in each direction (in the non-ov
 """
 Base.size(p::PlanNUFFT) = map(length, p.data.ks)
 
+"""
+    ntransforms(p::PlanNUFFT) -> Int
+
+Return the number of datasets which are simultaneously transformed by a plan.
+"""
+ntransforms(::PlanNUFFT{T, N, Nc}) where {T, N, Nc} = Nc
+
 default_block_size() = 4096  # in number of linear elements
 
 function get_block_dims(Ñs::Dims, bsize::Int)
@@ -93,10 +106,11 @@ end
 # This constructor is generally not called directly.
 function _PlanNUFFT(
         ::Type{T}, kernel::AbstractKernel, h::HalfSupport, σ_wanted, Ns::Dims{D};
+        num_transforms::Val = Val(1),
         timer = TimerOutput(),
         fftw_flags = FFTW.MEASURE,
         block_size::Union{Integer, Nothing} = default_block_size(),
-    ) where {T <: Number, D}
+    ) where {T <: Number, D, Nc}
     ks = init_wavenumbers(T, Ns)
     # Determine dimensions of oversampled grid.
     Ñs = map(Ns) do N
@@ -122,10 +136,10 @@ function _PlanNUFFT(
         FFTW.set_num_threads(1)   # also disable FFTW threading (avoids allocations)
     else
         block_dims = get_block_dims(Ñs, block_size)
-        blocks = BlockData(T, block_dims, Ñs, h)
+        blocks = BlockData(T, block_dims, Ñs, h)  # TODO pass num_transforms
         FFTW.set_num_threads(Threads.nthreads())
     end
-    nufft_data = init_plan_data(T, Ñs, ks; fftw_flags)
+    nufft_data = init_plan_data(T, Ñs, ks, num_transforms; fftw_flags)
     PlanNUFFT(kernel_data, σ, points, nufft_data, blocks, timer)
 end
 
