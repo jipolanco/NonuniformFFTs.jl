@@ -21,7 +21,7 @@ xp = rand(T, Np) .* 2π  # non-uniform points in [0, 2π]
 vp = randn(T, Np)       # random values at points
 
 # Create plan for data of type T
-plan_nufft = PlanNUFFT(T, N, HalfSupport(8))  # larger support increases accuracy
+plan_nufft = PlanNUFFT(T, N; m = HalfSupport(8))  # larger support increases accuracy
 
 # Set non-uniform points
 set_points!(plan_nufft, xp)
@@ -45,7 +45,7 @@ xp = rand(T, Np) .* 2π             # non-uniform points in [0, 2π]
 ûs = randn(Complex{T}, N ÷ 2 + 1)  # random values at points (we need to store roughly half the Fourier modes for complex-to-real transform)
 
 # Create plan for data of type T
-plan_nufft = PlanNUFFT(T, N, HalfSupport(8))
+plan_nufft = PlanNUFFT(T, N; m = HalfSupport(8))
 
 # Set non-uniform points
 set_points!(plan_nufft, xp)
@@ -55,7 +55,10 @@ vp = Array{T}(undef, Np)
 exec_type2!(vp, plan_nufft, ûs)
 ```
 
-### Multidimensional transforms
+### More examples
+
+<details>
+<summary><b>Multidimensional transforms</b></summary>
 
 ```julia
 using NonuniformFFTs
@@ -71,7 +74,7 @@ xp = [2π * rand(SVector{d, T}) for _ ∈ 1:Np]  # non-uniform points in [0, 2π
 vp = randn(T, Np)                             # random values at points
 
 # Create plan for data of type T
-plan_nufft = PlanNUFFT(T, Ns, HalfSupport(8))
+plan_nufft = PlanNUFFT(T, Ns; m = HalfSupport(8))
 
 # Set non-uniform points
 set_points!(plan_nufft, xp)
@@ -83,6 +86,42 @@ exec_type1!(ûs, plan_nufft, vp)
 # Perform type-2 NUFFT on preallocated output
 exec_type2!(vp, plan_nufft, ûs)
 ```
+
+</details>
+
+<details>
+<summary><b>Multiple transforms on the same non-uniform points</b></summary>
+
+```julia
+using NonuniformFFTs
+
+N = 256   # number of Fourier modes
+Np = 100  # number of non-uniform points
+ntrans = Val(3)  # number of simultaneous transforms
+
+# Generate some non-uniform random data
+T = Float64             # non-uniform data is real (can also be complex)
+xp = rand(T, Np) .* 2π  # non-uniform points in [0, 2π]
+vp = ntuple(_ -> randn(T, Np), ntrans)  # random values at points (one vector per transformed quantity)
+
+# Create plan for data of type T
+plan_nufft = PlanNUFFT(T, N; ntransforms = ntrans)
+
+# Set non-uniform points
+set_points!(plan_nufft, xp)
+
+# Perform type-1 NUFFT on preallocated output (one array per transformed quantity)
+ûs = ntuple(_ -> Array{Complex{T}}(undef, size(plan_nufft)), ntrans)
+exec_type1!(ûs, plan_nufft, vp)
+
+# Perform type-2 NUFFT on preallocated output (one vector per transformed quantity)
+vp_interp = map(similar, vp)
+exec_type2!(vp, plan_nufft, ûs)
+```
+
+</details>
+
+<br>
 
 More details on optional parameters and on tuning accuracy is coming soon.
 
@@ -117,6 +156,8 @@ In particular, this means that:
 - Setting non-uniform points and executing plans is allocation-free.
 
 - Different convention is used: non-uniform points are expected to be in $[0, 2π]$.
+
+- This package allows performing transforms of multiple quantities at the same non-uniform values at once.
 
 ### Differences with FINUFFT / FINUFFT.jl
 

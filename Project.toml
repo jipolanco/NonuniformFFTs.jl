@@ -1,7 +1,7 @@
 name = "NonuniformFFTs"
 uuid = "cd96f58b-6017-4a02-bb9e-f4d81626177f"
 authors = ["Juan Ignacio Polanco <juan-ignacio.polanco@cnrs.fr>"]
-version = "0.2.1"
+version = "0.3.0"
 
 [deps]
 Bessels = "0e736298-9ec6-45e8-9647-e4fc86a2fe38"
