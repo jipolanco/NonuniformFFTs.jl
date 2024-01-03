@@ -1,17 +1,28 @@
-function interpolate!(gs, vp::AbstractArray, us, xp::AbstractArray)
-    @assert axes(vp) === axes(xp)
-    for i ∈ eachindex(vp)
-        vp[i] = interpolate(gs, us, xp[i])
+function interpolate!(
+        gs,
+        vp_all::NTuple{C, AbstractVector},
+        us::NTuple{C, AbstractArray},
+        x⃗s::AbstractVector,
+    ) where {C}
+    # Note: the dimensions of arrays have already been checked via check_nufft_nonuniform_data.
+    Base.require_one_based_indexing(x⃗s)  # this is to make sure that all indices match
+    foreach(Base.require_one_based_indexing, vp_all)
+    for i ∈ eachindex(x⃗s)  # iterate over all points
+        x⃗ = @inbounds x⃗s[i]
+        vs = interpolate(gs, us, x⃗) :: NTuple{C}  # non-uniform values at point x⃗
+        for (vp, v) ∈ zip(vp_all, vs)
+            @inbounds vp[i] = v
+        end
     end
-    vp
+    vp_all
 end
 
 function interpolate(
         gs::NTuple{D, AbstractKernelData},
-        us::NTuple{M, AbstractArray{T, D}} where {T},
+        us::NTuple{C, AbstractArray{T, D}} where {T},
         x⃗::NTuple{D},  # coordinates are assumed to be in [0, 2π]
-    ) where {D, M}
-    @assert M > 0
+    ) where {D, C}
+    @assert C > 0
     map(Base.require_one_based_indexing, us)
     Ns = size(first(us))
     @assert all(u -> size(u) === Ns, us)
@@ -32,15 +43,13 @@ function interpolate(
     interpolate_from_arrays(us, inds, vals)
 end
 
-interpolate(gs::NTuple, u::AbstractArray, x⃗) = only(interpolate(gs, (u,), x⃗))
-
 function interpolate_blocked(
         gs::NTuple{D},
-        us::NTuple{M, AbstractArray{T, D}} where {T},
+        us::NTuple{C, AbstractArray{T, D}} where {T},
         x⃗::NTuple{D},
         I₀::NTuple{D},
-    ) where {D, M}
-    @assert M > 0
+    ) where {D, C}
+    @assert C > 0
     map(Base.require_one_based_indexing, us)
     Ns = size(first(us))
     @assert all(u -> size(u) === Ns, us)
@@ -66,8 +75,6 @@ function interpolate_blocked(
 
     interpolate_from_arrays_blocked(us, Is, vals)
 end
-
-interpolate_blocked(gs::NTuple, u::AbstractArray, args...) = only(interpolate_blocked(gs, (u,), args...))
 
 function interpolate_from_arrays(
         us::NTuple{C, AbstractArray{T, D}} where {T},
@@ -109,14 +116,20 @@ function interpolate_from_arrays_blocked(
     vs
 end
 
-function interpolate_blocked!(gs, bd::BlockData, vp::AbstractArray, us, xp::AbstractArray)
-    @assert axes(vp) === axes(xp)
+function interpolate_blocked!(
+        gs,
+        bd::BlockData,
+        vp_all::NTuple{C, AbstractVector},
+        us::NTuple{C, AbstractArray},
+        x⃗s::AbstractArray,
+    ) where {C}
     (; block_dims, pointperm, buffers, indices,) = bd
     Ms = map(Kernels.half_support, gs)
     Nt = length(buffers)  # usually equal to the number of threads
     # nblocks = length(indices)
     Base.require_one_based_indexing(buffers)
     Base.require_one_based_indexing(indices)
+
     Threads.@threads :static for i ∈ 1:Nt
         # j_start = (i - 1) * nblocks ÷ Nt + 1
         # j_end = i * nblocks ÷ Nt
@@ -133,29 +146,43 @@ function interpolate_blocked!(gs, bd::BlockData, vp::AbstractArray, us, xp::Abst
             I₀ = indices[j]
             Ia = I₀ + oneunit(I₀) - CartesianIndex(Ms)
             Ib = I₀ + CartesianIndex(block_dims) + CartesianIndex(Ms)
-            wrap_periodic!(inds_wrapped, Ia, Ib, size(us))
+            wrap_periodic!(inds_wrapped, Ia, Ib, size(first(us)))
             copy_to_block!(block, us, inds_wrapped)
 
             # Iterate over all points in the current block
             for k ∈ (a + 1):b
                 l = pointperm[k]
                 # @assert bd.blockidx[l] == j  # check that point is really in the current block
-                x⃗ = xp[l]  # if points have not been permuted
-                # x⃗ = xp[k]  # if points have been permuted (may be slightly faster here, but requires permutation in sort_points!)
-                vp[l] = interpolate_blocked(gs, block, x⃗, Tuple(I₀))
+                x⃗ = x⃗s[l]  # if points have not been permuted
+                # x⃗ = x⃗s[k]  # if points have been permuted (may be slightly faster here, but requires permutation in sort_points!)
+                vs = interpolate_blocked(gs, block, x⃗, Tuple(I₀)) :: NTuple{C}  # non-uniform values at point x⃗
+                for (vp, v) ∈ zip(vp_all, vs)
+                    @inbounds vp[l] = v
+                end
             end
         end
     end
-    vp
+
+    vp_all
 end
 
-function copy_to_block!(block::AbstractArray, us::AbstractArray, inds_wrapped::Tuple)
-    @assert size(block) == map(length, inds_wrapped)
-    Base.require_one_based_indexing(us)
-    Base.require_one_based_indexing(block)
-    @inbounds for I ∈ CartesianIndices(block)
-        js = map(getindex, inds_wrapped, Tuple(I))
-        block[I] = us[js...]
+function copy_to_block!(
+        block::NTuple{C, AbstractArray},
+        us_all::NTuple{C, AbstractArray},
+        inds_wrapped::Tuple,
+    ) where {C}
+    for ws ∈ block
+        @assert size(ws) == map(length, inds_wrapped)
+        Base.require_one_based_indexing(ws)
     end
-    us
+    for us ∈ us_all
+        Base.require_one_based_indexing(us)
+    end
+    @inbounds for I ∈ CartesianIndices(first(block))
+        js = map(getindex, inds_wrapped, Tuple(I))
+        for (us, ws) ∈ zip(us_all, block)
+            ws[I] = us[js...]
+        end
+    end
+    us_all
 end

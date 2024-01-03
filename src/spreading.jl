@@ -45,7 +45,7 @@ function spread_from_points!(
     ) where {C}
     # Note: the dimensions of arrays have already been checked via check_nufft_nonuniform_data.
     Base.require_one_based_indexing(x⃗s)  # this is to make sure that all indices match
-    map(Base.require_one_based_indexing, vp_all)
+    foreach(Base.require_one_based_indexing, vp_all)
     for i ∈ eachindex(x⃗s)  # iterate over all points
         x⃗ = @inbounds x⃗s[i]
         vs = map(vp -> @inbounds(vp[i]), vp_all)  # non-uniform values at point x⃗
