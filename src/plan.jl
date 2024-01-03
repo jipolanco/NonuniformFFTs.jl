@@ -1,26 +1,26 @@
-abstract type AbstractNUFFTData{T <: Number, N} end
+abstract type AbstractNUFFTData{T <: Number, N, Nc} end
 
 struct RealNUFFTData{
-        T <: AbstractFloat, N,
+        T <: AbstractFloat, N, Nc,
         WaveNumbers <: NTuple{N, AbstractVector{T}},
         PlanFFT_fw <: FFTW.Plan{T},
         PlanFFT_bw <: FFTW.Plan{Complex{T}},
-    } <: AbstractNUFFTData{T, N}
+    } <: AbstractNUFFTData{T, N, Nc}
     ks      :: WaveNumbers  # wavenumbers in *non-oversampled* Fourier grid
-    us      :: Array{T, N}  # values in oversampled grid
-    ûs      :: Array{Complex{T}, N}  # Fourier coefficients in oversampled grid
+    us      :: NTuple{Nc, Array{T, N}}  # values in oversampled grid
+    ûs      :: NTuple{Nc, Array{Complex{T}, N}}  # Fourier coefficients in oversampled grid
     plan_fw :: PlanFFT_fw
     plan_bw :: PlanFFT_bw
 end
 
 struct ComplexNUFFTData{
-        T <: AbstractFloat, N,
+        T <: AbstractFloat, N, Nc,
         WaveNumbers <: NTuple{N, AbstractVector{T}},
         PlanFFT_fw <: FFTW.Plan{Complex{T}},
         PlanFFT_bw <: FFTW.Plan{Complex{T}},
-    } <: AbstractNUFFTData{Complex{T}, N}
+    } <: AbstractNUFFTData{Complex{T}, N, Nc}
     ks      :: WaveNumbers
-    us      :: Array{Complex{T}, N}
+    us      :: NTuple{Nc, Array{Complex{T}, N}}
     plan_fw :: PlanFFT_fw  # in-place transform
     plan_bw :: PlanFFT_bw  # inverse in-place transform
 end
@@ -31,29 +31,88 @@ output_field(data::RealNUFFTData) = data.ûs
 output_field(data::ComplexNUFFTData) = data.us  # output === input
 
 # Case of real data
-function init_plan_data(::Type{T}, Ñs::Dims, ks::NTuple; fftw_flags) where {T <: AbstractFloat}
-    us = Array{T}(undef, Ñs)
+function init_plan_data(
+        ::Type{T}, Ñs::Dims, ks::NTuple, ::Val{Nc}; fftw_flags,
+    ) where {T <: AbstractFloat, Nc}
+    @assert Nc ≥ 1
+    us = ntuple(_ -> Array{T}(undef, Ñs), Val(Nc))
     dims_out = (Ñs[1] ÷ 2 + 1, Base.tail(Ñs)...)
-    ûs = Array{Complex{T}}(undef, dims_out)
-    plan_fw = FFTW.plan_rfft(us; flags = fftw_flags)
-    plan_bw = FFTW.plan_brfft(ûs, Ñs[1]; flags = fftw_flags)
+    ûs = ntuple(_ -> Array{Complex{T}}(undef, dims_out), Val(Nc))
+    plan_fw = FFTW.plan_rfft(first(us); flags = fftw_flags)
+    plan_bw = FFTW.plan_brfft(first(ûs), Ñs[1]; flags = fftw_flags)
     RealNUFFTData(ks, us, ûs, plan_fw, plan_bw)
 end
 
 # Case of complex data
-function init_plan_data(::Type{Complex{T}}, Ñs::Dims, ks::NTuple; fftw_flags) where {T <: AbstractFloat}
-    us = Array{Complex{T}}(undef, Ñs)
-    plan_fw = FFTW.plan_fft!(us; flags = fftw_flags)
-    plan_bw = FFTW.plan_bfft!(us; flags = fftw_flags)
+function init_plan_data(
+        ::Type{Complex{T}}, Ñs::Dims, ks::NTuple, ::Val{Nc}; fftw_flags,
+    ) where {T <: AbstractFloat, Nc}
+    @assert Nc ≥ 1
+    us = ntuple(_ -> Array{Complex{T}}(undef, Ñs), Val(Nc))
+    plan_fw = FFTW.plan_fft!(first(us); flags = fftw_flags)
+    plan_bw = FFTW.plan_bfft!(first(us); flags = fftw_flags)
     ComplexNUFFTData(ks, us, plan_fw, plan_bw)
 end
 
+"""
+    PlanNUFFT([T = ComplexF64], dims::Dims; ntransforms = Val(1), kwargs...)
+
+Construct a plan for performing non-uniform FFTs (NUFFTs).
+
+The created plan contains all data needed to perform NUFFTs for non-uniform data of type `T`
+(`ComplexF64` by default) and uniform data with dimensions `dims`.
+
+# Optional keyword arguments
+
+- `ntransforms = Val(1)`: the number of simultaneous transforms to perform.
+  This is useful if one wants to transform multiple scalar quantities at the same
+  non-uniform points.
+
+## NUFFT parameters
+
+- `m = HalfSupport(8)`: the half-support of the convolution kernels. Large values
+  increase accuracy at the cost of performance.
+
+- `σ = 2.0`: NUFFT oversampling factor. Typical values are 2.0 (more accurate) and 1.25 (faster),
+  but other values such as 1.5 should also work.
+
+- `kernel::AbstractKernel = BackwardsKaiserBesselKernel()`: convolution kernel used for NUFFTs.
+
+## Performance parameters
+
+- `block_size = 4096`: the linear block size (in number of elements) when using block partitioning.
+  This can be tuned for maximal performance.
+  Blocking can be completely disabled by passing `block_size = nothing` (but this is generally slower).
+
+## Other parameters
+
+- `fftw_flags = FFTW.MEASURE`: parameters passed to the FFTW planner.
+
+- `timer = TimerOutput()`: allows to specify a `TimerOutput` (from the
+  [TimerOutputs.jl](https://github.com/KristofferC/TimerOutputs.jl) package) where timing
+  information will be written to.
+  By default the plan creates its own timer.
+  One can visualise the time spent on different parts of the NUFFT computation using `p.timer`.
+
+# Using real non-uniform data
+
+In some applications, the non-uniform data to be transformed is purely real.
+In this case, one may pass `Float64` or `Float32` as the first argument.
+This may be faster than converting data to complex types, in particular because the
+real-to-complex FFTs from FFTW will be used to compute the transforms.
+Note that, in this case, the dimensions of the uniform data arrays is not exactly `dims`,
+since the size of the first dimension is divided roughly by 2 (taking advantage of Hermitian
+symmetry).
+For convenience, one can call [`size(::PlanNUFFT)`](@ref) on the constructed plan to know in
+advance the dimensions of the uniform data arrays.
+
+"""
 struct PlanNUFFT{
-        T <: Number, N, M,
+        T <: Number, N, Nc, M,
         Treal <: AbstractFloat,  # this is real(T)
         Kernels <: NTuple{N, AbstractKernelData{<:AbstractKernel, M, Treal}},
         Points <: StructVector{NTuple{N, Treal}},
-        Data <: AbstractNUFFTData{T, N},
+        Data <: AbstractNUFFTData{T, N, Nc},
         Blocks <: AbstractBlockData,
         Timer <: TimerOutput,
     }
@@ -74,6 +133,13 @@ This corresponds to the number of Fourier modes in each direction (in the non-ov
 """
 Base.size(p::PlanNUFFT) = map(length, p.data.ks)
 
+"""
+    ntransforms(p::PlanNUFFT) -> Int
+
+Return the number of datasets which are simultaneously transformed by a plan.
+"""
+ntransforms(::PlanNUFFT{T, N, Nc}) where {T, N, Nc} = Nc
+
 default_block_size() = 4096  # in number of linear elements
 
 function get_block_dims(Ñs::Dims, bsize::Int)
@@ -92,7 +158,8 @@ end
 
 # This constructor is generally not called directly.
 function _PlanNUFFT(
-        ::Type{T}, kernel::AbstractKernel, h::HalfSupport, σ_wanted, Ns::Dims{D};
+        ::Type{T}, kernel::AbstractKernel, h::HalfSupport, σ_wanted, Ns::Dims{D},
+        num_transforms::Val;
         timer = TimerOutput(),
         fftw_flags = FFTW.MEASURE,
         block_size::Union{Integer, Nothing} = default_block_size(),
@@ -122,10 +189,10 @@ function _PlanNUFFT(
         FFTW.set_num_threads(1)   # also disable FFTW threading (avoids allocations)
     else
         block_dims = get_block_dims(Ñs, block_size)
-        blocks = BlockData(T, block_dims, Ñs, h)
+        blocks = BlockData(T, block_dims, Ñs, h, num_transforms)
         FFTW.set_num_threads(Threads.nthreads())
     end
-    nufft_data = init_plan_data(T, Ñs, ks; fftw_flags)
+    nufft_data = init_plan_data(T, Ñs, ks, num_transforms; fftw_flags)
     PlanNUFFT(kernel_data, σ, points, nufft_data, blocks, timer)
 end
 
@@ -141,18 +208,25 @@ end
 
 function PlanNUFFT(
         ::Type{T}, Ns::Dims, h::HalfSupport;
+        ntransforms = Val(1),
         kernel::AbstractKernel = BackwardsKaiserBesselKernel(),
         σ::Real = real(T)(2), kws...,
     ) where {T <: Number}
     R = real(T)
-    _PlanNUFFT(T, kernel, h, R(σ), Ns; kws...)
+    _PlanNUFFT(T, kernel, h, R(σ), Ns, to_static(ntransforms); kws...)
 end
 
+@inline to_static(ntrans::Val) = ntrans
+@inline to_static(ntrans::Int) = Val(ntrans)
+
 # This constructor relies on constant propagation to make the output fully inferred.
-function PlanNUFFT(::Type{T}, Ns::Dims; m::Integer = 8, kws...) where {T <: Number}
-    h = HalfSupport(m)
+function PlanNUFFT(::Type{T}, Ns::Dims; m = 8, kws...) where {T <: Number}
+    h = to_halfsupport(m)
     PlanNUFFT(T, Ns, h; kws...)
 end
+
+@inline to_halfsupport(m::Integer) = HalfSupport(m)
+@inline to_halfsupport(m::HalfSupport) = m
 
 # 1D case
 function PlanNUFFT(::Type{T}, N::Integer, args...; kws...) where {T <: Number}

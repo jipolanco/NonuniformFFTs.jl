@@ -15,7 +15,7 @@ This can be useful for spreading vector fields, for instance.
 """
 function spread_from_point!(
         gs::NTuple{D, AbstractKernelData},
-        us::NTuple{C, AbstractArray{T,D}} where {T},
+        us::NTuple{C, AbstractArray{T, D}} where {T},
         x⃗₀::NTuple{D, Number},
         vs::NTuple{C, Number},
     ) where {C, D}
@@ -37,18 +37,30 @@ function spread_from_point!(
     us
 end
 
-function spread_from_point!(gs::NTuple, u::AbstractArray, x⃗₀, v::Number)
-    spread_from_point!(gs, (u,), x⃗₀, (v,))
-end
-
-function spread_from_points!(gs, us, x⃗s::AbstractVector, vs::AbstractVector)
-    for (x⃗, v) ∈ zip(x⃗s, vs)
-        spread_from_point!(gs, us, x⃗, v)
+function spread_from_points!(
+        gs,
+        us_all::NTuple{C, AbstractArray},
+        x⃗s::AbstractVector,
+        vp_all::NTuple{C, AbstractVector},
+    ) where {C}
+    # Note: the dimensions of arrays have already been checked via check_nufft_nonuniform_data.
+    Base.require_one_based_indexing(x⃗s)  # this is to make sure that all indices match
+    foreach(Base.require_one_based_indexing, vp_all)
+    for i ∈ eachindex(x⃗s)  # iterate over all points
+        x⃗ = @inbounds x⃗s[i]
+        vs = map(vp -> @inbounds(vp[i]), vp_all)  # non-uniform values at point x⃗
+        spread_from_point!(gs, us_all, x⃗, vs)
     end
-    us
+    us_all
 end
 
-function spread_from_point_blocked!(gs::NTuple, u::AbstractArray, x⃗₀, v::Number, I₀::NTuple)
+function spread_from_point_blocked!(
+        gs::NTuple{D, AbstractKernelData},
+        us::NTuple{C, AbstractArray{T, D}} where {T},
+        x⃗₀::NTuple{D, Number},
+        vs::NTuple{C, Number},
+        I₀::NTuple,
+    ) where {C, D}
     # Evaluate 1D kernels.
     gs_eval = map(Kernels.evaluate_kernel, gs, x⃗₀)
 
@@ -61,25 +73,32 @@ function spread_from_point_blocked!(gs::NTuple, u::AbstractArray, x⃗₀, v::Nu
         is .+ δ  # shift to beginning of current block
     end
     Is = CartesianIndices(inds)
-    # Base.checkbounds(u, Is)  # check that indices fall inside the output array
+    # Base.checkbounds.(us, Tuple(Is))  # check that indices fall inside the output array
 
     vals = map(g -> g.values, gs_eval)
-    spread_onto_arrays_blocked!((u,), Is, vals, (v,))
+    spread_onto_arrays_blocked!(us, Is, vals, vs)
 
-    u
+    us
 end
 
 function spread_from_points_blocked!(
-        gs, bd::BlockData, us::AbstractArray, xp::AbstractVector, vp::AbstractVector,
-    )
+        gs,
+        bd::BlockData,
+        us_all::NTuple{C, AbstractArray},
+        xp::AbstractVector,
+        vp_all::NTuple{C, AbstractVector},
+    ) where {C}
     (; block_dims, pointperm, buffers, indices,) = bd
     Ms = map(Kernels.half_support, gs)
-    fill!(us, zero(eltype(us)))
+    for us ∈ us_all
+        fill!(us, zero(eltype(us)))
+    end
     Nt = length(buffers)  # usually equal to the number of threads
     # nblocks = length(indices)
     Base.require_one_based_indexing(buffers)
     Base.require_one_based_indexing(indices)
     lck = ReentrantLock()
+
     Threads.@threads :static for i ∈ 1:Nt
         # j_start = (i - 1) * nblocks ÷ Nt + 1
         # j_end = i * nblocks ÷ Nt
@@ -94,29 +113,32 @@ function spread_from_points_blocked!(
 
             # Iterate over all points in the current block
             I₀ = indices[j]
-            fill!(block, zero(eltype(block)))
+            for ws ∈ block
+                fill!(ws, zero(eltype(ws)))
+            end
             for k ∈ (a + 1):b
                 l = pointperm[k]
                 # @assert bd.blockidx[l] == j  # check that point is really in the current block
                 x⃗ = xp[l]  # if points have not been permuted
                 # x⃗ = xp[k]  # if points have been permuted (may be slightly faster here, but requires permutation in sort_points!)
-                v = vp[l]
-                spread_from_point_blocked!(gs, block, x⃗, v, Tuple(I₀))
+                vs = map(vp -> @inbounds(vp[l]), vp_all)  # values at the non-uniform point x⃗
+                spread_from_point_blocked!(gs, block, x⃗, vs, Tuple(I₀))
             end
 
             # Indices of current block including padding
             Ia = I₀ + oneunit(I₀) - CartesianIndex(Ms)
             Ib = I₀ + CartesianIndex(block_dims) + CartesianIndex(Ms)
-            wrap_periodic!(inds_wrapped, Ia, Ib, size(us))
+            wrap_periodic!(inds_wrapped, Ia, Ib, size(first(us_all)))
 
             # Add data from block to output array.
             # Note that only one thread can write at a time.
             lock(lck) do
-                add_from_block!(us, block, inds_wrapped)
+                add_from_block!(us_all, block, inds_wrapped)
             end
         end
     end
-    us
+
+    us_all
 end
 
 function wrap_periodic!(inds::NTuple{D}, Ia::CartesianIndex{D}, Ib::CartesianIndex{D}, Ns::Dims{D}) where {D}
@@ -143,15 +165,25 @@ function wrap_periodic(i::Integer, N::Integer)
     i
 end
 
-function add_from_block!(us::AbstractArray, block::AbstractArray, inds_wrapped::Tuple)
-    @assert size(block) == map(length, inds_wrapped)
-    Base.require_one_based_indexing(us)
-    Base.require_one_based_indexing(block)
-    @inbounds for I ∈ CartesianIndices(block)
-        js = map(getindex, inds_wrapped, Tuple(I))
-        us[js...] += block[I]
+function add_from_block!(
+        us_all::NTuple{C, AbstractArray},
+        block::NTuple{C, AbstractArray},
+        inds_wrapped::Tuple,
+    ) where {C}
+    for ws ∈ block
+        @assert size(ws) == map(length, inds_wrapped)
+        Base.require_one_based_indexing(ws)
     end
-    us
+    for us ∈ us_all
+        Base.require_one_based_indexing(us)
+    end
+    @inbounds for I ∈ CartesianIndices(first(block))
+        js = map(getindex, inds_wrapped, Tuple(I))
+        for (us, ws) ∈ zip(us_all, block)
+            us[js...] += ws[I]
+        end
+    end
+    us_all
 end
 
 function spread_onto_arrays!(
