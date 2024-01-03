@@ -66,9 +66,7 @@ function exec_type1!(ûs_k::NTuple{<:Any, AbstractArray{<:Complex}}, p::PlanNUF
             T = real(eltype(us))
             normfactor::T = prod(N -> 2π / N, size(us))  # FFT normalisation factor
             ϕ̂s = map(fourier_coefficients, kernels)
-            for (û, ŵ) ∈ zip(ûs, ûs_k)
-                copy_deconvolve_to_non_oversampled!(ŵ, û, ks, ϕ̂s, normfactor)  # truncate to original grid + normalise
-            end
+            copy_deconvolve_to_non_oversampled!(ûs_k, ûs, ks, ϕ̂s, normfactor)  # truncate to original grid + normalise
         end
     end
     ûs_k
@@ -104,9 +102,7 @@ function exec_type2!(vp::AbstractVector, p::PlanNUFFT, ûs_k::NTuple{<:Any, Abs
         @timeit timer "Deconvolution" begin
             ϕ̂s = map(fourier_coefficients, kernels)
             ûs = output_field(data)
-            for (û, ŵ) ∈ zip(ûs, ûs_k)
-                copy_deconvolve_to_oversampled!(û, ŵ, ks, ϕ̂s)
-            end
+            copy_deconvolve_to_oversampled!(ûs, ûs_k, ks, ϕ̂s)
         end
         @timeit timer "Backward FFT" _type2_fft!(data)
         @timeit timer "Interpolate" begin
@@ -157,28 +153,38 @@ function non_oversampled_indices(ks::AbstractVector, ax::AbstractUnitRange)
     Iterators.flatten(inds)
 end
 
-function copy_deconvolve_to_non_oversampled!(ûs_k, ûs, ks, ϕ̂s, normfactor)
-    subindices = map(non_oversampled_indices, ks, axes(ûs))
-    inds = Iterators.product(subindices...)  # indices of oversampled array
-    inds_k = CartesianIndices(ûs_k)    # indices of non-oversampled array
-    @inbounds for (I, J) ∈ zip(inds_k, inds)
+function copy_deconvolve_to_non_oversampled!(ŵs_all::NTuple{C}, ûs_all::NTuple{C}, ks, ϕ̂s, normfactor) where {C}
+    @assert C > 0
+    subindices = map(non_oversampled_indices, ks, axes(first(ûs_all)))
+    inds_u = Iterators.product(subindices...)  # indices of oversampled array
+    inds_w = CartesianIndices(first(ŵs_all))   # indices of non-oversampled array
+    @inbounds for (I, J) ∈ zip(inds_w, inds_u)
         ϕ̂ = map(getindex, ϕ̂s, Tuple(I))  # Fourier coefficient of kernel
-        ûs_k[I] = ûs[J...] * (normfactor / prod(ϕ̂))
+        β = normfactor / prod(ϕ̂)         # deconvolution + FFT normalisation factor
+        for (ŵs, ûs) ∈ zip(ŵs_all, ûs_all)
+            ŵs[I] = β * ûs[J...]
+        end
     end
-    ûs_k
+    ŵs_all
 end
 
-function copy_deconvolve_to_oversampled!(ûs, ûs_k, ks, ϕ̂s)
-    fill!(ûs, zero(eltype(ûs)))  # make sure the padding region is set to zero
-    # Note: both these indices should have the same lengths.
-    subindices = map(non_oversampled_indices, ks, axes(ûs))
-    inds = Iterators.product(subindices...)  # indices of oversampled array
-    inds_k = CartesianIndices(ûs_k)    # indices of non-oversampled array
-    @inbounds for (I, J) ∈ zip(inds_k, inds)
-        ϕ̂ = map(getindex, ϕ̂s, Tuple(I))  # Fourier coefficient of kernel
-        ûs[J...] = ûs_k[I] / prod(ϕ̂)
+function copy_deconvolve_to_oversampled!(ûs_all::NTuple{C}, ŵs_all::NTuple{C}, ks, ϕ̂s) where {C}
+    @assert C > 0
+    for ûs ∈ ûs_all
+        fill!(ûs, zero(eltype(ûs)))  # make sure the padding region is set to zero
     end
-    ûs_k
+    # Note: both these indices should have the same lengths.
+    subindices = map(non_oversampled_indices, ks, axes(first(ûs_all)))
+    inds_u = Iterators.product(subindices...)   # indices of oversampled array
+    inds_w = CartesianIndices(first(ŵs_all))  # indices of non-oversampled array
+    @inbounds for (I, J) ∈ zip(inds_w, inds_u)
+        ϕ̂ = map(getindex, ϕ̂s, Tuple(I))  # Fourier coefficient of kernel
+        β = 1 / prod(ϕ̂)  # deconvolution factor
+        for (ŵs, ûs) ∈ zip(ŵs_all, ûs_all)
+            ûs[J...] = β * ŵs[I]
+        end
+    end
+    ûs_all
 end
 
 end
