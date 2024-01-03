@@ -54,6 +54,59 @@ function init_plan_data(
     ComplexNUFFTData(ks, us, plan_fw, plan_bw)
 end
 
+"""
+    PlanNUFFT([T = ComplexF64], dims::Dims; ntransforms = Val(1), kwargs...)
+
+Construct a plan for performing non-uniform FFTs (NUFFTs).
+
+The created plan contains all data needed to perform NUFFTs for non-uniform data of type `T`
+(`ComplexF64` by default) and uniform data with dimensions `dims`.
+
+# Optional keyword arguments
+
+- `ntransforms = Val(1)`: the number of simultaneous transforms to perform.
+  This is useful if one wants to transform multiple scalar quantities at the same
+  non-uniform points.
+
+## NUFFT parameters
+
+- `m = HalfSupport(8)`: the half-support of the convolution kernels. Large values
+  increase accuracy at the cost of performance.
+
+- `σ = 2.0`: NUFFT oversampling factor. Typical values are 2.0 (more accurate) and 1.25 (faster),
+  but other values such as 1.5 should also work.
+
+- `kernel::AbstractKernel = BackwardsKaiserBesselKernel()`: convolution kernel used for NUFFTs.
+
+## Performance parameters
+
+- `block_size = 4096`: the linear block size (in number of elements) when using block partitioning.
+  This can be tuned for maximal performance.
+  Blocking can be completely disabled by passing `block_size = nothing` (but this is generally slower).
+
+## Other parameters
+
+- `fftw_flags = FFTW.MEASURE`: parameters passed to the FFTW planner.
+
+- `timer = TimerOutput()`: allows to specify a `TimerOutput` (from the
+  [TimerOutputs.jl](https://github.com/KristofferC/TimerOutputs.jl) package) where timing
+  information will be written to.
+  By default the plan creates its own timer.
+  One can visualise the time spent on different parts of the NUFFT computation using `p.timer`.
+
+# Using real non-uniform data
+
+In some applications, the non-uniform data to be transformed is purely real.
+In this case, one may pass `Float64` or `Float32` as the first argument.
+This may be faster than converting data to complex types, in particular because the
+real-to-complex FFTs from FFTW will be used to compute the transforms.
+Note that, in this case, the dimensions of the uniform data arrays is not exactly `dims`,
+since the size of the first dimension is divided roughly by 2 (taking advantage of Hermitian
+symmetry).
+For convenience, one can call [`size(::PlanNUFFT)`](@ref) on the constructed plan to know in
+advance the dimensions of the uniform data arrays.
+
+"""
 struct PlanNUFFT{
         T <: Number, N, Nc, M,
         Treal <: AbstractFloat,  # this is real(T)
@@ -167,10 +220,13 @@ end
 @inline to_static(ntrans::Int) = Val(ntrans)
 
 # This constructor relies on constant propagation to make the output fully inferred.
-function PlanNUFFT(::Type{T}, Ns::Dims; m::Integer = 8, kws...) where {T <: Number}
-    h = HalfSupport(m)
+function PlanNUFFT(::Type{T}, Ns::Dims; m = 8, kws...) where {T <: Number}
+    h = to_halfsupport(m)
     PlanNUFFT(T, Ns, h; kws...)
 end
+
+@inline to_halfsupport(m::Integer) = HalfSupport(m)
+@inline to_halfsupport(m::HalfSupport) = m
 
 # 1D case
 function PlanNUFFT(::Type{T}, N::Integer, args...; kws...) where {T <: Number}
