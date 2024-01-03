@@ -136,7 +136,7 @@ function _PlanNUFFT(
         FFTW.set_num_threads(1)   # also disable FFTW threading (avoids allocations)
     else
         block_dims = get_block_dims(Ñs, block_size)
-        blocks = BlockData(T, block_dims, Ñs, h)  # TODO pass num_transforms
+        blocks = BlockData(T, block_dims, Ñs, h, num_transforms)
         FFTW.set_num_threads(Threads.nthreads())
     end
     nufft_data = init_plan_data(T, Ñs, ks, num_transforms; fftw_flags)

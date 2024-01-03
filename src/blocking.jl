@@ -8,14 +8,14 @@ with_blocking(::NullBlockData) = false
 sort_points!(::NullBlockData, xp) = nothing
 
 struct BlockData{
-        T, N,
+        T, N, Nc,
         Tr,  # = real(T)
-        Buffers <: AbstractVector{<:AbstractArray{T, N}},
+        Buffers <: AbstractVector{<:NTuple{Nc, AbstractArray{T, N}}},
         Indices <: CartesianIndices{N},
     } <: AbstractBlockData
     block_dims  :: Dims{N}        # size of each block (in number of elements)
     block_sizes :: NTuple{N, Tr}  # size of each block (in units of length)
-    buffers :: Buffers        # length = nthreads
+    buffers :: Buffers            # length = nthreads
     blocks_per_thread :: Vector{Int}  # maps a set of blocks i_start:i_end to a thread (length = nthreads + 1)
     indices :: Indices    # index associated to each block (length = num_blocks)
     buffers_for_indices :: Vector{NTuple{N, Vector{Int}}}  # maps values of current buffer to indices in global array (length = nthreads())
@@ -24,7 +24,10 @@ struct BlockData{
     pointperm :: Vector{Int}  # index permutation for sorting points according to their block (length = Np)
 end
 
-function BlockData(::Type{T}, block_dims::Dims{D}, Ñs::Dims{D}, ::HalfSupport{M}) where {T, D, M}
+function BlockData(
+        ::Type{T}, block_dims::Dims{D}, Ñs::Dims{D}, ::HalfSupport{M}, num_transforms::Val{Nc},
+    ) where {T, D, M, Nc}
+    @assert Nc > 0
     Nt = Threads.nthreads()
     # Nt = ifelse(Nt == 1, zero(Nt), Nt)  # this disables blocking if running on single thread
     dims = block_dims .+ 2M  # include padding for values outside of block
@@ -34,7 +37,9 @@ function BlockData(::Type{T}, block_dims::Dims{D}, Ñs::Dims{D}, ::HalfSupport{M
         Δx = Tr(2π) / N  # grid step
         B * Δx
     end
-    buffers = map(_ -> Array{T}(undef, dims), 1:Nt)
+    buffers = map(1:Nt) do _
+        ntuple(_ -> Array{T}(undef, dims), num_transforms)  # one buffer per transform (or "component")
+    end
     indices_tup = map(Ñs, block_dims) do N, B
         range(0, N - 1; step = B)
     end
