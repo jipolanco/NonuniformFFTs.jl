@@ -15,7 +15,7 @@ This can be useful for spreading vector fields, for instance.
 """
 function spread_from_point!(
         gs::NTuple{D, AbstractKernelData},
-        us::NTuple{C, AbstractArray{T,D}} where {T},
+        us::NTuple{C, AbstractArray{T, D}} where {T},
         x⃗₀::NTuple{D, Number},
         vs::NTuple{C, Number},
     ) where {C, D}
@@ -37,15 +37,16 @@ function spread_from_point!(
     us
 end
 
-function spread_from_point!(gs::NTuple, u::AbstractArray, x⃗₀, v::Number)
-    spread_from_point!(gs, (u,), x⃗₀, (v,))
-end
-
-function spread_from_points!(gs, us, x⃗s::AbstractVector, vs::AbstractVector)
-    for (x⃗, v) ∈ zip(x⃗s, vs)
-        spread_from_point!(gs, us, x⃗, v)
+function spread_from_points!(gs, us_all::NTuple{C}, x⃗s::AbstractVector, vp_all::NTuple{C, AbstractVector}) where {C}
+    # Note: the dimensions of arrays have already been checked via check_nufft_nonuniform_data.
+    Base.require_one_based_indexing(x⃗s)  # this is to make sure that all indices match
+    map(Base.require_one_based_indexing, vp_all)
+    for i ∈ eachindex(x⃗s)  # iterate over all points
+        x⃗ = @inbounds x⃗s[i]
+        vx = map(vp -> @inbounds(vp[i]), vp_all)  # non-uniform values at point x⃗
+        spread_from_point!(gs, us_all, x⃗, vx)
     end
-    us
+    us_all
 end
 
 function spread_from_point_blocked!(gs::NTuple, u::AbstractArray, x⃗₀, v::Number, I₀::NTuple)

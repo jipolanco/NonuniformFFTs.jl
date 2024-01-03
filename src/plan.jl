@@ -110,7 +110,7 @@ function _PlanNUFFT(
         timer = TimerOutput(),
         fftw_flags = FFTW.MEASURE,
         block_size::Union{Integer, Nothing} = default_block_size(),
-    ) where {T <: Number, D, Nc}
+    ) where {T <: Number, D}
     ks = init_wavenumbers(T, Ns)
     # Determine dimensions of oversampled grid.
     Ñs = map(Ns) do N

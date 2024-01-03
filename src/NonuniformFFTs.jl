@@ -37,10 +37,10 @@ include("set_points.jl")
 include("spreading.jl")
 include("interpolation.jl")
 
-function check_nufft_uniform_data(p::PlanNUFFT, ûs_all::NTuple{Nc′, AbstractArray{<:Complex}}) where {Nc′}
+function check_nufft_uniform_data(p::PlanNUFFT, ûs_all::NTuple{C, AbstractArray{<:Complex}}) where {C}
     (; ks,) = p.data
     Nc = ntransforms(p)
-    Nc′ == Nc || throw(DimensionMismatch(lazy"wrong amount of arrays (expected a tuple of $Nc arrays)"))
+    C == Nc || throw(DimensionMismatch(lazy"wrong amount of arrays (expected a tuple of $Nc arrays)"))
     D = length(ks)  # number of dimensions
     Nk_expected = map(length, ks)
     for ûs ∈ ûs_all
@@ -50,21 +50,35 @@ function check_nufft_uniform_data(p::PlanNUFFT, ûs_all::NTuple{Nc′, Abstract
     nothing
 end
 
-function exec_type1!(ûs_k::NTuple{<:Any, AbstractArray{<:Complex}}, p::PlanNUFFT, charges)
+function check_nufft_nonuniform_data(p::PlanNUFFT, vp_all::NTuple{C, AbstractVector}) where {C}
+    Nc = ntransforms(p)
+    C == Nc || throw(DimensionMismatch(lazy"wrong amount of data vectors (expected a tuple of $Nc vectors)"))
+    Np = length(p.points)
+    for vp ∈ vp_all
+        Nv = length(vp)
+        Nv == Np || throw(DimensionMismatch(lazy"wrong length of data vector (it should match the number of points $Np, got length $Nv)"))
+    end
+    nothing
+end
+
+function exec_type1!(ûs_k::NTuple{C, AbstractArray{<:Complex}}, p::PlanNUFFT, vp::NTuple{C}) where {C}
     (; points, kernels, data, blocks, timer,) = p
     (; us, ks,) = data
     @timeit timer "Execute type 1" begin
         check_nufft_uniform_data(p, ûs_k)
-        fill!(us, zero(eltype(us)))
+        check_nufft_nonuniform_data(p, vp)
+        for u ∈ us
+            fill!(u, zero(eltype(u)))
+        end
         @timeit timer "Spreading" if with_blocking(blocks)
-            spread_from_points_blocked!(kernels, blocks, us, points, charges)
+            spread_from_points_blocked!(kernels, blocks, us, points, vp)
         else
-            spread_from_points!(kernels, us, points, charges)  # single-threaded case?
+            spread_from_points!(kernels, us, points, vp)  # single-threaded case?
         end
         @timeit timer "Forward FFT" ûs = _type1_fft!(data)
         @timeit timer "Deconvolution" begin
-            T = real(eltype(us))
-            normfactor::T = prod(N -> 2π / N, size(us))  # FFT normalisation factor
+            T = real(eltype(first(us)))
+            normfactor::T = prod(N -> 2π / N, size(first(us)))  # FFT normalisation factor
             ϕ̂s = map(fourier_coefficients, kernels)
             copy_deconvolve_to_non_oversampled!(ûs_k, ûs, ks, ϕ̂s, normfactor)  # truncate to original grid + normalise
         end
@@ -73,8 +87,8 @@ function exec_type1!(ûs_k::NTuple{<:Any, AbstractArray{<:Complex}}, p::PlanNUF
 end
 
 # Case of a single transform
-function exec_type1!(ûs_k::AbstractArray{<:Complex}, p::PlanNUFFT, charges)
-    exec_type1!((ûs_k,), p, charges)
+function exec_type1!(ûs_k::AbstractArray{<:Complex}, p::PlanNUFFT, vp)
+    exec_type1!((ûs_k,), p, (vp,))
     ûs_k
 end
 
@@ -94,11 +108,12 @@ function _type1_fft!(data::ComplexNUFFTData)
     us
 end
 
-function exec_type2!(vp::AbstractVector, p::PlanNUFFT, ûs_k::NTuple{<:Any, AbstractArray{<:Complex}})
+function exec_type2!(vp::NTuple{C, AbstractVector}, p::PlanNUFFT, ûs_k::NTuple{C, AbstractArray{<:Complex}}) where {C}
     (; points, kernels, data, blocks, timer,) = p
     (; us, ks,) = data
     @timeit timer "Execute type 2" begin
         check_nufft_uniform_data(p, ûs_k)
+        check_nufft_nonuniform_data(p, vp)
         @timeit timer "Deconvolution" begin
             ϕ̂s = map(fourier_coefficients, kernels)
             ûs = output_field(data)
@@ -118,7 +133,7 @@ end
 
 # Case of a single transform
 function exec_type2!(vp::AbstractVector, p::PlanNUFFT, ûs_k::AbstractArray{<:Complex})
-    exec_type2!(vp, p, (ûs_k,))
+    exec_type2!((vp,), p, (ûs_k,))
 end
 
 function _type2_fft!(data::RealNUFFTData)
