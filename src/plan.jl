@@ -105,8 +105,8 @@ end
 
 # This constructor is generally not called directly.
 function _PlanNUFFT(
-        ::Type{T}, kernel::AbstractKernel, h::HalfSupport, σ_wanted, Ns::Dims{D};
-        num_transforms::Val = Val(1),
+        ::Type{T}, kernel::AbstractKernel, h::HalfSupport, σ_wanted, Ns::Dims{D},
+        num_transforms::Val;
         timer = TimerOutput(),
         fftw_flags = FFTW.MEASURE,
         block_size::Union{Integer, Nothing} = default_block_size(),
@@ -155,12 +155,16 @@ end
 
 function PlanNUFFT(
         ::Type{T}, Ns::Dims, h::HalfSupport;
+        ntransforms = Val(1),
         kernel::AbstractKernel = BackwardsKaiserBesselKernel(),
         σ::Real = real(T)(2), kws...,
     ) where {T <: Number}
     R = real(T)
-    _PlanNUFFT(T, kernel, h, R(σ), Ns; kws...)
+    _PlanNUFFT(T, kernel, h, R(σ), Ns, to_static(ntransforms); kws...)
 end
+
+@inline to_static(ntrans::Val) = ntrans
+@inline to_static(ntrans::Int) = Val(ntrans)
 
 # This constructor relies on constant propagation to make the output fully inferred.
 function PlanNUFFT(::Type{T}, Ns::Dims; m::Integer = 8, kws...) where {T <: Number}
