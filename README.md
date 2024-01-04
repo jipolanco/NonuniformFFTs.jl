@@ -153,8 +153,6 @@ In particular, this means that:
 
 - This package allows NUFFTs of purely real non-uniform data.
 
-- Setting non-uniform points and executing plans is allocation-free.
-
 - Different convention is used: non-uniform points are expected to be in $[0, 2π]$.
 
 - This package allows performing transforms of multiple quantities at the same non-uniform values at once.
@@ -167,7 +165,5 @@ In particular, this means that:
   Moreover, transforms can be performed in for an arbitrary number of dimensions.
 
 - A different smoothing kernel function is used (backwards Kaiser–Bessel kernel by default).
-
-- Unlike the FINUFFT.jl interface, this package guarantees zero allocations when setting non-uniform points and executing plans.
 
 - It is possible to use the same plan for type-1 and type-2 transforms, reducing memory requirements in cases where one wants to perform both.
