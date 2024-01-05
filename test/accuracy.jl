@@ -2,6 +2,7 @@ using Test
 using Random: Random
 using AbstractFFTs: fftfreq, rfftfreq
 using NonuniformFFTs
+using JET: JET
 
 function check_nufft_error(::Type{Float64}, ::KaiserBesselKernel, ::HalfSupport{M}, σ, err) where {M}
     if σ ≈ 1.25
@@ -87,9 +88,15 @@ function test_nufft_type1_1d(
 
     # Compute NUFFT
     ûs = Array{Complex{Tr}}(undef, length(ks))
-    plan_nufft = @inferred PlanNUFFT(T, N, m; σ, kernel, block_size)
+    plan_nufft = @inferred PlanNUFFT(T, N; m, σ, kernel, block_size)
     NonuniformFFTs.set_points!(plan_nufft, xp)
     NonuniformFFTs.exec_type1!(ûs, plan_nufft, vp)
+
+    let targets = (NonuniformFFTs, NonuniformFFTs.Kernels)
+        JET.@test_opt target_modules=targets PlanNUFFT(T, N; m, σ, kernel, block_size)
+        JET.@test_opt target_modules=targets NonuniformFFTs.set_points!(plan_nufft, xp)
+        JET.@test_opt target_modules=targets NonuniformFFTs.exec_type1!(ûs, plan_nufft, vp)
+    end
 
     # Check results
     err = l2_error(ûs, ûs_exact)
@@ -145,9 +152,15 @@ function test_nufft_type2_1d(
 
     # Compute NUFFT
     vp = Array{T}(undef, Np)
-    plan_nufft = @inferred PlanNUFFT(T, N, m; σ, kernel, block_size)
+    plan_nufft = @inferred PlanNUFFT(T, N; m, σ, kernel, block_size)
     NonuniformFFTs.set_points!(plan_nufft, xp)
     NonuniformFFTs.exec_type2!(vp, plan_nufft, ûs)
+
+    let targets = (NonuniformFFTs, NonuniformFFTs.Kernels)
+        JET.@test_opt target_modules=targets PlanNUFFT(T, N; m, σ, kernel, block_size)
+        JET.@test_opt target_modules=targets NonuniformFFTs.set_points!(plan_nufft, xp)
+        JET.@test_opt target_modules=targets NonuniformFFTs.exec_type2!(vp, plan_nufft, ûs)
+    end
 
     err = l2_error(vp, vp_exact)
 
