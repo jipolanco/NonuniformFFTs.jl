@@ -177,10 +177,23 @@ function add_from_block!(
     for us ∈ us_all
         Base.require_one_based_indexing(us)
     end
-    @inbounds for I ∈ CartesianIndices(first(block))
-        js = map(getindex, inds_wrapped, Tuple(I))
-        for (us, ws) ∈ zip(us_all, block)
-            us[js...] += ws[I]
+    # We explicitly split the first index (fastest) from the other ones.
+    # This seems to noticeably improve performance, maybe because the compiler can use SIMD
+    # on the innermost loop?
+    # Note that performance of this function is critical to get good parallel scaling!
+    inds = axes(first(block))
+    inds_first = first(inds)
+    inds_tail = Base.tail(inds)
+    inds_wrapped_first = first(inds_wrapped)
+    inds_wrapped_tail = Base.tail(inds_wrapped)
+    @inbounds for I_tail ∈ CartesianIndices(inds_tail)
+        is_tail = Tuple(I_tail)
+        js_tail = map(getindex, inds_wrapped_tail, is_tail)
+        for i ∈ inds_first
+            j = inds_wrapped_first[i]
+            for (us, ws) ∈ zip(us_all, block)
+                us[j, js_tail...] += ws[i, is_tail...]
+            end
         end
     end
     us_all
