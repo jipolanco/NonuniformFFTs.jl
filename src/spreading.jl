@@ -182,10 +182,8 @@ function add_from_block!(
     # on the innermost loop?
     # Note that performance of this function is critical to get good parallel scaling!
     inds = axes(first(block))
-    inds_first = first(inds)
-    inds_tail = Base.tail(inds)
-    inds_wrapped_first = first(inds_wrapped)
-    inds_wrapped_tail = Base.tail(inds_wrapped)
+    inds_first, inds_tail = first(inds), Base.tail(inds)
+    inds_wrapped_first, inds_wrapped_tail = first(inds_wrapped), Base.tail(inds_wrapped)
     @inbounds for I_tail ∈ CartesianIndices(inds_tail)
         is_tail = Tuple(I_tail)
         js_tail = map(getindex, inds_wrapped_tail, is_tail)
@@ -219,19 +217,26 @@ end
 
 # This is basically the same as the non-blocked version, but uses CartesianIndices instead
 # of tuples (since indices don't "jump" due to periodic wrapping).
+# Moreover, splitting the first index from the other ones seems to improve performance.
 function spread_onto_arrays_blocked!(
         us::NTuple{C, AbstractArray{T, D}} where {T},
         Is::CartesianIndices{D},
         vals::NTuple{D, Tuple},
         vs::NTuple{C},
     ) where {C, D}
-    inds_iter = CartesianIndices(map(eachindex, vals))
-    @inbounds for ns ∈ inds_iter  # ns = (ni, nj, ...)
-        I = Is[ns]
-        gs = map(getindex, vals, Tuple(ns))
-        gprod = prod(gs)
-        for (u, v) ∈ zip(us, vs)
-            u[I] += v * gprod
+    inds = map(eachindex, vals)
+    inds_first, inds_tail = first(inds), Base.tail(inds)
+    vals_first, vals_tail = first(vals), Base.tail(vals)
+    @inbounds for J_tail ∈ CartesianIndices(inds_tail)
+        js_tail = Tuple(J_tail)
+        gs_tail = map(getindex, vals_tail, js_tail)
+        gprod_tail = prod(gs_tail)
+        for j ∈ inds_first
+            I = Is[j, js_tail...]
+            gprod = gprod_tail * vals_first[j]
+            for (u, v) ∈ zip(us, vs)
+                u[I] += v * gprod
+            end
         end
     end
     us
