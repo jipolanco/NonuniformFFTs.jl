@@ -63,6 +63,24 @@ function check_nufft_nonuniform_data(p::PlanNUFFT, vp_all::NTuple{C, AbstractVec
     nothing
 end
 
+"""
+    exec_type1!(ûs::AbstractArray{<:Complex}, p::PlanNUFFT, vp::AbstractVector{<:Number})
+    exec_type1!(ûs::NTuple{N, AbstractArray{<:Complex}}, p::PlanNUFFT, vp::NTuple{N, AbstractVector{<:Number}})
+
+Perform type-1 NUFFT (from non-uniform points to uniform grid).
+
+Here `vp` contains the input values at non-uniform points.
+The result of the transform is written into `ûs`.
+
+One first needs to set the non-uniform points using [`set_points!`](@ref).
+
+To perform multiple transforms at once, both `vp` and `ûs` should be a tuple of arrays (second variant above).
+Note that this requires a plan initialised with `ntransforms = Val(N)` (see [`PlanNUFFT`](@ref)).
+
+See also [`exec_type2!`](@ref).
+"""
+function exec_type1! end
+
 function exec_type1!(ûs_k::NTuple{C, AbstractArray{<:Complex}}, p::PlanNUFFT, vp::NTuple{C}) where {C}
     (; points, kernels, data, blocks, timer,) = p
     (; us, ks,) = data
@@ -109,6 +127,24 @@ function _type1_fft!(data::ComplexNUFFTData)
     end
     us
 end
+
+"""
+    exec_type2!(vp::AbstractVector{<:Number}, p::PlanNUFFT, ûs::AbstractArray{<:Complex})
+    exec_type2!(vp::NTuple{N, AbstractVector{<:Number}}, p::PlanNUFFT, ûs::NTuple{N, AbstractArray{<:Complex}})
+
+Perform type-2 NUFFT (from uniform grid to non-uniform points).
+
+Here `ûs` contains the input coefficients in the uniform grid.
+The result of the transform at non-uniform points is written into `vp`.
+
+One first needs to set the non-uniform points using [`set_points!`](@ref).
+
+To perform multiple transforms at once, both `vp` and `ûs` should be a tuple of arrays (second variant above).
+Note that this requires a plan initialised with `ntransforms = Val(N)` (see [`PlanNUFFT`](@ref)).
+
+See also [`exec_type1!`](@ref).
+"""
+function exec_type2! end
 
 function exec_type2!(vp::NTuple{C, AbstractVector}, p::PlanNUFFT, ûs_k::NTuple{C, AbstractArray{<:Complex}}) where {C}
     (; points, kernels, data, blocks, timer,) = p

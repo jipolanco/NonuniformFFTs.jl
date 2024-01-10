@@ -18,6 +18,11 @@ set_points!
 
 ## Executing plans
 
+```@docs
+exec_type1!
+exec_type2!
+```
+
 ## Other functions
 
 ```@docs
@@ -27,5 +32,5 @@ size(::PlanNUFFT)
 ## Index
 
 ```@index
-Pages = ["NUFFT.md"]
+Pages = ["API.md"]
 ```
