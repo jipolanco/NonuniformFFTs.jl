@@ -44,6 +44,7 @@ struct BlockData{
         Tr,  # = real(T)
         Buffers <: AbstractVector{<:NTuple{Nc, AbstractArray{T, N}}},
         Indices <: CartesianIndices{N},
+        SortPoints <: StaticBool,
     } <: AbstractBlockData
     block_dims  :: Dims{N}        # size of each block (in number of elements)
     block_sizes :: NTuple{N, Tr}  # size of each block (in units of length)
@@ -54,10 +55,12 @@ struct BlockData{
     cumulative_npoints_per_block :: Vector{Int}    # cumulative sum of number of points in each block (length = 1 + num_blocks, initial value is 0)
     blockidx  :: Vector{Int}  # linear index of block associated to each point (length = Np)
     pointperm :: Vector{Int}  # index permutation for sorting points according to their block (length = Np)
+    sort_points :: SortPoints
 end
 
 function BlockData(
         ::Type{T}, block_dims::Dims{D}, Ñs::Dims{D}, ::HalfSupport{M}, num_transforms::Val{Nc},
+        sort_points::StaticBool,
     ) where {T, D, M, Nc}
     @assert Nc > 0
     Nt = Threads.nthreads()
@@ -88,6 +91,7 @@ function BlockData(
     BlockData(
         block_dims, block_sizes, buffers, blocks_per_thread, indices, buffers_for_indices,
         cumulative_npoints_per_block, blockidx, pointperm,
+        sort_points,
     )
 end
 
@@ -98,18 +102,24 @@ function set_points!(bd::BlockData, points, xp, timer)
     with_blocking(bd) || return set_points!(NullBlockData(), points, xp, timer)
 
     (; indices, cumulative_npoints_per_block, blockidx, pointperm, block_sizes,) = bd
+    N = type_length(eltype(xp))  # = number of dimensions
+    @assert N == length(block_sizes)
     fill!(cumulative_npoints_per_block, 0)
     to_linear_index = LinearIndices(axes(indices))  # maps Cartesian to linear index of a block
     Np = length(xp)
     resize!(blockidx, Np)
     resize!(pointperm, Np)
+    resize!(points, Np)
 
     @timeit timer "Assign blocks" @inbounds for (i, x⃗) ∈ pairs(xp)
         # Get index of block where point x⃗ is located.
-        y⃗ = to_unit_cell(x⃗)
+        y⃗ = to_unit_cell(NTuple{N}(x⃗))  # converts `x⃗` to Tuple if it's an SVector
         is = map(y⃗, block_sizes) do x, Δx  # here x is already in [0, 2π)
             # @assert 0 ≤ x < 2π
             1 + floor(Int, x / Δx)
+        end
+        if bd.sort_points === False()
+            points[i] = y⃗  # copy folded point (doesn't need to be sorted)
         end
         # checkbounds(indices, CartesianIndex(is))
         n = to_linear_index[is...]  # linear index of block
@@ -142,12 +152,14 @@ function set_points!(bd::BlockData, points, xp, timer)
     # Note: we don't use threading since it seems to be much slower.
     # This is very likely due to false sharing (https://en.wikipedia.org/wiki/False_sharing),
     # since all threads modify the same data in "random" order.
-    @timeit timer "Copy sorted" begin
-        resize!(points, length(xp))
-        N = type_length(eltype(xp))
-        @inbounds for i ∈ eachindex(pointperm)
-            @inbounds j = pointperm[i]
-            @inbounds points[i] = to_unit_cell(NTuple{N}(xp[j]))  # converts `x` to Tuple if it's an SVector
+    if bd.sort_points === True()
+        @timeit timer "Copy sorted" begin
+            @inbounds for i ∈ eachindex(pointperm)
+                j = pointperm[i]
+                x⃗ = xp[j]
+                y⃗ = to_unit_cell(NTuple{N}(x⃗))  # converts `x⃗` to Tuple if it's an SVector
+                points[i] = y⃗
+            end
         end
     end
 

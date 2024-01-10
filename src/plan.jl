@@ -82,7 +82,15 @@ The created plan contains all data needed to perform NUFFTs for non-uniform data
 
 - `block_size = 4096`: the linear block size (in number of elements) when using block partitioning.
   This can be tuned for maximal performance.
-  Blocking can be completely disabled by passing `block_size = nothing` (but this is generally slower).
+  Using block partitioning is required for running with multiple threads.
+  Blocking can be completely disabled by passing `block_size = nothing` (but this is
+  generally slower, even when running on a single thread).
+
+- `sort_points = False()`: whether to internally permute the order of the non-uniform points.
+  This can be enabled by passing `sort_points = True()`.
+  In this case, more time will be spent in [`set_points!`](@ref) and less time on the actual transforms.
+  This can improve performance if executing multiple transforms on the same non-uniform points.
+  Note that, even when enabled, this does not modify the `points` argument passed to `set_points!`.
 
 ## Other parameters
 
@@ -163,6 +171,7 @@ function _PlanNUFFT(
         timer = TimerOutput(),
         fftw_flags = FFTW.MEASURE,
         block_size::Union{Integer, Nothing} = default_block_size(),
+        sort_points::StaticBool = False(),
     ) where {T <: Number, D}
     ks = init_wavenumbers(T, Ns)
     # Determine dimensions of oversampled grid.
@@ -189,7 +198,7 @@ function _PlanNUFFT(
         FFTW.set_num_threads(1)   # also disable FFTW threading (avoids allocations)
     else
         block_dims = get_block_dims(Ñs, block_size)
-        blocks = BlockData(T, block_dims, Ñs, h, num_transforms)
+        blocks = BlockData(T, block_dims, Ñs, h, num_transforms, sort_points)
         FFTW.set_num_threads(Threads.nthreads())
     end
     nufft_data = init_plan_data(T, Ñs, ks, num_transforms; fftw_flags)

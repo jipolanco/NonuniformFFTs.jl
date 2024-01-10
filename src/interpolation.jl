@@ -168,8 +168,11 @@ function interpolate_blocked!(
             for k ∈ (a + 1):b
                 l = pointperm[k]
                 # @assert bd.blockidx[l] == j  # check that point is really in the current block
-                # x⃗ = x⃗s[l]  # if points have not been permuted
-                x⃗ = x⃗s[k]  # if points have been permuted (may be slightly faster here, but requires permutation in set_points!)
+                if bd.sort_points === True()
+                    x⃗ = x⃗s[k]  # if points have been permuted (may be slightly faster here, but requires permutation in set_points!)
+                else
+                    x⃗ = x⃗s[l]  # if points have not been permuted
+                end
                 vs = interpolate_blocked(gs, block, x⃗, Tuple(I₀)) :: NTuple{C}  # non-uniform values at point x⃗
                 for (vp, v) ∈ zip(vp_all, vs)
                     @inbounds vp[l] = v
