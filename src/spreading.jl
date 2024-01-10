@@ -199,17 +199,25 @@ end
 
 function spread_onto_arrays!(
         us::NTuple{C, AbstractArray{T, D}} where {T},
-        inds::NTuple{D, Tuple},
+        inds_mapping::NTuple{D, Tuple},
         vals::NTuple{D, Tuple},
         vs::NTuple{C},
     ) where {C, D}
-    inds_iter = CartesianIndices(map(eachindex, inds))
-    @inbounds for ns ∈ inds_iter  # ns = (ni, nj, ...)
-        is = map(getindex, inds, Tuple(ns))
-        gs = map(getindex, vals, Tuple(ns))
-        gprod = prod(gs)
-        for (u, v) ∈ zip(us, vs)
-            u[is...] += v * gprod
+    inds = map(eachindex, inds_mapping)
+    inds_first, inds_tail = first(inds), Base.tail(inds)
+    vals_first, vals_tail = first(vals), Base.tail(vals)
+    imap_first, imap_tail = first(inds_mapping), Base.tail(inds_mapping)
+    @inbounds for J_tail ∈ CartesianIndices(inds_tail)
+        js_tail = Tuple(J_tail)
+        is_tail = map(getindex, imap_tail, js_tail)
+        gs_tail = map(getindex, vals_tail, js_tail)
+        gprod_tail = prod(gs_tail)
+        for j ∈ inds_first
+            i = imap_first[j]
+            gprod = gprod_tail * vals_first[j]
+            for (u, v) ∈ zip(us, vs)
+                u[i, is_tail...] += v * gprod
+            end
         end
     end
     us

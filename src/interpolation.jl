@@ -78,20 +78,28 @@ end
 
 function interpolate_from_arrays(
         us::NTuple{C, AbstractArray{T, D}} where {T},
-        inds::NTuple{D, Tuple},
+        inds_mapping::NTuple{D, Tuple},
         vals::NTuple{D, Tuple},
     ) where {C, D}
     vs = ntuple(_ -> zero(eltype(first(us))), Val(C))
-    inds_iter = CartesianIndices(map(eachindex, inds))
-    @inbounds for ns ∈ inds_iter  # ns = (ni, nj, ...)
-        is = map(getindex, inds, Tuple(ns))
-        gs = map(getindex, vals, Tuple(ns))
-        gprod = prod(gs)
-        vs_new = ntuple(Val(C)) do j
-            @inline
-            gprod * us[j][is...]
+    inds = map(eachindex, inds_mapping)
+    inds_first, inds_tail = first(inds), Base.tail(inds)
+    vals_first, vals_tail = first(vals), Base.tail(vals)
+    imap_first, imap_tail = first(inds_mapping), Base.tail(inds_mapping)
+    @inbounds for J_tail ∈ CartesianIndices(inds_tail)
+        js_tail = Tuple(J_tail)
+        is_tail = map(getindex, imap_tail, js_tail)
+        gs_tail = map(getindex, vals_tail, js_tail)
+        gprod_tail = prod(gs_tail)
+        for j ∈ inds_first
+            i = imap_first[j]
+            gprod = gprod_tail * vals_first[j]
+            vs_new = ntuple(Val(C)) do n
+                @inline
+                @inbounds gprod * us[n][i, is_tail...]
+            end
+            vs = vs .+ vs_new
         end
-        vs = vs .+ vs_new
     end
     vs
 end
