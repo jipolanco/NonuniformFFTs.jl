@@ -1,5 +1,7 @@
 # NonuniformFFTs.jl
 
+[![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://jipolanco.github.io/NonuniformFFTs.jl/stable/)
+[![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://jipolanco.github.io/NonuniformFFTs.jl/dev/)
 [![Build Status](https://github.com/jipolanco/NonuniformFFTs.jl/workflows/CI/badge.svg)](https://github.com/jipolanco/NonuniformFFTs.jl/actions)
 [![Coverage](https://codecov.io/gh/jipolanco/NonuniformFFTs.jl/branch/master/graph/badge.svg)](https://codecov.io/gh/jipolanco/NonuniformFFTs.jl)
 
