@@ -1,3 +1,21 @@
+"""
+    set_points!(p::PlanNUFFT, points)
+
+Set non-uniform points before executing a NUFFT.
+
+In one dimension, `points` is simply a vector of real values (the non-uniform locations).
+
+In multiple dimensions, `points` may be passed as:
+
+- a tuple of vectors `(xs::AbstractVector, ys::AbstractVector, …)`,
+- a vector `[x⃗₁, x⃗₂, x⃗₃, x⃗₄, …]` of tuples or static vectors (typically `SVector`s from the
+  StaticArrays.jl package).
+
+The points are allowed to be outside of the periodic cell ``[0, 2π)^d``, in which case they
+will be "folded" to that domain.
+"""
+function set_points! end
+
 function set_points!(p::PlanNUFFT{T, N}, xp::NTuple{N, AbstractVector}) where {T, N}
     set_points!(p, StructVector(xp))
 end

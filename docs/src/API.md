@@ -12,6 +12,10 @@ PlanNUFFT
 
 ## Setting non-uniform points
 
+```@docs
+set_points!
+```
+
 ## Executing plans
 
 ## Other functions
