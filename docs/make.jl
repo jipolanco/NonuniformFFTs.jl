@@ -9,6 +9,7 @@ makedocs(;
     modules = [NonuniformFFTs],
     pages = [
         "index.md",
+        "accuracy.md",
         "API.md",
     ],
     warnonly = [:missing_docs],  # TODO fix this?
