@@ -30,34 +30,6 @@ end
 function set_points!(p::PlanNUFFT{T, N}, xp::AbstractVector) where {T, N}
     (; points, timer,) = p
     type_length(eltype(xp)) == N || throw(DimensionMismatch(lazy"expected $N-dimensional points"))
-    @timeit timer "Set points" begin
-        @timeit timer "Copy/fold" begin
-            resize!(points, length(xp))
-            Base.require_one_based_indexing(points)
-            @inbounds for (i, x) ∈ enumerate(xp)
-                points[i] = to_unit_cell(NTuple{N}(x))  # converts `x` to Tuple if it's an SVector
-            end
-        end
-        @timeit timer "Sort" begin
-            sort_points!(p.blocks, points)
-        end
-    end
+    @timeit timer "Set points" set_points!(p.blocks, points, xp, timer)
     p
 end
-
-# "Folds" location onto unit cell [0, 2π]ᵈ.
-to_unit_cell(x⃗) = map(_to_unit_cell, x⃗)
-
-function _to_unit_cell(x::Real)
-    L = oftype(x, 2π)
-    while x < 0
-        x += L
-    end
-    while x ≥ L
-        x -= L
-    end
-    x
-end
-
-type_length(::Type{T}) where {T} = length(T)  # usually for SVector
-type_length(::Type{<:NTuple{N}}) where {N} = N

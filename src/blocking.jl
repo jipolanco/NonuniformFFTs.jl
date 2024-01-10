@@ -5,7 +5,39 @@ abstract type AbstractBlockData end
 # Dummy type used when blocking has been disabled in the NUFFT plan.
 struct NullBlockData <: AbstractBlockData end
 with_blocking(::NullBlockData) = false
-sort_points!(::NullBlockData, xp) = nothing
+
+# Here the element type of `xp` can be either an NTuple{N, <:Real}, an SVector{N, <:Real},
+# or anything else which has length `N`.
+function set_points!(::NullBlockData, points, xp, timer)
+    resize!(points, length(xp))
+    Base.require_one_based_indexing(points)
+    N = type_length(eltype(xp))
+    @timeit timer "Copy + fold" begin
+        @inbounds for (i, x) ∈ enumerate(xp)
+            points[i] = to_unit_cell(NTuple{N}(x))  # converts `x` to Tuple if it's an SVector
+        end
+    end
+    nothing
+end
+
+# "Folds" location onto unit cell [0, 2π]ᵈ.
+to_unit_cell(x⃗) = map(_to_unit_cell, x⃗)
+
+function _to_unit_cell(x::Real)
+    L = oftype(x, 2π)
+    while x < 0
+        x += L
+    end
+    while x ≥ L
+        x -= L
+    end
+    x
+end
+
+type_length(::Type{T}) where {T} = length(T)  # usually for SVector
+type_length(::Type{<:NTuple{N}}) where {N} = N
+
+# ================================================================================ #
 
 struct BlockData{
         T, N, Nc,
@@ -62,8 +94,9 @@ end
 # Blocking is considered to be disabled if there are no allocated buffers.
 with_blocking(bd::BlockData) = !isempty(bd.buffers)
 
-function sort_points!(bd::BlockData, xp::AbstractVector)
-    with_blocking(bd) || return nothing
+function set_points!(bd::BlockData, points, xp, timer)
+    with_blocking(bd) || return set_points!(NullBlockData(), points, xp, timer)
+
     (; indices, cumulative_npoints_per_block, blockidx, pointperm, block_sizes,) = bd
     fill!(cumulative_npoints_per_block, 0)
     to_linear_index = LinearIndices(axes(indices))  # maps Cartesian to linear index of a block
@@ -71,9 +104,10 @@ function sort_points!(bd::BlockData, xp::AbstractVector)
     resize!(blockidx, Np)
     resize!(pointperm, Np)
 
-    @inbounds for (i, x⃗) ∈ pairs(xp)
+    @timeit timer "Assign blocks" @inbounds for (i, x⃗) ∈ pairs(xp)
         # Get index of block where point x⃗ is located.
-        is = map(x⃗, block_sizes) do x, Δx  # we assume x⃗ is already in [0, 2π)
+        y⃗ = to_unit_cell(x⃗)
+        is = map(y⃗, block_sizes) do x, Δx  # here x is already in [0, 2π)
             # @assert 0 ≤ x < 2π
             1 + floor(Int, x / Δx)
         end
@@ -96,12 +130,25 @@ function sort_points!(bd::BlockData, xp::AbstractVector)
     # are concentrated, improving load balance.
     map_blocks_to_threads!(bd.blocks_per_thread, cumulative_npoints_per_block)
 
-    if Threads.nthreads() == 1
+    @timeit timer "Sort" if Threads.nthreads() == 1
         # This is the same as sortperm! but seems to be faster.
         sort!(pointperm; by = i -> @inbounds(blockidx[i]), alg = QuickSort)
         # sortperm!(pointperm, blockidx; alg = QuickSort)
     else
         ThreadsX.sort!(pointperm; by = i -> @inbounds(blockidx[i]), alg = ThreadsX.QuickSort())
+    end
+
+    # Write sorted points into `points`.
+    # Note: we don't use threading since it seems to be much slower.
+    # This is very likely due to false sharing (https://en.wikipedia.org/wiki/False_sharing),
+    # since all threads modify the same data in "random" order.
+    @timeit timer "Copy sorted" begin
+        resize!(points, length(xp))
+        N = type_length(eltype(xp))
+        @inbounds for i ∈ eachindex(pointperm)
+            @inbounds j = pointperm[i]
+            @inbounds points[i] = to_unit_cell(NTuple{N}(xp[j]))  # converts `x` to Tuple if it's an SVector
+        end
     end
 
     # Verification
