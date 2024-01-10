@@ -33,6 +33,7 @@ function test_nufft_type1(
         m = HalfSupport(8),
         σ = 1.25,
         block_size = NonuniformFFTs.default_block_size(),
+        sort_points = False(),
     ) where {T <: Number}
     Tr = real(T)
     ks = map(N -> fftfreq(N, Tr(N)), Ns)
@@ -60,7 +61,7 @@ function test_nufft_type1(
 
     # Compute NUFFT
     ûs = Array{Complex{Tr}}(undef, map(length, ks))
-    plan_nufft = @inferred PlanNUFFT(T, Ns, m; σ, kernel, block_size)
+    plan_nufft = @inferred PlanNUFFT(T, Ns, m; σ, kernel, block_size, sort_points)
     NonuniformFFTs.set_points!(plan_nufft, xp)
     NonuniformFFTs.exec_type1!(ûs, plan_nufft, vp)
 
@@ -79,6 +80,7 @@ function test_nufft_type2(
         m = HalfSupport(8),
         σ = 1.25,
         block_size = NonuniformFFTs.default_block_size(),
+        sort_points = False(),
     ) where {T <: Number}
     Tr = real(T)
     ks = map(N -> fftfreq(N, Tr(N)), Ns)
@@ -117,7 +119,7 @@ function test_nufft_type2(
 
     # Compute NUFFT
     vp = Array{T}(undef, Np)
-    plan_nufft = @inferred PlanNUFFT(T, Ns, m; σ, kernel, block_size)
+    plan_nufft = @inferred PlanNUFFT(T, Ns, m; σ, kernel, block_size, sort_points)
     NonuniformFFTs.set_points!(plan_nufft, xp)
     NonuniformFFTs.exec_type2!(vp, plan_nufft, ûs)
 
@@ -152,6 +154,10 @@ end
     @testset "Blocking disabled" begin
         @testset "Type 1 NUFFT" test_nufft_type1(T, Ns; block_size = nothing)
         @testset "Type 2 NUFFT" test_nufft_type2(T, Ns; block_size = nothing)
+    end
+    @testset "Sort points" begin
+        @testset "Type 1 NUFFT" test_nufft_type1(T, Ns; sort_points = True())
+        @testset "Type 2 NUFFT" test_nufft_type2(T, Ns; sort_points = True())
     end
     @testset "Non-multiple of block size" begin
         # This gives an oversampled grid size Ñs = (80, 80) (when σ = 2.0).
