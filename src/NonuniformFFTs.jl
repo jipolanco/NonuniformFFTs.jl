@@ -4,6 +4,7 @@ using StructArrays: StructVector
 using FFTW: FFTW
 using LinearAlgebra: mul!
 using TimerOutputs: TimerOutput, @timeit
+using Static: Static, StaticBool, False, True
 
 include("Kernels/Kernels.jl")
 
@@ -27,6 +28,7 @@ export
     BSplineKernel,
     KaiserBesselKernel,
     BackwardsKaiserBesselKernel,
+    False, True,
     set_points!,
     exec_type1!,
     exec_type2!

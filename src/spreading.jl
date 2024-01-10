@@ -119,8 +119,11 @@ function spread_from_points_blocked!(
             for k ∈ (a + 1):b
                 l = pointperm[k]
                 # @assert bd.blockidx[l] == j  # check that point is really in the current block
-                x⃗ = xp[l]  # if points have not been permuted
-                # x⃗ = xp[k]  # if points have been permuted (may be slightly faster here, but requires permutation in sort_points!)
+                if bd.sort_points === True()
+                    x⃗ = xp[k]  # if points have been permuted (may be slightly faster here, but requires permutation in set_points!)
+                else
+                    x⃗ = xp[l]  # if points have not been permuted
+                end
                 vs = map(vp -> @inbounds(vp[l]), vp_all)  # values at the non-uniform point x⃗
                 spread_from_point_blocked!(gs, block, x⃗, vs, Tuple(I₀))
             end

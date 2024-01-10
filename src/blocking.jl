@@ -5,13 +5,46 @@ abstract type AbstractBlockData end
 # Dummy type used when blocking has been disabled in the NUFFT plan.
 struct NullBlockData <: AbstractBlockData end
 with_blocking(::NullBlockData) = false
-sort_points!(::NullBlockData, xp) = nothing
+
+# Here the element type of `xp` can be either an NTuple{N, <:Real}, an SVector{N, <:Real},
+# or anything else which has length `N`.
+function set_points!(::NullBlockData, points, xp, timer)
+    resize!(points, length(xp))
+    Base.require_one_based_indexing(points)
+    N = type_length(eltype(xp))
+    @timeit timer "Copy + fold" begin
+        @inbounds for (i, x) ∈ enumerate(xp)
+            points[i] = to_unit_cell(NTuple{N}(x))  # converts `x` to Tuple if it's an SVector
+        end
+    end
+    nothing
+end
+
+# "Folds" location onto unit cell [0, 2π]ᵈ.
+to_unit_cell(x⃗) = map(_to_unit_cell, x⃗)
+
+function _to_unit_cell(x::Real)
+    L = oftype(x, 2π)
+    while x < 0
+        x += L
+    end
+    while x ≥ L
+        x -= L
+    end
+    x
+end
+
+type_length(::Type{T}) where {T} = length(T)  # usually for SVector
+type_length(::Type{<:NTuple{N}}) where {N} = N
+
+# ================================================================================ #
 
 struct BlockData{
         T, N, Nc,
         Tr,  # = real(T)
         Buffers <: AbstractVector{<:NTuple{Nc, AbstractArray{T, N}}},
         Indices <: CartesianIndices{N},
+        SortPoints <: StaticBool,
     } <: AbstractBlockData
     block_dims  :: Dims{N}        # size of each block (in number of elements)
     block_sizes :: NTuple{N, Tr}  # size of each block (in units of length)
@@ -22,10 +55,12 @@ struct BlockData{
     cumulative_npoints_per_block :: Vector{Int}    # cumulative sum of number of points in each block (length = 1 + num_blocks, initial value is 0)
     blockidx  :: Vector{Int}  # linear index of block associated to each point (length = Np)
     pointperm :: Vector{Int}  # index permutation for sorting points according to their block (length = Np)
+    sort_points :: SortPoints
 end
 
 function BlockData(
         ::Type{T}, block_dims::Dims{D}, Ñs::Dims{D}, ::HalfSupport{M}, num_transforms::Val{Nc},
+        sort_points::StaticBool,
     ) where {T, D, M, Nc}
     @assert Nc > 0
     Nt = Threads.nthreads()
@@ -56,26 +91,35 @@ function BlockData(
     BlockData(
         block_dims, block_sizes, buffers, blocks_per_thread, indices, buffers_for_indices,
         cumulative_npoints_per_block, blockidx, pointperm,
+        sort_points,
     )
 end
 
 # Blocking is considered to be disabled if there are no allocated buffers.
 with_blocking(bd::BlockData) = !isempty(bd.buffers)
 
-function sort_points!(bd::BlockData, xp::AbstractVector)
-    with_blocking(bd) || return nothing
+function set_points!(bd::BlockData, points, xp, timer)
+    with_blocking(bd) || return set_points!(NullBlockData(), points, xp, timer)
+
     (; indices, cumulative_npoints_per_block, blockidx, pointperm, block_sizes,) = bd
+    N = type_length(eltype(xp))  # = number of dimensions
+    @assert N == length(block_sizes)
     fill!(cumulative_npoints_per_block, 0)
     to_linear_index = LinearIndices(axes(indices))  # maps Cartesian to linear index of a block
     Np = length(xp)
     resize!(blockidx, Np)
     resize!(pointperm, Np)
+    resize!(points, Np)
 
-    @inbounds for (i, x⃗) ∈ pairs(xp)
+    @timeit timer "Assign blocks" @inbounds for (i, x⃗) ∈ pairs(xp)
         # Get index of block where point x⃗ is located.
-        is = map(x⃗, block_sizes) do x, Δx  # we assume x⃗ is already in [0, 2π)
+        y⃗ = to_unit_cell(NTuple{N}(x⃗))  # converts `x⃗` to Tuple if it's an SVector
+        is = map(y⃗, block_sizes) do x, Δx  # here x is already in [0, 2π)
             # @assert 0 ≤ x < 2π
             1 + floor(Int, x / Δx)
+        end
+        if bd.sort_points === False()
+            points[i] = y⃗  # copy folded point (doesn't need to be sorted)
         end
         # checkbounds(indices, CartesianIndex(is))
         n = to_linear_index[is...]  # linear index of block
@@ -96,12 +140,27 @@ function sort_points!(bd::BlockData, xp::AbstractVector)
     # are concentrated, improving load balance.
     map_blocks_to_threads!(bd.blocks_per_thread, cumulative_npoints_per_block)
 
-    if Threads.nthreads() == 1
+    @timeit timer "Sort" if Threads.nthreads() == 1
         # This is the same as sortperm! but seems to be faster.
         sort!(pointperm; by = i -> @inbounds(blockidx[i]), alg = QuickSort)
         # sortperm!(pointperm, blockidx; alg = QuickSort)
     else
         ThreadsX.sort!(pointperm; by = i -> @inbounds(blockidx[i]), alg = ThreadsX.QuickSort())
+    end
+
+    # Write sorted points into `points`.
+    # Note: we don't use threading since it seems to be much slower.
+    # This is very likely due to false sharing (https://en.wikipedia.org/wiki/False_sharing),
+    # since all threads modify the same data in "random" order.
+    if bd.sort_points === True()
+        @timeit timer "Copy sorted" begin
+            @inbounds for i ∈ eachindex(pointperm)
+                j = pointperm[i]
+                x⃗ = xp[j]
+                y⃗ = to_unit_cell(NTuple{N}(x⃗))  # converts `x⃗` to Tuple if it's an SVector
+                points[i] = y⃗
+            end
+        end
     end
 
     # Verification
