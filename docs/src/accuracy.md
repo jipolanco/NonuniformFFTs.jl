@@ -73,6 +73,36 @@ of spreading kernel.
         for (j, kernel) ∈ pairs(kernels)
             scatterlines!(ax, Ms, errs[:, j, k]; label = string(typeof(kernel)))
         end
+        kw_line = (linestyle = :dash, color = :grey)
+        kw_text = (color = :grey, fontsize = 12)
+        if σ ≈ 1.25
+            let xs = 3.5:11.5, ys = @. 10.0^(-0.5 * xs - 1)
+                lines!(ax, xs, ys; kw_line...)
+                text!(ax, xs[3end÷5], ys[3end÷5]; text = L"∼10^{-0.5 M}", align = (:right, :top), kw_text...)
+            end
+            let xs = 2.5:8.5, ys = @. 10.0^(-1.3 * xs - 0)
+                lines!(ax, xs, ys; kw_line...)
+                text!(ax, xs[3end÷5], ys[3end÷5]; text = L"∼10^{-1.3 M}", align = (:right, :top), kw_text...)
+            end
+        elseif σ ≈ 1.5
+            let xs = 3.5:11.5, ys = @. 10.0^(-0.7 * xs - 1)
+                lines!(ax, xs, ys; kw_line...)
+                text!(ax, xs[3end÷5], ys[3end÷5]; text = L"∼10^{-0.7 M}", align = (:right, :top), kw_text...)
+            end
+            let xs = 2.5:7.5, ys = @. 10.0^(-1.6 * xs - 0.5)
+                lines!(ax, xs, ys; kw_line...)
+                text!(ax, xs[3end÷4], ys[3end÷4]; text = L"∼10^{-1.6 M}", align = (:right, :top), kw_text...)
+            end
+        elseif σ ≈ 2.0
+            let xs = 3.5:11.5, ys = @. 10.0^(-xs - 1)
+                lines!(ax, xs, ys; kw_line...)
+                text!(ax, xs[3end÷5], ys[3end÷5]; text = L"∼10^{-M}", align = (:right, :top), kw_text...)
+            end
+            let xs = 2.5:6.5, ys = @. 10.0^(-2 * xs)
+                lines!(ax, xs, ys; kw_line...)
+                text!(ax, xs[3end÷5], ys[3end÷5]; text = L"∼10^{-2M}", align = (:right, :top), kw_text...)
+            end
+        end
         ax
     end
     axislegend(axs[begin]; position = (0, 0), labelsize = 10, rowgap = -4)
