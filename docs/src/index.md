@@ -174,7 +174,7 @@ set_points!(plan_nufft, xp)
 # Perform type-1 NUFFT on preallocated output (one array per transformed quantity)
 ûs = ntuple(_ -> Array{Complex{T}}(undef, size(plan_nufft)), ntrans)
 exec_type1!(ûs, plan_nufft, vp)
-@. us = us / N  # normalise transform
+@. ûs = ûs / N  # normalise transform
 
 # Perform type-2 NUFFT on preallocated output (one vector per transformed quantity)
 vp_interp = map(similar, vp)
