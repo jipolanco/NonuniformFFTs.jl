@@ -71,7 +71,16 @@ of spreading kernel.
         ax.xticks = Ms
         ax.yticks = LogTicks(-14:2:0)
         for (j, kernel) ∈ pairs(kernels)
-            scatterlines!(ax, Ms, errs[:, j, k]; label = string(typeof(kernel)))
+            l = scatterlines!(ax, Ms, errs[:, j, k]; label = string(typeof(kernel)))
+            if kernel isa BackwardsKaiserBesselKernel  # default kernel
+                # Make sure this curve is on top
+                translate!(l, 0, 0, 10)
+            else
+                # Use an open marker for the non-default kernels
+                l.strokewidth = 1
+                l.strokecolor = l.color[]
+                l.markercolor = :transparent
+            end
         end
         kw_line = (linestyle = :dash, color = :grey)
         kw_text = (color = :grey, fontsize = 12)
@@ -105,8 +114,9 @@ of spreading kernel.
         end
         ax
     end
-    axislegend(axs[begin]; position = (0, 0), labelsize = 10, rowgap = -4)
-    axislegend(axs[end]; labelsize = 10, rowgap = -4)
+    legend_kw = (; labelsize = 10, rowgap = -4, framewidth = 0.5,)
+    axislegend(axs[begin]; position = (0, 0), legend_kw...)
+    axislegend(axs[end]; legend_kw...)
     linkxaxes!(axs...)
     linkyaxes!(axs...)
     save("accuracy.svg", fig; pt_per_unit = 2.0)
@@ -114,3 +124,19 @@ of spreading kernel.
     ```
 
 ![NUFFT accuracy for choice of parameters.](accuracy.svg)
+
+In all cases, the convergence with respect to the spreading half-width ``M`` is
+exponential, but the actual convergence rate depends on the chosen kernel
+function and on the oversampling factor ``σ``.
+The straight dashed lines in the figure above are just an indication allowing
+to estimate the rate of exponential convergence of the different kernels as
+``M`` is increased.
+Clearly, the `BackwardsKaiserBesselKernel` (default) and `KaiserBesselKernel`
+are those which display the **best convergence rates** and the **smallest
+errors** for a given ``M``.
+Note that the evaluation of both these kernels is **highly optimised** using
+basically the same techniques originally proposed for FINUFFT (that is,
+an accurate piecewise polynomial approximation of the kernel function).
+
+In conclusion, there is usually no reason for changing the default kernel
+(`BackwardsKaiserBesselKernel`).

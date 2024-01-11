@@ -41,8 +41,11 @@ v_j = ∑_{k = -N/2}^{N/2 + 1} û(k) \, e^{+i k x_j}
 for ``x_j ∈ [0, 2π)``.
 The type-2 transform can be interpreted as an interpolation of a Fourier series onto a given location.
 
-If the points are uniformly distributed in ``[0, 2π)``, then these
-definitions respectively correspond to the [forward and backward DFTs](http://fftw.org/fftw3_doc/The-1d-Discrete-Fourier-Transform-_0028DFT_0029.html) computed by FFTW.
+If the points are uniformly distributed in ``[0, 2π)``, i.e. ``x_j = 2π (j - 1) / M``, then these
+definitions exactly correspond to the [forward and backward DFTs](http://fftw.org/fftw3_doc/The-1d-Discrete-Fourier-Transform-_0028DFT_0029.html) computed by FFTW.
+Note in particular that the type-1 transform is not normalised.
+In applications, one usually wants to normalise the obtained Fourier
+coefficients by the size ``N`` of the transform (see examples below).
 
 ### Ordering of data in frequency space
 
@@ -91,6 +94,7 @@ set_points!(plan_nufft, xp)
 # Perform type-1 NUFFT on preallocated output
 ûs = Array{Complex{T}}(undef, size(plan_nufft))
 exec_type1!(ûs, plan_nufft, vp)
+@. ûs = ûs / N  # normalise transform
 ```
 
 ### Type-2 (or *direct*) NUFFT in one dimension
@@ -141,6 +145,7 @@ set_points!(plan_nufft, xp)
 # Perform type-1 NUFFT on preallocated output
 ûs = Array{Complex{T}}(undef, size(plan_nufft))
 exec_type1!(ûs, plan_nufft, vp)
+ûs ./= prod(Ns)  # normalise transform
 
 # Perform type-2 NUFFT on preallocated output
 exec_type2!(vp, plan_nufft, ûs)
@@ -169,6 +174,7 @@ set_points!(plan_nufft, xp)
 # Perform type-1 NUFFT on preallocated output (one array per transformed quantity)
 ûs = ntuple(_ -> Array{Complex{T}}(undef, size(plan_nufft)), ntrans)
 exec_type1!(ûs, plan_nufft, vp)
+@. us = us / N  # normalise transform
 
 # Perform type-2 NUFFT on preallocated output (one vector per transformed quantity)
 vp_interp = map(similar, vp)
