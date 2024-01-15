@@ -29,6 +29,15 @@ exec_type2!
 size(::PlanNUFFT)
 ```
 
+## Available spreading kernels
+
+```@docs
+KaiserBesselKernel
+BackwardsKaiserBesselKernel
+GaussianKernel
+BSplineKernel
+```
+
 ## Index
 
 ```@index

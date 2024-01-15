@@ -3,6 +3,45 @@ using Base.Cartesian: @ntuple
 
 export GaussianKernel
 
+@doc raw"""
+    GaussianKernel <: AbstractKernel
+    GaussianKernel()
+
+Represents a truncated Gaussian spreading kernel.
+
+# Definition
+
+```math
+ϕ(x) = e^{-x² / 2ℓ²}
+```
+
+where ``ℓ`` is the characteristic width of the kernel.
+
+# Fourier transform
+
+```math
+ϕ̂(k) = \sqrt{2πσ²} e^{-ℓ² k² / 2}
+```
+
+# Parameter selection
+
+Given a kernel half-width ``M``, an oversampling factor ``σ`` and the oversampling grid
+spacing ``Δx``, the characteristic width ``ℓ`` is chosen as [1]
+
+```math
+ℓ² = Δx² \frac{σ}{2σ - 1} \frac{M}{π}
+```
+
+""" *
+"""
+# Implementation details
+
+In the implementation, this kernel is efficiently evaluated using the fast Gaussian gridding
+method proposed by Greengard & Lee [2].
+
+[1] Potts & Steidl, SIAM J. Sci. Comput. **24**, 2013 (2003) \\
+[2] Greengard & Lee, SIAM Rev. **46**, 443 (2004)
+"""
 struct GaussianKernel <: AbstractKernel end
 
 """
