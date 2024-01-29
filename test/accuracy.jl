@@ -16,6 +16,16 @@ function check_nufft_error(::Type{Float64}, ::KaiserBesselKernel, ::HalfSupport{
     nothing
 end
 
+# Note: the Float32 case is only tuned for M = 2.
+function check_nufft_error(::Type{Float32}, ::KaiserBesselKernel, ::HalfSupport{M}, σ, err) where {M}
+    if σ ≈ 1.25
+        @test err < 2 * 10.0^(-1.16 * M)
+    elseif σ ≈ 2.0
+        @test err < 6 * 10.0^(-1.9 * M)
+    end
+    nothing
+end
+
 function check_nufft_error(::Type{Float64}, ::BackwardsKaiserBesselKernel, ::HalfSupport{M}, σ, err) where {M}
     if σ ≈ 1.25
         err_min_kb = 4e-12  # error reaches a minimum at ~2e-12 for M = 10
@@ -27,7 +37,25 @@ function check_nufft_error(::Type{Float64}, ::BackwardsKaiserBesselKernel, ::Hal
     nothing
 end
 
+# Note: the Float32 case is only tuned for M = 2.
+function check_nufft_error(::Type{Float32}, ::BackwardsKaiserBesselKernel, ::HalfSupport{M}, σ, err) where {M}
+    if σ ≈ 1.25
+        @test err < 2 * 10.0^(-1.20 * M)
+    elseif σ ≈ 2.0
+        @test err < 6 * 10.0^(-1.9 * M)
+    end
+    nothing
+end
+
 function check_nufft_error(::Type{Float64}, ::GaussianKernel, ::HalfSupport{M}, σ, err) where {M}
+    if σ ≈ 2.0
+        @test err < 10.0^(-0.95 * M) * 0.8
+    end
+    nothing
+end
+
+# Note: the Float32 case is only tuned for M = 2.
+function check_nufft_error(::Type{Float32}, ::GaussianKernel, ::HalfSupport{M}, σ, err) where {M}
     if σ ≈ 2.0
         @test err < 10.0^(-0.95 * M) * 0.8
     end
@@ -41,7 +69,16 @@ function check_nufft_error(::Type{Float64}, ::BSplineKernel, ::HalfSupport{M}, �
     nothing
 end
 
-check_nufft_error(::Type{ComplexF64}, args...) = check_nufft_error(Float64, args...)
+# Note: the Float32 case is only tuned for M = 2.
+function check_nufft_error(::Type{Float32}, ::BSplineKernel, ::HalfSupport{M}, σ, err) where {M}
+    if σ ≈ 2.0
+        @test err < 10.0^(-0.98 * M) * 0.4
+    end
+    nothing
+end
+
+check_nufft_error(::Type{Complex{T}}, args...) where {T} =
+    check_nufft_error(T, args...)
 
 function l2_error(us, vs)
     err = sum(zip(us, vs)) do (u, v)
@@ -169,9 +206,14 @@ function test_nufft_type2_1d(
     err
 end
 
-@testset "1D NUFFTs: $T" for T ∈ (Float64, ComplexF64)
+@testset "1D NUFFTs: $T" for T ∈ (Float64, ComplexF64, Float32, ComplexF32)
+    if real(T) === Float64
+        Ms = 4:10
+    elseif real(T) === Float32
+        Ms = 2:2
+    end
     @testset "Type 1 NUFFTs" begin
-        for M ∈ 4:10
+        for M ∈ Ms
             m = HalfSupport(M)
             σ = 1.25
             @testset "$kernel (m = $M, σ = $σ)" for kernel ∈ (KaiserBesselKernel(), BackwardsKaiserBesselKernel())
@@ -184,7 +226,7 @@ end
         end
     end
     @testset "Type 2 NUFFTs" begin
-        for M ∈ 4:10
+        for M ∈ Ms
             m = HalfSupport(M)
             σ = 1.25
             @testset "$kernel (m = $M, σ = $σ)" for kernel ∈ (KaiserBesselKernel(), BackwardsKaiserBesselKernel())

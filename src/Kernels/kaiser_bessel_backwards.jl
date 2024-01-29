@@ -92,7 +92,7 @@ function optimal_kernel(::BackwardsKaiserBesselKernel, h::HalfSupport{M}, Δx, �
     # Set the optimal kernel shape parameter given the wanted support M and the oversampling
     # factor σ. See Potts & Steidl 2003, eq. (5.12).
     γ = 0.995  # empirical "safety factor" which slightly improves accuracy, as in FINUFFT (where γ = 0.976)
-    β = oftype(Δx, M * π * (2 - 1 / σ)) * γ
+    β = oftype(Δx, M * π * (2 - 1 / σ) * γ)
     BackwardsKaiserBesselKernelData(h, Δx, β)
 end
 
