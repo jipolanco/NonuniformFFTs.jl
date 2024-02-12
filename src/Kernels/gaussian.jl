@@ -5,7 +5,7 @@ export GaussianKernel
 
 @doc raw"""
     GaussianKernel <: AbstractKernel
-    GaussianKernel()
+    GaussianKernel([ℓ/Δx])
 
 Represents a truncated Gaussian spreading kernel.
 
@@ -25,12 +25,14 @@ where ``ℓ`` is the characteristic width of the kernel.
 
 # Parameter selection
 
-Given a kernel half-width ``M``, an oversampling factor ``σ`` and the oversampling grid
+By default, given a kernel half-width ``M``, an oversampling factor ``σ`` and the oversampling grid
 spacing ``Δx``, the characteristic width ``ℓ`` is chosen as [1]
 
 ```math
 ℓ² = Δx² \frac{σ}{2σ - 1} \frac{M}{π}
 ```
+
+This default value can be overriden by explicitly passing a value of the wanted normalised width ``ℓ/Δx``.
 
 """ *
 """
@@ -42,7 +44,11 @@ method proposed by Greengard & Lee [2].
 [1] Potts & Steidl, SIAM J. Sci. Comput. **24**, 2013 (2003) \\
 [2] Greengard & Lee, SIAM Rev. **46**, 443 (2004)
 """
-struct GaussianKernel <: AbstractKernel end
+struct GaussianKernel{Width <: Union{Nothing, Real}} <: AbstractKernel
+    ℓ :: Width
+end
+
+GaussianKernel() = GaussianKernel(nothing)
 
 """
     GaussianKernelData(HalfSupport(M), Δx, α)
@@ -70,11 +76,16 @@ end
 
 GaussianKernelData(::HalfSupport{M}, args...) where {M} = GaussianKernelData{M}(args...)
 
-function optimal_kernel(::GaussianKernel, h::HalfSupport{M}, Δx, σ) where {M}
-    # Set the optimal kernel shape parameter given the wanted support M and the oversampling
-    # factor σ. See Potts & Steidl 2003, eq. (5.9).
-    α² = oftype(Δx, σ * M / (2 * σ - 1) / π)
-    GaussianKernelData(h, Δx, sqrt(α²))
+function optimal_kernel(kernel::GaussianKernel, h::HalfSupport{M}, Δx, σ) where {M}
+    T = typeof(Δx)
+    ℓ = if kernel.ℓ === nothing
+        # Set the optimal kernel shape parameter given the wanted support M and the oversampling
+        # factor σ. See Potts & Steidl 2003, eq. (5.9).
+        T(sqrt(σ * M / (2 * σ - 1) / π))
+    else
+        T(kernel.ℓ)
+    end
+    GaussianKernelData(h, Δx, ℓ)
 end
 
 function evaluate_fourier(g::GaussianKernelData, k::Number)
