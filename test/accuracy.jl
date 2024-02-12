@@ -238,4 +238,21 @@ end
             end
         end
     end
+    @testset "Setting kernel parameter" begin
+        # Explicitly set kernel parameters to close to the default value.
+        M = 2
+        m = HalfSupport(M)
+        σ = 2.0
+        β = M * π * (2 - 1/σ)
+        @testset "KaiserBesselKernel" begin
+            test_nufft_type1_1d(T; m, σ, kernel = KaiserBesselKernel(β))
+        end
+        @testset "BackwardsKaiserBesselKernel" begin
+            test_nufft_type1_1d(T; m, σ, kernel = BackwardsKaiserBesselKernel(β))
+        end
+        ℓ_dx = sqrt(σ / (2σ - 1) * (M / π))  # normalised Gaussian width ℓ/Δx
+        @testset "GaussianKernel" begin
+            test_nufft_type1_1d(T; m, σ, kernel = GaussianKernel(ℓ_dx))
+        end
+    end
 end

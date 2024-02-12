@@ -8,7 +8,7 @@ kb_equivalent_variance(β) = besseli0(β) / (β * besseli1(β))
 
 @doc raw"""
     KaiserBesselKernel <: AbstractKernel
-    KaiserBesselKernel()
+    KaiserBesselKernel([β])
 
 Represents a [Kaiser–Bessel](https://en.wikipedia.org/wiki/Kaiser_window#Definition)
 spreading kernel.
@@ -32,7 +32,7 @@ of the first kind and ``β`` is a shape factor.
 
 # Parameter selection
 
-The shape parameter is chosen to be [1]
+By default, the shape parameter is chosen to be [1]
 
 ```math
 β = γ M π \left( 2 - \frac{1}{σ} \right)
@@ -41,6 +41,8 @@ The shape parameter is chosen to be [1]
 where ``M`` is the kernel half-width and ``σ`` the oversampling factor.
 Moreover, ``γ = 0.980`` is an empirical "safety factor", similarly to the one used by
 FINUFFT [2], which slightly improves accuracy.
+
+This default value can be overriden by explicitly passing a ``β`` value.
 
 """ *
 """
@@ -55,7 +57,11 @@ Shamshirgar et al. [3].
 [2] Barnett, Magland & af Klinteberg, SIAM J. Sci. Comput. **41**, C479 (2019) \\
 [3] Shamshirgar, Bagge & Tornberg, J. Chem. Phys. **154**, 164109 (2021)
 """
-struct KaiserBesselKernel <: AbstractKernel end
+struct KaiserBesselKernel{Beta <: Union{Nothing, Real}} <: AbstractKernel
+    β :: Beta
+end
+
+KaiserBesselKernel() = KaiserBesselKernel(nothing)
 
 """
     KaiserBesselKernelData(HalfSupport(M), Δx, β)
@@ -118,11 +124,16 @@ end
 KaiserBesselKernelData(::HalfSupport{M}, args...) where {M} =
     KaiserBesselKernelData{M}(args...)
 
-function optimal_kernel(::KaiserBesselKernel, h::HalfSupport{M}, Δx, σ) where {M}
-    # Set the optimal kernel shape parameter given the wanted support M and the oversampling
-    # factor σ. See Potts & Steidl 2003, eq. (5.12).
-    γ = 0.980  # empirical "safety factor" which slightly improves accuracy, as in FINUFFT (where γ = 0.976)
-    β = oftype(Δx, M * π * (2 - 1 / σ) * γ)
+function optimal_kernel(kernel::KaiserBesselKernel, h::HalfSupport{M}, Δx, σ) where {M}
+    T = typeof(Δx)
+    β = if kernel.β === nothing
+        # Set the optimal kernel shape parameter given the wanted support M and the oversampling
+        # factor σ. See Potts & Steidl 2003, eq. (5.12).
+        γ = 0.980  # empirical "safety factor" which slightly improves accuracy, as in FINUFFT (where γ = 0.976)
+        T(M * π * (2 - 1 / σ) * γ)
+    else
+        T(kernel.β)
+    end
     KaiserBesselKernelData(h, Δx, β)
 end
 

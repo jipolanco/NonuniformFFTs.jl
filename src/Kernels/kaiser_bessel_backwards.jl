@@ -6,7 +6,7 @@ backwards_kb_equivalent_variance(β) = sinh(β) / (β * cosh(β) - sinh(β))
 
 @doc raw"""
     BackwardsKaiserBesselKernel <: AbstractKernel
-    BackwardsKaiserBesselKernel()
+    BackwardsKaiserBesselKernel([β])
 
 Represents a backwards [Kaiser–Bessel](https://en.wikipedia.org/wiki/Kaiser_window#Definition) (KB)
 spreading kernel.
@@ -36,7 +36,7 @@ of the first kind.
 
 # Parameter selection
 
-The shape parameter is chosen to be [1]
+By default, the shape parameter is chosen to be [1]
 
 ```math
 β = γ M π \left( 2 - \frac{1}{σ} \right)
@@ -45,6 +45,8 @@ The shape parameter is chosen to be [1]
 where ``M`` is the kernel half-width and ``σ`` the oversampling factor.
 Moreover, ``γ = 0.995`` is an empirical "safety factor", similarly to the one used by
 FINUFFT [2], which slightly improves accuracy.
+
+This default value can be overriden by explicitly passing a ``β`` value.
 
 """ *
 """
@@ -59,7 +61,11 @@ Shamshirgar et al. [3].
 [2] Barnett, Magland & af Klinteberg, SIAM J. Sci. Comput. **41**, C479 (2019) \\
 [3] Shamshirgar, Bagge & Tornberg, J. Chem. Phys. **154**, 164109 (2021)
 """
-struct BackwardsKaiserBesselKernel <: AbstractKernel end
+struct BackwardsKaiserBesselKernel{Beta <: Union{Nothing, Real}} <: AbstractKernel
+    β :: Beta
+end
+
+BackwardsKaiserBesselKernel() = BackwardsKaiserBesselKernel(nothing)
 
 struct BackwardsKaiserBesselKernelData{
         M, T <: AbstractFloat, ApproxCoefs <: AbstractArray{T},
@@ -88,11 +94,16 @@ end
 BackwardsKaiserBesselKernelData(::HalfSupport{M}, args...) where {M} =
     BackwardsKaiserBesselKernelData{M}(args...)
 
-function optimal_kernel(::BackwardsKaiserBesselKernel, h::HalfSupport{M}, Δx, σ) where {M}
-    # Set the optimal kernel shape parameter given the wanted support M and the oversampling
-    # factor σ. See Potts & Steidl 2003, eq. (5.12).
-    γ = 0.995  # empirical "safety factor" which slightly improves accuracy, as in FINUFFT (where γ = 0.976)
-    β = oftype(Δx, M * π * (2 - 1 / σ) * γ)
+function optimal_kernel(kernel::BackwardsKaiserBesselKernel, h::HalfSupport{M}, Δx, σ) where {M}
+    T = typeof(Δx)
+    β = if kernel.β === nothing
+        # Set the optimal kernel shape parameter given the wanted support M and the oversampling
+        # factor σ. See Potts & Steidl 2003, eq. (5.12).
+        γ = 0.995  # empirical "safety factor" which slightly improves accuracy, as in FINUFFT (where γ = 0.976)
+        T(M * π * (2 - 1 / σ) * γ)
+    else
+        T(kernel.β)
+    end
     BackwardsKaiserBesselKernelData(h, Δx, β)
 end
 
