@@ -71,7 +71,7 @@ of spreading kernel.
         ax.xticks = Ms
         ax.yticks = LogTicks(-14:2:0)
         for (j, kernel) ∈ pairs(kernels)
-            l = scatterlines!(ax, Ms, errs[:, j, k]; label = string(typeof(kernel)))
+            l = scatterlines!(ax, Ms, errs[:, j, k]; label = string(nameof(typeof(kernel))))
             if kernel isa BackwardsKaiserBesselKernel  # default kernel
                 # Make sure this curve is on top
                 translate!(l, 0, 0, 10)
