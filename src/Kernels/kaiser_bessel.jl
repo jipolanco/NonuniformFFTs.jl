@@ -96,7 +96,7 @@ In other words, FFTs must be performed over a grid of size ``Ñ = σN`` where ``
 size of the grid of interest.
 """
 struct KaiserBesselKernelData{
-        M, T <: AbstractFloat, ApproxCoefs <: AbstractArray{T},
+        M, T <: AbstractFloat, ApproxCoefs <: NTuple,
     } <: AbstractKernelData{KaiserBesselKernel, M, T}
     Δx :: T  # grid spacing
     σ  :: T  # equivalent kernel width (for comparison with Gaussian)

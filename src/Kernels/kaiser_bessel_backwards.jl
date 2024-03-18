@@ -68,7 +68,7 @@ end
 BackwardsKaiserBesselKernel() = BackwardsKaiserBesselKernel(nothing)
 
 struct BackwardsKaiserBesselKernelData{
-        M, T <: AbstractFloat, ApproxCoefs <: AbstractArray{T},
+        M, T <: AbstractFloat, ApproxCoefs <: NTuple,
     } <: AbstractKernelData{BackwardsKaiserBesselKernel, M, T}
     Δx :: T  # grid spacing
     σ  :: T  # equivalent kernel width (for comparison with Gaussian)
