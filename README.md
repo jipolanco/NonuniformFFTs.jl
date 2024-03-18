@@ -18,9 +18,9 @@ N = 256   # number of Fourier modes
 Np = 100  # number of non-uniform points
 
 # Generate some non-uniform random data
-T = Float64             # non-uniform data is real (can also be complex)
-xp = rand(T, Np) .* 2π  # non-uniform points in [0, 2π]
-vp = randn(T, Np)       # random values at points
+T = Float64                # non-uniform data is real (can also be complex)
+xp = rand(T, Np) .* T(2π)  # non-uniform points in [0, 2π]
+vp = randn(T, Np)          # random values at points
 
 # Create plan for data of type T
 plan_nufft = PlanNUFFT(T, N; m = HalfSupport(8))  # larger support increases accuracy
@@ -43,7 +43,7 @@ Np = 100  # number of non-uniform points
 
 # Generate some uniform random data
 T = Float64                        # non-uniform data is real (can also be complex)
-xp = rand(T, Np) .* 2π             # non-uniform points in [0, 2π]
+xp = rand(T, Np) .* T(2π)          # non-uniform points in [0, 2π]
 ûs = randn(Complex{T}, N ÷ 2 + 1)  # random values at points (we need to store roughly half the Fourier modes for complex-to-real transform)
 
 # Create plan for data of type T
@@ -70,10 +70,10 @@ Ns = (256, 256)  # number of Fourier modes in each direction
 Np = 1000        # number of non-uniform points
 
 # Generate some non-uniform random data
-T = Float64                                   # non-uniform data is real (can also be complex)
-d = length(Ns)                                # number of dimensions (d = 2 here)
-xp = [2π * rand(SVector{d, T}) for _ ∈ 1:Np]  # non-uniform points in [0, 2π]ᵈ
-vp = randn(T, Np)                             # random values at points
+T = Float64                                      # non-uniform data is real (can also be complex)
+d = length(Ns)                                   # number of dimensions (d = 2 here)
+xp = [T(2π) * rand(SVector{d, T}) for _ ∈ 1:Np]  # non-uniform points in [0, 2π]ᵈ
+vp = randn(T, Np)                                # random values at points
 
 # Create plan for data of type T
 plan_nufft = PlanNUFFT(T, Ns; m = HalfSupport(8))
@@ -102,8 +102,8 @@ Np = 100  # number of non-uniform points
 ntrans = Val(3)  # number of simultaneous transforms
 
 # Generate some non-uniform random data
-T = Float64             # non-uniform data is real (can also be complex)
-xp = rand(T, Np) .* 2π  # non-uniform points in [0, 2π]
+T = Float64                # non-uniform data is real (can also be complex)
+xp = rand(T, Np) .* T(2π)  # non-uniform points in [0, 2π]
 vp = ntuple(_ -> randn(T, Np), ntrans)  # random values at points (one vector per transformed quantity)
 
 # Create plan for data of type T
