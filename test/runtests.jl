@@ -16,6 +16,8 @@ macro includetest(path::String)
     ex
 end
 
+@info "Running tests on $(Threads.nthreads()) threads"
+
 @testset "NonuniformFFTs.jl" begin
     @includetest "accuracy.jl"
     @includetest "multidimensional.jl"
