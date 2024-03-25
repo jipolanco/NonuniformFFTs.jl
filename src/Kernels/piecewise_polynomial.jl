@@ -25,7 +25,7 @@ function solve_polynomial_coefficients(f::F, ::Type{T}, ::Val{N}) where {F, T, N
     xs_pow = zero(xs) .+ true  # = 1
     for j ∈ 1:N
         A[:, j] = xs_pow
-        xs_pow = xs_pow .* xs
+        xs_pow = map(*, xs_pow, xs)  # = xs_pow .* xs
     end
     NTuple{N}(A \ ys)
 end
