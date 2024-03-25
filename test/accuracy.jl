@@ -129,9 +129,11 @@ function test_nufft_type1_1d(
     NonuniformFFTs.set_points!(plan_nufft, xp)
     NonuniformFFTs.exec_type1!(ûs, plan_nufft, vp)
 
-    JET.@test_opt ignored_modules=(Base,) PlanNUFFT(T, N; m, σ, kernel, block_size)
-    JET.@test_opt NonuniformFFTs.set_points!(plan_nufft, xp)
-    JET.@test_opt NonuniformFFTs.exec_type1!(ûs, plan_nufft, vp)
+    if VERSION ≥ v"1.10"
+        JET.@test_opt ignored_modules=(Base,) PlanNUFFT(T, N; m, σ, kernel, block_size)
+        JET.@test_opt NonuniformFFTs.set_points!(plan_nufft, xp)
+        JET.@test_opt NonuniformFFTs.exec_type1!(ûs, plan_nufft, vp)
+    end
 
     # Check results
     err = l2_error(ûs, ûs_exact)
@@ -191,9 +193,11 @@ function test_nufft_type2_1d(
     NonuniformFFTs.set_points!(plan_nufft, xp)
     NonuniformFFTs.exec_type2!(vp, plan_nufft, ûs)
 
-    JET.@test_opt ignored_modules=(Base,) PlanNUFFT(T, N; m, σ, kernel, block_size)
-    JET.@test_opt NonuniformFFTs.set_points!(plan_nufft, xp)
-    JET.@test_opt NonuniformFFTs.exec_type2!(vp, plan_nufft, ûs)
+    if VERSION ≥ v"1.10"
+        JET.@test_opt ignored_modules=(Base,) PlanNUFFT(T, N; m, σ, kernel, block_size)
+        JET.@test_opt NonuniformFFTs.set_points!(plan_nufft, xp)
+        JET.@test_opt NonuniformFFTs.exec_type2!(vp, plan_nufft, ûs)
+    end
 
     err = l2_error(vp, vp_exact)
 
