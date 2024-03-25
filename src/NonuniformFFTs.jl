@@ -33,6 +33,7 @@ export
     exec_type1!,
     exec_type2!
 
+include("sorting.jl")
 include("blocking.jl")
 include("plan.jl")
 include("set_points.jl")

@@ -1,5 +1,3 @@
-using ThreadsX: ThreadsX
-
 abstract type AbstractBlockData end
 
 # Dummy type used when blocking has been disabled in the NUFFT plan.
@@ -140,12 +138,8 @@ function set_points!(bd::BlockData, points, xp, timer)
     # are concentrated, improving load balance.
     map_blocks_to_threads!(bd.blocks_per_thread, cumulative_npoints_per_block)
 
-    @timeit timer "Sort" if Threads.nthreads() == 1
-        # This is the same as sortperm! but seems to be faster.
-        sort!(pointperm; by = i -> @inbounds(blockidx[i]), alg = QuickSort)
-        # sortperm!(pointperm, blockidx; alg = QuickSort)
-    else
-        ThreadsX.sort!(pointperm; by = i -> @inbounds(blockidx[i]), alg = ThreadsX.QuickSort())
+    @timeit timer "Sort" begin
+        quicksort_perm!(pointperm, blockidx)
     end
 
     # Write sorted points into `points`.
