@@ -5,6 +5,7 @@ using FFTW: FFTW
 using LinearAlgebra: mul!
 using TimerOutputs: TimerOutput, @timeit
 using Static: Static, StaticBool, False, True
+using PrecompileTools: PrecompileTools, @setup_workload, @compile_workload
 
 include("Kernels/Kernels.jl")
 
@@ -32,6 +33,8 @@ export
     set_points!,
     exec_type1!,
     exec_type2!
+
+default_kernel() = BackwardsKaiserBesselKernel()
 
 include("sorting.jl")
 include("blocking.jl")
@@ -239,6 +242,37 @@ function copy_deconvolve_to_oversampled!(ûs_all::NTuple{C}, ŵs_all::NTuple{C
         end
     end
     ûs_all
+end
+
+# Precompilation
+@setup_workload let
+    kernels = [default_kernel()]  # only precompile for default kernel
+    ndims_all = 1:3
+    ms = map(HalfSupport, 2:2:8)
+    # Ts = [Float32, Float64, ComplexF32, ComplexF64]
+    Ts = [Float64, ComplexF64]
+    σ = 1.25
+    for kernel ∈ kernels, m ∈ ms, T ∈ Ts, ndims ∈ ndims_all
+        dims = ntuple(_ -> 12, ndims)  # σN = 16
+        Np = 16  # number of non-uniform points
+        xs = ntuple(_ -> rand(real(T), Np) .* 2π, ndims)
+        Ns = ntuple(ndims) do i
+            N = dims[i]
+            (i == 1 && T <: Real) ? ((N + 2) >> 1) : N
+        end
+        C = complex(T)
+        for ntrans ∈ (1, ndims)  # number of simultaneous transforms
+            ntransforms = Val(ntrans)
+            qs = ntuple(_ -> randn(T, Np), ntransforms)
+            uhat = ntuple(_ -> Array{C}(undef, Ns), ntransforms)
+            @compile_workload begin
+                plan = PlanNUFFT(T, dims; ntransforms, m, σ, kernel)
+                set_points!(plan, xs)
+                exec_type1!(uhat, plan, qs)
+                exec_type2!(qs, plan, uhat)
+            end
+        end
+    end
 end
 
 end

@@ -218,7 +218,7 @@ end
 function PlanNUFFT(
         ::Type{T}, Ns::Dims, h::HalfSupport;
         ntransforms = Val(1),
-        kernel::AbstractKernel = BackwardsKaiserBesselKernel(),
+        kernel::AbstractKernel = default_kernel(),
         σ::Real = real(T)(2), kws...,
     ) where {T <: Number}
     R = real(T)
