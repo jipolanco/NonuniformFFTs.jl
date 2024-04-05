@@ -2,6 +2,10 @@
 
 Yet another package for computing multidimensional [non-uniform fast Fourier transforms (NUFFTs)](https://en.wikipedia.org/wiki/NUFFT) in Julia.
 
+Like other [existing packages](#similar-packages), computations are
+parallelised using threads.
+By default, all available Julia threads are used.
+
 ## Installation
 
 NonuniformFFTs.jl can be simply installed from the Julia REPL with:
@@ -183,7 +187,7 @@ exec_type2!(vp, plan_nufft, ûs)
 
 More details on optional parameters and on tuning accuracy is coming soon.
 
-## Differences with other packages
+## [Differences with other packages](@id similar-packages)
 
 This package roughly follows the same notation and conventions of the [FINUFFT library](https://finufft.readthedocs.io/en/latest/)
 and its [Julia interface](https://github.com/ludvigak/FINUFFT.jl), with a few differences detailed below.

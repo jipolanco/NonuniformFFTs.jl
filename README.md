@@ -7,6 +7,10 @@
 
 Yet another package for computing multidimensional [non-uniform fast Fourier transforms (NUFFTs)](https://en.wikipedia.org/wiki/NUFFT) in Julia.
 
+Like other [existing packages](#differences-with-other-packages), computations
+are parallelised using threads.
+By default, all available Julia threads are used.
+
 ## Basic usage
 
 ### Type-1 (or *adjoint*) NUFFT in one dimension
