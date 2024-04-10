@@ -16,7 +16,7 @@ spreading kernel.
 # Definition
 
 ```math
-ϕ(x) = \frac{I₀ \left(β \sqrt{1 - x²} \right)}{I₀(β)}
+ϕ(x) = I₀ \left(β \sqrt{1 - x²} \right)
 \quad \text{ for } |x| ≤ 1
 ```
 
@@ -27,7 +27,7 @@ of the first kind and ``β`` is a shape factor.
 # Fourier transform
 
 ```math
-ϕ̂(k) = \frac{2}{I₀(β)} \frac{\sinh\left( \sqrt{β² - k²} \right)}{\sqrt{β² - k²}}
+ϕ̂(k) = 2 \frac{\sinh\left( \sqrt{β² - k²} \right)}{\sqrt{β² - k²}}
 ```
 
 # Parameter selection
@@ -103,7 +103,6 @@ struct KaiserBesselKernelData{
     w  :: T  # actual kernel half-width (= M * Δx)
     β  :: T  # KB parameter
     β² :: T
-    I₀_at_β :: T
     cs :: ApproxCoefs  # coefficients of polynomial approximation
     gk :: Vector{T}
 
@@ -111,13 +110,12 @@ struct KaiserBesselKernelData{
         w = M * Δx
         σ = sqrt(kb_equivalent_variance(β)) * w
         β² = β * β
-        I₀_at_β = besseli0(β)
         gk = Vector{T}(undef, 0)
         Npoly = M + 4  # degree of polynomial is d = Npoly - 1
         cs = solve_piecewise_polynomial_coefficients(T, Val(M), Val(Npoly)) do x
-            besseli0(β * sqrt(1 - x^2)) / I₀_at_β
+            besseli0(β * sqrt(1 - x^2))
         end
-        new{M, T, typeof(cs)}(Δx, σ, w, β, β², I₀_at_β, cs, gk)
+        new{M, T, typeof(cs)}(Δx, σ, w, β, β², cs, gk)
     end
 end
 
@@ -138,10 +136,10 @@ function optimal_kernel(kernel::KaiserBesselKernel, h::HalfSupport{M}, Δx, σ) 
 end
 
 function evaluate_fourier(g::KaiserBesselKernelData, k::Number)
-    (; β², w, I₀_at_β,) = g
+    (; β², w,) = g
     q = w * k
     s = sqrt(β² - q^2)  # this is always real (assuming β ≥ Mπ)
-    2 * w * sinh(s) / (I₀_at_β * s)
+    2 * w * sinh(s) / s
 end
 
 function evaluate_kernel(g::KaiserBesselKernelData{M}, x, i::Integer) where {M}
