@@ -18,7 +18,7 @@ It has very similar properties to the Kaiser–Bessel kernel.
 # Definition
 
 ```math
-ϕ(x) = \frac{1}{\sinh(β)} \frac{\sinh \left(β \sqrt{1 - x²} \right)}{\sqrt{1 - x²}}
+ϕ(x) = \frac{\sinh \left(β \sqrt{1 - x²} \right)}{π \sqrt{1 - x²}}
 \quad \text{ for } |x| ≤ 1
 ```
 
@@ -27,7 +27,7 @@ where ``β`` is a shape factor.
 # Fourier transform
 
 ```math
-ϕ̂(k) = \frac{π}{\sinh(β)} \, I₀ \left( \sqrt{β² - k²} \right)
+ϕ̂(k) = I₀ \left( \sqrt{β² - k²} \right)
 ```
 
 where ``I₀`` is the zeroth-order [modified Bessel
@@ -74,20 +74,18 @@ struct BackwardsKaiserBesselKernelData{
     σ  :: T  # equivalent kernel width (for comparison with Gaussian)
     w  :: T  # actual kernel half-width (= M * Δx)
     β  :: T  # KB parameter
-    sinh_β :: T
     cs :: ApproxCoefs  # coefficients of polynomial approximation
     gk :: Vector{T}
     function BackwardsKaiserBesselKernelData{M}(Δx::T, β::T) where {M, T <: AbstractFloat}
         w = M * Δx
         σ = sqrt(backwards_kb_equivalent_variance(β)) * w
-        sinh_β = sinh(β)
         gk = Vector{T}(undef, 0)
         Npoly = M + 4  # degree of polynomial is d = Npoly - 1
         cs = solve_piecewise_polynomial_coefficients(T, Val(M), Val(Npoly)) do x
             s = sqrt(1 - x^2)
-            sinh(β * s) / (s * sinh(β))
+            sinh(β * s) / (s * oftype(x, π))
         end
-        new{M, T, typeof(cs)}(Δx, σ, w, β, sinh_β, cs, gk)
+        new{M, T, typeof(cs)}(Δx, σ, w, β, cs, gk)
     end
 end
 
@@ -108,10 +106,10 @@ function optimal_kernel(kernel::BackwardsKaiserBesselKernel, h::HalfSupport{M}, 
 end
 
 function evaluate_fourier(g::BackwardsKaiserBesselKernelData, k::Number)
-    (; β, w, sinh_β,) = g
+    (; β, w,) = g
     q = w * k
     s = sqrt(β^2 - q^2)  # this is always real (assuming β ≥ Mπ)
-    w * π * besseli0(s) / sinh_β
+    w * besseli0(s)
 end
 
 function evaluate_kernel(g::BackwardsKaiserBesselKernelData{M}, x, i::Integer) where {M}
