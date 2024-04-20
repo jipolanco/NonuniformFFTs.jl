@@ -252,7 +252,7 @@ function copy_deconvolve_to_non_oversampled!(
 end
 
 function copy_deconvolve_to_oversampled!(
-        ûs_all::NTuple{C}, ŵs_all::NTuple{C}, index_map, ϕ̂s,
+        ûs_all::NTuple{C, DenseArray}, ŵs_all::NTuple{C}, index_map, ϕ̂s,
     ) where {C}
     @assert C > 0
 
@@ -261,7 +261,7 @@ function copy_deconvolve_to_oversampled!(
     # We find it's faster to use a low-level call to memset (as opposed to a `for` loop, or
     # `fill!`), parallelised over all threads.
     #
-    # In fact we just need to zero-out the oversampled region (to get zero-padding), but
+    # NOTE: In fact we just need to zero-out the oversampled region (to get zero-padding), but
     # that's more difficult to do and might even be more expensive in multiple dimensions,
     # since that region is not contiguous.
     #
@@ -273,8 +273,9 @@ function copy_deconvolve_to_oversampled!(
     Threads.@threads :static for n ∈ 1:Threads.nthreads()
         a = ((n - 1) * length(inds_oversampled)) ÷ Threads.nthreads()
         b = ((n - 0) * length(inds_oversampled)) ÷ Threads.nthreads()
-        checkbounds(inds_oversampled, (a + 1):b)
+        # checkbounds(inds_oversampled, (a + 1):b)
         for ûs ∈ ûs_all
+            # This requires ûs to be a DenseArray (contiguous in memory).
             p = pointer(ûs, a + 1)
             n = (b - a) * sizeof(eltype(ûs))
             val = zero(Cint)
