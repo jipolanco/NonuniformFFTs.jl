@@ -215,19 +215,37 @@ function non_oversampled_indices!(
     indmap
 end
 
+inbounds_getindex(v, i) = @inbounds v[i]
+
 function copy_deconvolve_to_non_oversampled!(
         ŵs_all::NTuple{C}, ûs_all::NTuple{C}, index_map, ϕ̂s, normfactor,
     ) where {C}
     @assert C > 0
-    inds_u = Iterators.product(index_map...)  # indices of oversampled array
-    inds_w = CartesianIndices(first(ŵs_all))  # indices of non-oversampled array
-    @inbounds for (I, J) ∈ zip(inds_w, inds_u)
-        ϕ̂ = map(getindex, ϕ̂s, Tuple(I))  # Fourier coefficient of kernel
-        β = normfactor / prod(ϕ̂)         # deconvolution + FFT normalisation factor
-        for (ŵs, ûs) ∈ zip(ŵs_all, ûs_all)
-            ŵs[I] = β * ûs[J...]
+    inds_out = axes(first(ŵs_all))
+    @assert inds_out == map(eachindex, index_map)
+
+    # Split indices (and everything else) in order to parallelise along the last dimension.
+    inds_front = Base.front(inds_out)  # indices over dimensions 1, ..., N - 1
+    inds_last = last(inds_out)         # indices over dimension N
+    index_map_front, index_map_last = Base.front(index_map), last(index_map)
+    ϕ̂s_front, ϕ̂s_last = Base.front(ϕ̂s), last(ϕ̂s)
+
+    Threads.@threads :static for ilast ∈ inds_last
+        @inbounds begin
+            jlast = index_map_last[ilast]
+            ϕ̂last = ϕ̂s_last[ilast]
+            for Ifront ∈ CartesianIndices(inds_front)
+                I = CartesianIndex(Ifront, ilast)
+                js_front = map(inbounds_getindex, index_map_front, Tuple(Ifront))
+                ϕ̂_front = map(inbounds_getindex, ϕ̂s_front, Tuple(Ifront))
+                β = normfactor / (prod(ϕ̂_front) * ϕ̂last)   # deconvolution + FFT normalisation factor
+                for (ŵs, ûs) ∈ zip(ŵs_all, ûs_all)
+                    ŵs[I] = β * ûs[js_front..., jlast]
+                end
+            end
         end
     end
+
     ŵs_all
 end
 
@@ -235,19 +253,48 @@ function copy_deconvolve_to_oversampled!(
         ûs_all::NTuple{C}, ŵs_all::NTuple{C}, index_map, ϕ̂s,
     ) where {C}
     @assert C > 0
-    for ûs ∈ ûs_all
-        fill!(ûs, zero(eltype(ûs)))  # make sure the padding region is set to zero
-    end
-    # Note: both these indices should have the same lengths.
-    inds_u = Iterators.product(index_map...)  # indices of oversampled array
-    inds_w = CartesianIndices(first(ŵs_all))  # indices of non-oversampled array
-    @inbounds for (I, J) ∈ zip(inds_w, inds_u)
-        ϕ̂ = map(getindex, ϕ̂s, Tuple(I))  # Fourier coefficient of kernel
-        β = 1 / prod(ϕ̂)  # deconvolution factor
-        for (ŵs, ûs) ∈ zip(ŵs_all, ûs_all)
-            ûs[J...] = β * ŵs[I]
+
+    # TODO: is this needed? and can it be optimised, by zeroing out only what's needed?
+    inds_oversampled = eachindex(first(ûs_all)) :: AbstractVector  # array uses linear indices
+    @assert isone(first(inds_oversampled))  # 1-based indexing
+    @assert all(ûs -> eachindex(ûs) === inds_oversampled, ûs_all)  # all arrays have the same indices
+    Threads.@threads :static for n ∈ 1:Threads.nthreads()
+        a = ((n - 1) * length(inds_oversampled)) ÷ Threads.nthreads()
+        b = ((n - 0) * length(inds_oversampled)) ÷ Threads.nthreads()
+        checkbounds(inds_oversampled, (a + 1):b)
+        for ûs ∈ ûs_all
+            p = pointer(ûs, a + 1)
+            n = (b - a) * sizeof(eltype(ûs))
+            val = zero(Cint)
+            ccall(:memset, Ptr{Cvoid}, (Ptr{Cvoid}, Cint, Csize_t), p, val, n)
         end
     end
+
+    inds_out = axes(first(ŵs_all))
+    @assert inds_out == map(eachindex, index_map)
+
+    # Split indices (and everything else) in order to parallelise along the last dimension.
+    inds_front = Base.front(inds_out)  # indices over dimensions 1, ..., N - 1
+    inds_last = last(inds_out)         # indices over dimension N
+    index_map_front, index_map_last = Base.front(index_map), last(index_map)
+    ϕ̂s_front, ϕ̂s_last = Base.front(ϕ̂s), last(ϕ̂s)
+
+    Threads.@threads :static for ilast ∈ inds_last
+        @inbounds begin
+            jlast = index_map_last[ilast]
+            ϕ̂last = ϕ̂s_last[ilast]
+            for Ifront ∈ CartesianIndices(inds_front)
+                I = CartesianIndex(Ifront, ilast)
+                js_front = map(inbounds_getindex, index_map_front, Tuple(Ifront))
+                ϕ̂_front = map(inbounds_getindex, ϕ̂s_front, Tuple(Ifront))
+                β = 1 / (prod(ϕ̂_front) * ϕ̂last)  # deconvolution factor
+                for (ŵs, ûs) ∈ zip(ŵs_all, ûs_all)
+                    ûs[js_front..., jlast] = β * ŵs[I]
+                end
+            end
+        end
+    end
+
     ûs_all
 end
 
