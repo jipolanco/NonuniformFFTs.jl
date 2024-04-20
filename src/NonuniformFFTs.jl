@@ -71,6 +71,35 @@ function check_nufft_nonuniform_data(p::PlanNUFFT, vp_all::NTuple{C, AbstractVec
     nothing
 end
 
+# We find it's faster to use a low-level call to memset (as opposed to a `for` loop, or
+# `fill!`), parallelised over all threads.
+# In fact, this mostly seems to be the case for complex data, while for real data usign
+# `fill!` gives the same performance...
+# Using memset only makes sense if the arrays are contiguous in memory (DenseArray).
+function fill_with_zeros_threaded!(
+        us_all::NTuple{C, A};
+        nthreads = Threads.nthreads(),
+    ) where {C, A <: DenseArray}
+    # We assume all arrays in the tuple have the same type and shape.
+    inds = eachindex(first(us_all)) :: AbstractVector  # make sure array uses linear indices
+    @assert isone(first(inds))  # 1-based indexing
+    @assert all(us -> eachindex(us) === inds, us_all)  # all arrays have the same indices
+    Threads.@threads :static for n ∈ 1:nthreads
+        a = ((n - 1) * length(inds)) ÷ nthreads
+        b = ((n - 0) * length(inds)) ÷ nthreads
+        # checkbounds(inds, (a + 1):b)
+        for us ∈ us_all
+            # This requires ûs to be a DenseArray (contiguous in memory).
+            p = pointer(us, a + 1)
+            n = (b - a) * sizeof(eltype(us))
+            val = zero(Cint)
+            ccall(:memset, Ptr{Cvoid}, (Ptr{Cvoid}, Cint, Csize_t), p, val, n)
+            # @views fill!(us[(a + 1):b], zero(eltype(us)))  # alternative (slower for complex data)
+        end
+    end
+    us_all
+end
+
 """
     exec_type1!(ûs::AbstractArray{<:Complex}, p::PlanNUFFT, vp::AbstractVector{<:Number})
     exec_type1!(ûs::NTuple{N, AbstractArray{<:Complex}}, p::PlanNUFFT, vp::NTuple{N, AbstractVector{<:Number}})
@@ -95,8 +124,8 @@ function exec_type1!(ûs_k::NTuple{C, AbstractArray{<:Complex}}, p::PlanNUFFT, 
     @timeit timer "Execute type 1" begin
         check_nufft_uniform_data(p, ûs_k)
         check_nufft_nonuniform_data(p, vp)
-        for u ∈ us
-            fill!(u, zero(eltype(u)))
+        @timeit timer "Fill with zeros" begin
+            fill_with_zeros_threaded!(us)
         end
         @timeit timer "Spreading" if with_blocking(blocks)
             spread_from_points_blocked!(kernels, blocks, us, points, vp)
@@ -258,8 +287,6 @@ function copy_deconvolve_to_oversampled!(
 
     # Start by zeroing-out the whole output arrays.
     # This can actually be quite costly for big transforms.
-    # We find it's faster to use a low-level call to memset (as opposed to a `for` loop, or
-    # `fill!`), parallelised over all threads.
     #
     # NOTE: In fact we just need to zero-out the oversampled region (to get zero-padding), but
     # that's more difficult to do and might even be more expensive in multiple dimensions,
@@ -267,21 +294,7 @@ function copy_deconvolve_to_oversampled!(
     #
     # TODO: specialise and optimise for 1D case? In that case it might actually be worth it
     # to zero-out only the oversampled region.
-    inds_oversampled = eachindex(first(ûs_all)) :: AbstractVector  # array uses linear indices
-    @assert isone(first(inds_oversampled))  # 1-based indexing
-    @assert all(ûs -> eachindex(ûs) === inds_oversampled, ûs_all)  # all arrays have the same indices
-    Threads.@threads :static for n ∈ 1:Threads.nthreads()
-        a = ((n - 1) * length(inds_oversampled)) ÷ Threads.nthreads()
-        b = ((n - 0) * length(inds_oversampled)) ÷ Threads.nthreads()
-        # checkbounds(inds_oversampled, (a + 1):b)
-        for ûs ∈ ûs_all
-            # This requires ûs to be a DenseArray (contiguous in memory).
-            p = pointer(ûs, a + 1)
-            n = (b - a) * sizeof(eltype(ûs))
-            val = zero(Cint)
-            ccall(:memset, Ptr{Cvoid}, (Ptr{Cvoid}, Cint, Csize_t), p, val, n)
-        end
-    end
+    fill_with_zeros_threaded!(ûs_all)
 
     inds_out = axes(first(ŵs_all))
     @assert inds_out == map(eachindex, index_map)
