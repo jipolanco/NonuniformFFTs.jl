@@ -189,7 +189,7 @@ function add_from_block!(
     inds_wrapped_first, inds_wrapped_tail = first(inds_wrapped), Base.tail(inds_wrapped)
     @inbounds for I_tail ∈ CartesianIndices(inds_tail)
         is_tail = Tuple(I_tail)
-        js_tail = map(getindex, inds_wrapped_tail, is_tail)
+        js_tail = map(inbounds_getindex, inds_wrapped_tail, is_tail)
         for i ∈ inds_first
             j = inds_wrapped_first[i]
             for (us, ws) ∈ zip(us_all, block)
@@ -212,8 +212,8 @@ function spread_onto_arrays!(
     imap_first, imap_tail = first(inds_mapping), Base.tail(inds_mapping)
     @inbounds for J_tail ∈ CartesianIndices(inds_tail)
         js_tail = Tuple(J_tail)
-        is_tail = map(getindex, imap_tail, js_tail)
-        gs_tail = map(getindex, vals_tail, js_tail)
+        is_tail = map(inbounds_getindex, imap_tail, js_tail)
+        gs_tail = map(inbounds_getindex, vals_tail, js_tail)
         gprod_tail = prod(gs_tail)
         for j ∈ inds_first
             i = imap_first[j]
@@ -240,7 +240,7 @@ function spread_onto_arrays_blocked!(
     vals_first, vals_tail = first(vals), Base.tail(vals)
     @inbounds for J_tail ∈ CartesianIndices(inds_tail)
         js_tail = Tuple(J_tail)
-        gs_tail = map(getindex, vals_tail, js_tail)
+        gs_tail = map(inbounds_getindex, vals_tail, js_tail)
         gprod_tail = prod(gs_tail)
         for j ∈ inds_first
             I = Is[j, js_tail...]

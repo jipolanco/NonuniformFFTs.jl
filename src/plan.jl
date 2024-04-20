@@ -122,6 +122,7 @@ struct PlanNUFFT{
         Points <: StructVector{NTuple{N, Treal}},
         Data <: AbstractNUFFTData{T, N, Nc},
         Blocks <: AbstractBlockData,
+        IndexMap <: NTuple{N, AbstractVector{Int}},
         Timer <: TimerOutput,
     }
     kernels :: Kernels
@@ -129,6 +130,7 @@ struct PlanNUFFT{
     points  :: Points  # non-uniform points (real values)
     data    :: Data
     blocks  :: Blocks
+    index_map :: IndexMap
     timer   :: Timer
 end
 
@@ -202,7 +204,12 @@ function _PlanNUFFT(
         FFTW.set_num_threads(Threads.nthreads())
     end
     nufft_data = init_plan_data(T, Ñs, ks, num_transforms; fftw_flags)
-    PlanNUFFT(kernel_data, σ, points, nufft_data, blocks, timer)
+    ûs = first(output_field(nufft_data)) :: AbstractArray{<:Complex}
+    index_map = map(ks, axes(ûs)) do k, inds
+        indmap = similar(inds, length(k))
+        non_oversampled_indices!(indmap, k, inds)
+    end
+    PlanNUFFT(kernel_data, σ, points, nufft_data, blocks, index_map, timer)
 end
 
 init_wavenumbers(::Type{T}, Ns::Dims) where {T <: AbstractFloat} = ntuple(Val(length(Ns))) do i
