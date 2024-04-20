@@ -36,6 +36,10 @@ export
 
 default_kernel() = BackwardsKaiserBesselKernel()
 
+# This is used at several places instead of getindex (inside of a `map`) to be sure that the
+# @inbounds is applied.
+inbounds_getindex(v, i) = @inbounds v[i]
+
 include("sorting.jl")
 include("blocking.jl")
 include("plan.jl")
@@ -214,8 +218,6 @@ function non_oversampled_indices!(
     end
     indmap
 end
-
-inbounds_getindex(v, i) = @inbounds v[i]
 
 function copy_deconvolve_to_non_oversampled!(
         ŵs_all::NTuple{C}, ûs_all::NTuple{C}, index_map, ϕ̂s, normfactor,
