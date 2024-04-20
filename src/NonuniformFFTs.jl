@@ -73,7 +73,7 @@ end
 
 # We find it's faster to use a low-level call to memset (as opposed to a `for` loop, or
 # `fill!`), parallelised over all threads.
-# In fact, this mostly seems to be the case for complex data, while for real data usign
+# In fact, this mostly seems to be the case for complex data, while for real data using
 # `fill!` gives the same performance...
 # Using memset only makes sense if the arrays are contiguous in memory (DenseArray).
 function fill_with_zeros_threaded!(
@@ -89,7 +89,7 @@ function fill_with_zeros_threaded!(
         b = ((n - 0) * length(inds)) ÷ nthreads
         # checkbounds(inds, (a + 1):b)
         for us ∈ us_all
-            # This requires ûs to be a DenseArray (contiguous in memory).
+            # This requires `us` to be a DenseArray (contiguous in memory).
             p = pointer(us, a + 1)
             n = (b - a) * sizeof(eltype(us))
             val = zero(Cint)
