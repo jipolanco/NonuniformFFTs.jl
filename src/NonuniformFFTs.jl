@@ -232,17 +232,17 @@ function copy_deconvolve_to_non_oversampled!(
     index_map_front, index_map_last = Base.front(index_map), last(index_map)
     ϕ̂s_front, ϕ̂s_last = Base.front(ϕ̂s), last(ϕ̂s)
 
-    Threads.@threads :static for ilast ∈ inds_last
+    Threads.@threads :static for i_last ∈ inds_last
         @inbounds begin
-            jlast = index_map_last[ilast]
-            ϕ̂last = ϕ̂s_last[ilast]
-            for Ifront ∈ CartesianIndices(inds_front)
-                I = CartesianIndex(Ifront, ilast)
-                js_front = map(inbounds_getindex, index_map_front, Tuple(Ifront))
-                ϕ̂_front = map(inbounds_getindex, ϕ̂s_front, Tuple(Ifront))
-                β = normfactor / (prod(ϕ̂_front) * ϕ̂last)   # deconvolution + FFT normalisation factor
+            j_last = index_map_last[i_last]
+            ϕ̂_last = ϕ̂s_last[i_last]
+            for I_front ∈ CartesianIndices(inds_front)
+                I = CartesianIndex(I_front, i_last)
+                js_front = map(inbounds_getindex, index_map_front, Tuple(I_front))
+                ϕ̂_front = map(inbounds_getindex, ϕ̂s_front, Tuple(I_front))
+                β = normfactor / (prod(ϕ̂_front) * ϕ̂_last)   # deconvolution + FFT normalisation factor
                 for (ŵs, ûs) ∈ zip(ŵs_all, ûs_all)
-                    ŵs[I] = β * ûs[js_front..., jlast]
+                    ŵs[I] = β * ûs[js_front..., j_last]
                 end
             end
         end
@@ -256,7 +256,17 @@ function copy_deconvolve_to_oversampled!(
     ) where {C}
     @assert C > 0
 
-    # TODO: is this needed? and can it be optimised, by zeroing out only what's needed?
+    # Start by zeroing-out the whole output arrays.
+    # This can actually be quite costly for big transforms.
+    # We find it's faster to use a low-level call to memset (as opposed to a `for` loop, or
+    # `fill!`), parallelised over all threads.
+    #
+    # In fact we just need to zero-out the oversampled region (to get zero-padding), but
+    # that's more difficult to do and might even be more expensive in multiple dimensions,
+    # since that region is not contiguous.
+    #
+    # TODO: specialise and optimise for 1D case? In that case it might actually be worth it
+    # to zero-out only the oversampled region.
     inds_oversampled = eachindex(first(ûs_all)) :: AbstractVector  # array uses linear indices
     @assert isone(first(inds_oversampled))  # 1-based indexing
     @assert all(ûs -> eachindex(ûs) === inds_oversampled, ûs_all)  # all arrays have the same indices
@@ -281,17 +291,17 @@ function copy_deconvolve_to_oversampled!(
     index_map_front, index_map_last = Base.front(index_map), last(index_map)
     ϕ̂s_front, ϕ̂s_last = Base.front(ϕ̂s), last(ϕ̂s)
 
-    Threads.@threads :static for ilast ∈ inds_last
+    Threads.@threads :static for i_last ∈ inds_last
         @inbounds begin
-            jlast = index_map_last[ilast]
-            ϕ̂last = ϕ̂s_last[ilast]
-            for Ifront ∈ CartesianIndices(inds_front)
-                I = CartesianIndex(Ifront, ilast)
-                js_front = map(inbounds_getindex, index_map_front, Tuple(Ifront))
-                ϕ̂_front = map(inbounds_getindex, ϕ̂s_front, Tuple(Ifront))
-                β = 1 / (prod(ϕ̂_front) * ϕ̂last)  # deconvolution factor
+            j_last = index_map_last[i_last]
+            ϕ̂_last = ϕ̂s_last[i_last]
+            for I_front ∈ CartesianIndices(inds_front)
+                I = CartesianIndex(I_front, i_last)
+                js_front = map(inbounds_getindex, index_map_front, Tuple(I_front))
+                ϕ̂_front = map(inbounds_getindex, ϕ̂s_front, Tuple(I_front))
+                β = 1 / (prod(ϕ̂_front) * ϕ̂_last)  # deconvolution factor
                 for (ŵs, ûs) ∈ zip(ŵs_all, ûs_all)
-                    ûs[js_front..., jlast] = β * ŵs[I]
+                    ûs[js_front..., j_last] = β * ŵs[I]
                 end
             end
         end
