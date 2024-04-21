@@ -120,20 +120,24 @@ function exec_type1! end
 
 function exec_type1!(ûs_k::NTuple{C, AbstractArray{<:Complex}}, p::PlanNUFFT, vp::NTuple{C}) where {C}
     (; points, kernels, data, blocks, index_map, timer,) = p
-    (; us, ks,) = data
+    (; us,) = data
     @timeit timer "Execute type 1" begin
         check_nufft_uniform_data(p, ûs_k)
         check_nufft_nonuniform_data(p, vp)
-        @timeit timer "Fill with zeros" begin
+
+        @timeit timer "(0) Fill with zeros" begin
             fill_with_zeros_threaded!(us)
         end
-        @timeit timer "Spreading" if with_blocking(blocks)
+
+        @timeit timer "(1) Spreading" if with_blocking(blocks)
             spread_from_points_blocked!(kernels, blocks, us, points, vp)
         else
             spread_from_points!(kernels, us, points, vp)  # single-threaded case?
         end
-        @timeit timer "Forward FFT" ûs = _type1_fft!(data)
-        @timeit timer "Deconvolution" begin
+
+        @timeit timer "(2) Forward FFT" ûs = _type1_fft!(data)
+
+        @timeit timer "(3) Deconvolution" begin
             T = real(eltype(first(us)))
             normfactor::T = prod(N -> 2π / N, size(first(us)))  # FFT normalisation factor
             ϕ̂s = map(fourier_coefficients, kernels)
@@ -185,17 +189,33 @@ function exec_type2! end
 
 function exec_type2!(vp::NTuple{C, AbstractVector}, p::PlanNUFFT, ûs_k::NTuple{C, AbstractArray{<:Complex}}) where {C}
     (; points, kernels, data, blocks, index_map, timer,) = p
-    (; us, ks,) = data
+    (; us,) = data
     @timeit timer "Execute type 2" begin
         check_nufft_uniform_data(p, ûs_k)
         check_nufft_nonuniform_data(p, vp)
-        @timeit timer "Deconvolution" begin
+        ûs = output_field(data)
+
+        # Start by zeroing-out the whole output arrays.
+        # This can actually be quite costly for big transforms.
+        #
+        # NOTE: In fact we just need to zero-out the oversampled region (to get zero-padding), but
+        # that's more difficult to do and might even be more expensive in multiple dimensions,
+        # since that region is not contiguous.
+        #
+        # TODO: specialise and optimise for 1D case? In that case it might actually be worth
+        # it to zero-out only the oversampled region.
+        @timeit timer "(0) Fill with zeros" begin
+            fill_with_zeros_threaded!(ûs)
+        end
+
+        @timeit timer "(1) Deconvolution" begin
             ϕ̂s = map(fourier_coefficients, kernels)
-            ûs = output_field(data)
             copy_deconvolve_to_oversampled!(ûs, ûs_k, index_map, ϕ̂s)
         end
-        @timeit timer "Backward FFT" _type2_fft!(data)
-        @timeit timer "Interpolate" begin
+
+        @timeit timer "(2) Backward FFT" _type2_fft!(data)
+
+        @timeit timer "(3) Interpolation" begin
             if with_blocking(blocks)
                 interpolate_blocked!(kernels, blocks, vp, us, points)
             else
@@ -284,18 +304,6 @@ function copy_deconvolve_to_oversampled!(
         ûs_all::NTuple{C, DenseArray}, ŵs_all::NTuple{C}, index_map, ϕ̂s,
     ) where {C}
     @assert C > 0
-
-    # Start by zeroing-out the whole output arrays.
-    # This can actually be quite costly for big transforms.
-    #
-    # NOTE: In fact we just need to zero-out the oversampled region (to get zero-padding), but
-    # that's more difficult to do and might even be more expensive in multiple dimensions,
-    # since that region is not contiguous.
-    #
-    # TODO: specialise and optimise for 1D case? In that case it might actually be worth it
-    # to zero-out only the oversampled region.
-    fill_with_zeros_threaded!(ûs_all)
-
     inds_out = axes(first(ŵs_all))
     @assert inds_out == map(eachindex, index_map)
 

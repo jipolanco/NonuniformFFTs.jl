@@ -10,7 +10,7 @@ function set_points!(::NullBlockData, points, xp, timer)
     resize!(points, length(xp))
     Base.require_one_based_indexing(points)
     N = type_length(eltype(xp))
-    @timeit timer "Copy + fold" begin
+    @timeit timer "(1) Copy + fold" begin
         @inbounds for (i, x) ∈ enumerate(xp)
             points[i] = to_unit_cell(NTuple{N}(x))  # converts `x` to Tuple if it's an SVector
         end
@@ -109,7 +109,7 @@ function set_points!(bd::BlockData, points, xp, timer)
     resize!(pointperm, Np)
     resize!(points, Np)
 
-    @timeit timer "Assign blocks" @inbounds for (i, x⃗) ∈ pairs(xp)
+    @timeit timer "(1) Assign blocks" @inbounds for (i, x⃗) ∈ pairs(xp)
         # Get index of block where point x⃗ is located.
         y⃗ = to_unit_cell(NTuple{N}(x⃗))  # converts `x⃗` to Tuple if it's an SVector
         is = map(y⃗, block_sizes) do x, Δx  # here x is already in [0, 2π)
@@ -138,7 +138,7 @@ function set_points!(bd::BlockData, points, xp, timer)
     # are concentrated, improving load balance.
     map_blocks_to_threads!(bd.blocks_per_thread, cumulative_npoints_per_block)
 
-    @timeit timer "Sort" begin
+    @timeit timer "(2) Sortperm" begin
         quicksort_perm!(pointperm, blockidx)
     end
 
@@ -147,7 +147,7 @@ function set_points!(bd::BlockData, points, xp, timer)
     # This is very likely due to false sharing (https://en.wikipedia.org/wiki/False_sharing),
     # since all threads modify the same data in "random" order.
     if bd.sort_points === True()
-        @timeit timer "Copy sorted" begin
+        @timeit timer "(3) Permute points" begin
             @inbounds for i ∈ eachindex(pointperm)
                 j = pointperm[i]
                 x⃗ = xp[j]
