@@ -36,8 +36,8 @@ export
 
 default_kernel() = BackwardsKaiserBesselKernel()
 
-# This is used at several places instead of getindex (inside of a `map`) to be sure that the
-# @inbounds is applied.
+# This is used at several places instead of getindex (inside of a `map`) to make sure that
+# the @inbounds is applied.
 inbounds_getindex(v, i) = @inbounds v[i]
 
 include("sorting.jl")

@@ -102,6 +102,28 @@ The created plan contains all data needed to perform NUFFTs for non-uniform data
   By default the plan creates its own timer.
   One can visualise the time spent on different parts of the NUFFT computation using `p.timer`.
 
+# FFT size and performance
+
+For performance reasons, when doing FFTs one usually wants the size of the input along each
+dimension to be a power of 2 (ideally), or the product of powers of small prime numbers (2,
+3, 5, …). The problem is that, with the NUFFT, one does not directly control the FFT size
+due to the oversampling factor ``σ``, which may be any real number ``σ > 1``. That is, for
+an input of size ``N``, FFTs are performed on an oversampled grid of size ``Ñ ≈ σN``. Note
+that ``σN`` is generally not an integer, hence the ``≈``.
+
+The aim of this section is to clarify how ``Ñ`` is actually chosen, so that one can predict
+its value for given inputs ``N`` and ``σ``.
+This may be better understood in actual code:
+
+```julia
+Ñ = nextprod((2, 3, 5), floor(Int, σ * N))
+```
+
+Basically, we truncate ``σN`` to an integer, and then we choose ``Ñ`` as the next integer
+that can be written as the product of powers of 2, 3 and 5
+(see [`nextprod`](https://docs.julialang.org/en/v1/base/math/#Base.nextprod)).
+Most often, the result will be greater than or equal to ``σN``.
+
 # Using real non-uniform data
 
 In some applications, the non-uniform data to be transformed is purely real.

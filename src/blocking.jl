@@ -143,6 +143,7 @@ function set_points!(bd::BlockData, points, xp, timer)
     end
 
     # Write sorted points into `points`.
+    # (This should rather be called "permute" instead of "sort"...)
     # Note: we don't use threading since it seems to be much slower.
     # This is very likely due to false sharing (https://en.wikipedia.org/wiki/False_sharing),
     # since all threads modify the same data in "random" order.
