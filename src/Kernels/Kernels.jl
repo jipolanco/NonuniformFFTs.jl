@@ -68,9 +68,20 @@ function init_fourier_coefficients!(g::AbstractKernelData, ks::AbstractVector)
     gk
 end
 
+# Assign a cell index to a location `x`. This assumes 0 ≤ x < 2π.
+@inline function point_to_cell(x, Δx)
+    r = x / Δx
+    i = unsafe_trunc(Int, r)  # assumes r ≥ 0
+    # When x is very close to 2π, then doing (x / Δx) * Δx may actually be ≥ 2π due to
+    # roundoff errors. We account for this below.
+    L = 2 * oftype(x, π)  # = 2π
+    x_new = r * Δx
+    ifelse(x_new < L, i + 1, i)  # index such that xs[j] ≤ x₀ < xs[j + 1]
+end
+
 @inline function evaluate_kernel(g::AbstractKernelData, x₀)
     dx = gridstep(g)
-    i = floor(Int, x₀ / dx) + 1  # such that xs[i] ≤ x₀ < xs[i + 1]
+    i = point_to_cell(x₀, dx)
     evaluate_kernel(g, x₀, i)
 end
 

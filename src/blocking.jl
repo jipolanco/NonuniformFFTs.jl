@@ -112,10 +112,7 @@ function set_points!(bd::BlockData, points, xp, timer)
     @timeit timer "(1) Assign blocks" @inbounds for (i, x⃗) ∈ pairs(xp)
         # Get index of block where point x⃗ is located.
         y⃗ = to_unit_cell(NTuple{N}(x⃗))  # converts `x⃗` to Tuple if it's an SVector
-        is = map(y⃗, block_sizes) do x, Δx  # here x is already in [0, 2π)
-            # @assert 0 ≤ x < 2π
-            1 + floor(Int, x / Δx)
-        end
+        is = map(Kernels.point_to_cell, y⃗, block_sizes)
         if bd.sort_points === False()
             points[i] = y⃗  # copy folded point (doesn't need to be sorted)
         end
