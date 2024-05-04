@@ -104,31 +104,65 @@ function interpolate_from_arrays(
     vs
 end
 
-# See add_from_block! and spread_onto_arrays_blocked! for comments on performance.
+# This is equivalent to spread_onto_arrays_blocked! in spreading.
 function interpolate_from_arrays_blocked(
-        us::NTuple{C, AbstractArray{T, D}} where {T},
+        us::NTuple{C, AbstractArray{T, D}},
         Is::CartesianIndices{D},
-        vals::NTuple{D, Tuple},
-    ) where {C, D}
-    vs = ntuple(_ -> zero(eltype(first(us))), Val(C))
-    inds = map(eachindex, vals)
-    inds_first, inds_tail = first(inds), Base.tail(inds)
-    vals_first, vals_tail = first(vals), Base.tail(vals)
-    @inbounds for J_tail ∈ CartesianIndices(inds_tail)
-        js_tail = Tuple(J_tail)
-        gs_tail = map(inbounds_getindex, vals_tail, js_tail)
-        gprod_tail = prod(gs_tail)
-        for j ∈ inds_first
-            I = Is[j, js_tail...]
-            gprod = gprod_tail * vals_first[j]
-            vs_new = ntuple(Val(C)) do n
+        vals::NTuple{D, NTuple{M, T}},
+    ) where {C, D, M, T}
+    # ntuple(Val(C)) do i
+    #     _interpolate_from_arrays_blocked(us[i], Is, vals)
+    # end
+    if @generated
+        gprod_init = Symbol(:gprod_, D)  # the name of this variable is important!
+        quote
+            inds = map(eachindex, vals)
+            @nexprs $C j -> (v_j = zero($T))
+            @nextract $C u us  # creates variables u_1, u_2, ..., u_C
+            $gprod_init = one($T)
+            # Split loop onto dimensions 1 and 2:D.
+            # The loop over the first (fastest) dimension is avoided and SVectors are used
+            # instead.
+            @inbounds @nloops(
+                $(D - 1),
+                i,
+                d -> inds[d + 1],  # for i_d ∈ inds[d]
+                d -> begin
+                    gprod_d = gprod_{d + 1} * vals[d + 1][i_d]  # add factor for dimension d + 1
+                end,
+                begin
+                    is_tail = @ntuple $(D - 1) i
+                    # Try to automatically take advantage of SIMD vectorisation
+                    # (effectiveness may depend on half support size M...).
+                    gs = gprod_1 * SVector{$M}(vals[1])
+                    @nexprs $C j -> begin
+                        udata_j = @ntuple $M k -> u_j[Is[k, is_tail...]]
+                        uvec_j = SVector{$M}(udata_j)
+                        v_j += gs ⋅ uvec_j
+                    end
+                end,
+            )
+            @ntuple $C v
+        end
+    else
+        vs = ntuple(_ -> zero(eltype(first(us))), Val(C))
+        inds = map(eachindex, vals)
+        inds_tail = Base.tail(inds)
+        vals_tail = Base.tail(vals)
+        @inbounds for J_tail ∈ CartesianIndices(inds_tail)
+            js_tail = Tuple(J_tail)
+            gs_tail = map(inbounds_getindex, vals_tail, js_tail)
+            gprod_tail = prod(gs_tail)
+            gs = gprod_tail * SVector(vals[1])
+            vs_new = map(us) do u
                 @inline
-                @inbounds gprod * us[n][I]
+                udata = ntuple(k -> @inbounds(u[Is[k, js_tail...]]), Val(M))
+                gs ⋅ SVector(udata)
             end
             vs = vs .+ vs_new
         end
+        vs
     end
-    vs
 end
 
 function interpolate_blocked!(
