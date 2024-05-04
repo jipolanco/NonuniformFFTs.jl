@@ -184,7 +184,6 @@ function add_from_block!(
         block::NTuple{C, AbstractArray},
         inds_wrapped::NTuple,
     ) where {C}
-    # TODO: is it worth it to combine C operations?
     for i ∈ 1:C
         _add_from_block!(us_all[i], block[i], inds_wrapped)
     end
@@ -287,8 +286,8 @@ function spread_onto_arrays_blocked!(
         vs::NTuple{C, T},
     ) where {C, T, D}
     # NOTE: When C > 1, we found that we gain nothing (in terms of performance) by combining
-    # operations over C arrays at once. So we simply perform the same operation C times.
-    # TODO: actually, is it worth it to combine all operations? (see interpolations)
+    # operations over C arrays at once. Things actually get much slower for some reason.
+    # So we simply perform the same operation C times.
     for i ∈ 1:C
         _spread_onto_arrays_blocked!(us[i], Is, vals, vs[i])
     end

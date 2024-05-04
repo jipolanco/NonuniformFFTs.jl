@@ -215,12 +215,11 @@ function interpolate_blocked!(
 end
 
 # This is equivalent to add_from_block! in spreading.
-# TODO: is it worth it to combine operations here?
 function copy_to_block!(
         block::NTuple{C, AbstractArray},
         us_all::NTuple{C, AbstractArray},
-        inds_wrapped::NTuple,
-    ) where {C}
+        inds_wrapped::NTuple{D, NTuple{2, UnitRange}},
+    ) where {C, D}
     for i ∈ 1:C
         _copy_to_block!(block[i], us_all[i], inds_wrapped)
     end
