@@ -200,6 +200,7 @@ function add_from_block!(
     us_all
 end
 
+# TODO: optimise as blocked version, using CartesianIndices.
 function spread_onto_arrays!(
         us::NTuple{C, AbstractArray{T, D}} where {T},
         inds_mapping::NTuple{D, Tuple},
@@ -228,27 +229,54 @@ end
 
 # This is basically the same as the non-blocked version, but uses CartesianIndices instead
 # of tuples (since indices don't "jump" due to periodic wrapping).
-# Moreover, splitting the first index from the other ones seems to improve performance.
 function spread_onto_arrays_blocked!(
-        us::NTuple{C, AbstractArray{T, D}} where {T},
+        us::NTuple{C, AbstractArray{T, D}},
         Is::CartesianIndices{D},
         vals::NTuple{D, Tuple},
-        vs::NTuple{C},
-    ) where {C, D}
-    inds = map(eachindex, vals)
-    inds_first, inds_tail = first(inds), Base.tail(inds)
-    vals_first, vals_tail = first(vals), Base.tail(vals)
-    @inbounds for J_tail ∈ CartesianIndices(inds_tail)
-        js_tail = Tuple(J_tail)
-        gs_tail = map(inbounds_getindex, vals_tail, js_tail)
-        gprod_tail = prod(gs_tail)
-        for j ∈ inds_first
-            I = Is[j, js_tail...]
-            gprod = gprod_tail * vals_first[j]
-            for (u, v) ∈ zip(us, vs)
-                u[I] += v * gprod
-            end
-        end
+        vs::NTuple{C, T},
+    ) where {C, T, D}
+    # NOTE: When C > 1, we found that we gain nothing (in terms of performance) by combining
+    # operations over C arrays at once. So we simply perform the same operation C times.
+    for i ∈ 1:C
+        _spread_onto_arrays_blocked!(us[i], Is, vals, vs[i])
     end
     us
+end
+
+function _spread_onto_arrays_blocked!(
+        u::AbstractArray{T, D},
+        Is::CartesianIndices{D},
+        vals::NTuple{D, Tuple},
+        v::T,
+    ) where {T, D}
+    if @generated
+        gprod_init = Symbol(:gprod_, D + 1)  # the name of this variable is important!
+        quote
+            inds = map(eachindex, vals)
+            $gprod_init = v
+            @inbounds @nloops(
+                $D,
+                i,
+                d -> inds[d],  # for i_d ∈ inds[d]
+                d -> begin
+                    gprod_d = gprod_{d + 1} * vals[d][i_d]  # add factor for dimension d
+                end,
+                begin
+                    I = @nref $D Is i  # = Is[i_1, i_2, ..., i_D]
+                    u[I] += gprod_1
+                end,
+            )
+            u
+        end
+    else
+        inds = map(eachindex, vals)
+        Js = CartesianIndices(inds)
+        @inbounds for J ∈ Js
+            gs = map(inbounds_getindex, vals, Tuple(J))
+            gprod = v * prod(gs)
+            I = Is[J]
+            u[I] += gprod
+        end
+        u
+    end
 end
