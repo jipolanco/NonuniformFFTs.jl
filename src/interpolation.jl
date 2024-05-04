@@ -110,9 +110,6 @@ function interpolate_from_arrays_blocked(
         Is::CartesianIndices{D},
         vals::NTuple{D, NTuple{M, T}},
     ) where {C, D, M, T}
-    # ntuple(Val(C)) do i
-    #     _interpolate_from_arrays_blocked(us[i], Is, vals)
-    # end
     if @generated
         gprod_init = Symbol(:gprod_, D)  # the name of this variable is important!
         quote
@@ -218,6 +215,7 @@ function interpolate_blocked!(
 end
 
 # This is equivalent to add_from_block! in spreading.
+# TODO: is it worth it to combine operations here?
 function copy_to_block!(
         block::NTuple{C, AbstractArray},
         us_all::NTuple{C, AbstractArray},
@@ -235,8 +233,24 @@ function _copy_to_block!(
         inds_wrapped::NTuple{D, NTuple{2, UnitRange}},
     ) where {T, D}
     if @generated
-        # TODO: implement
-        aaa
+        loop_core = quote
+            n += 1
+            js = @ntuple $D j
+            ws[n] = us[js...]
+        end
+        ex_loop = _generate_split_loop_expr(D, :inds_wrapped, loop_core)
+        quote
+            number_of_indices_per_dimension = @ntuple($D, i -> sum(length, inds_wrapped[i]))
+            @assert size(ws) == number_of_indices_per_dimension
+            Base.require_one_based_indexing(ws)
+            Base.require_one_based_indexing(us)
+            n = 0
+            @inbounds begin
+                $ex_loop
+            end
+            @assert n == length(ws)
+            ws
+        end
     else
         @assert size(ws) == map(tup -> sum(length, tup), inds_wrapped)
         Base.require_one_based_indexing(ws)
