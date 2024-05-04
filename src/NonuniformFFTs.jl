@@ -5,7 +5,7 @@ using FFTW: FFTW
 using LinearAlgebra: mul!
 using TimerOutputs: TimerOutput, @timeit
 using Static: Static, StaticBool, False, True
-using Base.Cartesian: @nloops, @nref
+using Base.Cartesian: @nloops, @nref, @ntuple
 using PrecompileTools: PrecompileTools, @setup_workload, @compile_workload
 
 include("Kernels/Kernels.jl")
