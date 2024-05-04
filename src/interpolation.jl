@@ -151,7 +151,6 @@ function interpolate_blocked!(
         j_start = bd.blocks_per_thread[i] + 1
         j_end = bd.blocks_per_thread[i + 1]
         block = buffers[i]
-        inds_wrapped = bd.buffers_for_indices[i]
         @inbounds for j ∈ j_start:j_end
             a = bd.cumulative_npoints_per_block[j]
             b = bd.cumulative_npoints_per_block[j + 1]
@@ -161,8 +160,8 @@ function interpolate_blocked!(
             I₀ = indices[j]
             Ia = I₀ + oneunit(I₀) - CartesianIndex(Ms)
             Ib = I₀ + CartesianIndex(block_dims) + CartesianIndex(Ms)
-            wrap_periodic!(inds_wrapped, Ia, Ib, size(first(us)))
-            copy_to_block!(block, us, inds_wrapped)
+            inds_split = split_periodic(Ia, Ib, size(first(us)))
+            copy_to_block!(block, us, inds_split)
 
             # Iterate over all points in the current block
             for k ∈ (a + 1):b
@@ -184,31 +183,39 @@ function interpolate_blocked!(
     vp_all
 end
 
-# See add_from_block! for comments on performance.
+# This is equivalent to add_from_block! in spreading.
 function copy_to_block!(
         block::NTuple{C, AbstractArray},
         us_all::NTuple{C, AbstractArray},
-        inds_wrapped::Tuple,
+        inds_wrapped::NTuple,
     ) where {C}
-    for ws ∈ block
-        @assert size(ws) == map(length, inds_wrapped)
+    for i ∈ 1:C
+        _copy_to_block!(block[i], us_all[i], inds_wrapped)
+    end
+    block
+end
+
+function _copy_to_block!(
+        ws::AbstractArray{T, D},
+        us::AbstractArray{T, D},
+        inds_wrapped::NTuple{D, NTuple{2, UnitRange}},
+    ) where {T, D}
+    if @generated
+        # TODO: implement
+        aaa
+    else
+        @assert size(ws) == map(tup -> sum(length, tup), inds_wrapped)
         Base.require_one_based_indexing(ws)
-    end
-    for us ∈ us_all
         Base.require_one_based_indexing(us)
-    end
-    inds = axes(first(block))
-    inds_first, inds_tail = first(inds), Base.tail(inds)
-    inds_wrapped_first, inds_wrapped_tail = first(inds_wrapped), Base.tail(inds_wrapped)
-    @inbounds for I_tail ∈ CartesianIndices(inds_tail)
-        is_tail = Tuple(I_tail)
-        js_tail = map(inbounds_getindex, inds_wrapped_tail, is_tail)
-        for i ∈ inds_first
-            j = inds_wrapped_first[i]
-            for (us, ws) ∈ zip(us_all, block)
+        iters = map(enumerate ∘ Iterators.flatten, inds_wrapped)
+        iter_first, iters_tail =  first(iters), Base.tail(iters)
+        @inbounds for inds_tail ∈ Iterators.product(iters_tail...)
+            is_tail = map(first, inds_tail)
+            js_tail = map(last, inds_tail)
+            for (i, j) ∈ iter_first
                 ws[i, is_tail...] = us[j, js_tail...]
             end
         end
+        ws
     end
-    us_all
 end

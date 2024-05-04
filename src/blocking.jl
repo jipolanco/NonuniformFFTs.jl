@@ -49,7 +49,6 @@ struct BlockData{
     buffers :: Buffers            # length = nthreads
     blocks_per_thread :: Vector{Int}  # maps a set of blocks i_start:i_end to a thread (length = nthreads + 1)
     indices :: Indices    # index associated to each block (length = num_blocks)
-    buffers_for_indices :: Vector{NTuple{N, Vector{Int}}}  # maps values of current buffer to indices in global array (length = nthreads())
     cumulative_npoints_per_block :: Vector{Int}    # cumulative sum of number of points in each block (length = 1 + num_blocks, initial value is 0)
     blockidx  :: Vector{Int}  # linear index of block associated to each point (length = Np)
     pointperm :: Vector{Int}  # index permutation for sorting points according to their block (length = Np)
@@ -84,16 +83,12 @@ function BlockData(
     end
     indices = CartesianIndices(indices_tup)
     nblocks = length(indices)  # total number of blocks
-    buffers_for_indices = Vector{NTuple{D, Vector{Int}}}(undef, Nt)
-    for i ∈ eachindex(buffers_for_indices)
-        buffers_for_indices[i] = map(N -> Vector{Int}(undef, N), dims)
-    end
     cumulative_npoints_per_block = Vector{Int}(undef, nblocks + 1)
     blockidx = Int[]
     pointperm = Int[]
     blocks_per_thread = zeros(Int, Nt + 1)
     BlockData(
-        block_dims, block_sizes, buffers, blocks_per_thread, indices, buffers_for_indices,
+        block_dims, block_sizes, buffers, blocks_per_thread, indices,
         cumulative_npoints_per_block, blockidx, pointperm,
         sort_points,
     )
