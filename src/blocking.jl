@@ -63,6 +63,12 @@ function BlockData(
     @assert Nc > 0
     Nt = Threads.nthreads()
     # Nt = ifelse(Nt == 1, zero(Nt), Nt)  # this disables blocking if running on single thread
+    # Reduce block size if the total grid size is not sufficiently large in a given
+    # direction. This maximum block size is assumed in spreading and interpolation.
+    block_dims = map(Ñs, block_dims) do N, B
+        @assert N - M > 0
+        min(B, N ÷ 2, N - M)
+    end
     dims = block_dims .+ 2M  # include padding for values outside of block
     Tr = real(T)
     block_sizes = map(Ñs, block_dims) do N, B
