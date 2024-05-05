@@ -202,7 +202,9 @@ function _PlanNUFFT(
     Ñs = map(Ns) do N
         # We try to make sure that each dimension is a product of powers of small primes,
         # which is good for FFT performance.
-        nextprod((2, 3, 5), floor(Int, σ_wanted * N))
+        Ñ = nextprod((2, 3, 5), floor(Int, σ_wanted * N))
+        check_nufft_size(Ñ, h)
+        Ñ
     end
     Tr = real(T)
     σ::Tr = maximum(Ñs ./ Ns)  # actual oversampling factor
@@ -232,6 +234,19 @@ function _PlanNUFFT(
         non_oversampled_indices!(indmap, k, inds)
     end
     PlanNUFFT(kernel_data, σ, points, nufft_data, blocks, index_map, timer)
+end
+
+function check_nufft_size(Ñ, ::HalfSupport{M}) where M
+    if Ñ < 2 * M
+        throw(ArgumentError(
+            lazy"""
+            data size is too small: σN = $Ñ < $(2M) = 2M. Try either:
+                1. increasing the number of data points N 
+                2. increasing the oversampling factor σ
+                3. decreasing the kernel half-support M"""
+        ))
+    end
+    nothing
 end
 
 init_wavenumbers(::Type{T}, Ns::Dims) where {T <: AbstractFloat} = ntuple(Val(length(Ns))) do i
