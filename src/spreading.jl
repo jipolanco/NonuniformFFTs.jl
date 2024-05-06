@@ -112,9 +112,7 @@ function spread_from_points_blocked!(
 
             # Iterate over all points in the current block
             I₀ = indices[j]
-            for ws ∈ block
-                fill!(ws, zero(eltype(ws)))
-            end
+            fill_with_zeros_serial!(block)
             for k ∈ (a + 1):b
                 l = pointperm[k]
                 # @assert bd.blockidx[l] == j  # check that point is really in the current block
