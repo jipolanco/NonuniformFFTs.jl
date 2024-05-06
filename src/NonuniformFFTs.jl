@@ -5,6 +5,9 @@ using FFTW: FFTW
 using LinearAlgebra: mul!
 using TimerOutputs: TimerOutput, @timeit
 using Static: Static, StaticBool, False, True
+using StaticArrays: SVector
+using LinearAlgebra: ⋅
+using Base.Cartesian: @nloops, @nref, @ntuple, @nextract, @nexprs
 using PrecompileTools: PrecompileTools, @setup_workload, @compile_workload
 
 include("Kernels/Kernels.jl")
@@ -341,7 +344,7 @@ end
     Ts = [Float64, ComplexF64]
     σ = 1.25
     for kernel ∈ kernels, m ∈ ms, T ∈ Ts, ndims ∈ ndims_all
-        dims = ntuple(_ -> 12, ndims)  # σN = 16
+        dims = ntuple(_ -> 13, ndims)  # floor(σN) = 16
         Np = 16  # number of non-uniform points
         xs = ntuple(_ -> rand(real(T), Np) .* 2π, ndims)
         Ns = ntuple(ndims) do i

@@ -105,7 +105,6 @@ function spread_from_points_blocked!(
         j_start = bd.blocks_per_thread[i] + 1
         j_end = bd.blocks_per_thread[i + 1]
         block = buffers[i]
-        inds_wrapped = bd.buffers_for_indices[i]
         @inbounds for j ∈ j_start:j_end
             a = bd.cumulative_npoints_per_block[j]
             b = bd.cumulative_npoints_per_block[j + 1]
@@ -131,12 +130,13 @@ function spread_from_points_blocked!(
             # Indices of current block including padding
             Ia = I₀ + oneunit(I₀) - CartesianIndex(Ms)
             Ib = I₀ + CartesianIndex(block_dims) + CartesianIndex(Ms)
-            wrap_periodic!(inds_wrapped, Ia, Ib, size(first(us_all)))
+            inds_split = split_periodic(Ia, Ib, size(first(us_all)))
+
 
             # Add data from block to output array.
             # Note that only one thread can write at a time.
             lock(lck) do
-                add_from_block!(us_all, block, inds_wrapped)
+                add_from_block!(us_all, block, inds_split)
             end
         end
     end
@@ -144,62 +144,113 @@ function spread_from_points_blocked!(
     us_all
 end
 
-function wrap_periodic!(inds::NTuple{D}, Ia::CartesianIndex{D}, Ib::CartesianIndex{D}, Ns::Dims{D}) where {D}
-    for j ∈ 1:D
-        wrap_periodic!(inds[j], Ia[j]:Ib[j], Ns[j])
+function split_periodic(
+        Ia::CartesianIndex{D}, Ib::CartesianIndex{D}, Ns::Dims{D},
+    ) where {D}
+    ntuple(Val(D)) do j
+        split_periodic(Ia[j]:Ib[j], Ns[j])
     end
-    inds
 end
 
-function wrap_periodic!(inds::AbstractVector, irange::AbstractRange, N)
-    for j ∈ eachindex(inds, irange)
-        inds[j] = wrap_periodic(irange[j], N)
+# Split range into two contiguous ranges in 1:N after periodic wrapping.
+# We assume the input range only goes outside 1:N either on the left or the right of the
+# range (and by less than N values).
+# This requires the block size B to be smaller than the dataset size N.
+# More exactly, we need B ≤ N - M where M is the half kernel support (= the block padding).
+function split_periodic(irange::AbstractUnitRange, N)
+    T = typeof(irange)
+    if irange[begin] < 1
+        # We assume the range includes the 1.
+        n = searchsortedlast(irange, 1)
+        # @assert n > firstindex(irange) && irange[n] == 1
+        a = (irange[begin]:irange[n - 1]) .+ N  # indices [..., N - 1, N]
+        b = irange[n]:irange[end]  # indices [1, 2, ...]
+    elseif last(irange) > N
+        # We assume the range includes N.
+        n = searchsortedlast(irange, N)
+        # @assert n < lastindex(irange) && irange[n] == N
+        a = irange[begin]:irange[n]
+        b = (irange[n + 1]:irange[end]) .- N
+    else
+        # A single contiguous range, plus an empty one.
+        a = irange
+        b = T(0:-1)  # empty range
     end
-    inds
-end
-
-function wrap_periodic(i::Integer, N::Integer)
-    while i ≤ 0
-        i += N
-    end
-    while i > N
-        i -= N
-    end
-    i
+    (a, b) :: Tuple{T, T}
 end
 
 function add_from_block!(
         us_all::NTuple{C, AbstractArray},
         block::NTuple{C, AbstractArray},
-        inds_wrapped::Tuple,
+        inds_wrapped::NTuple,
     ) where {C}
-    for ws ∈ block
-        @assert size(ws) == map(length, inds_wrapped)
-        Base.require_one_based_indexing(ws)
-    end
-    for us ∈ us_all
-        Base.require_one_based_indexing(us)
-    end
-    # We explicitly split the first index (fastest) from the other ones.
-    # This seems to noticeably improve performance, maybe because the compiler can use SIMD
-    # on the innermost loop?
-    # Note that performance of this function is critical to get good parallel scaling!
-    inds = axes(first(block))
-    inds_first, inds_tail = first(inds), Base.tail(inds)
-    inds_wrapped_first, inds_wrapped_tail = first(inds_wrapped), Base.tail(inds_wrapped)
-    @inbounds for I_tail ∈ CartesianIndices(inds_tail)
-        is_tail = Tuple(I_tail)
-        js_tail = map(inbounds_getindex, inds_wrapped_tail, is_tail)
-        for i ∈ inds_first
-            j = inds_wrapped_first[i]
-            for (us, ws) ∈ zip(us_all, block)
-                us[j, js_tail...] += ws[i, is_tail...]
-            end
-        end
+    for i ∈ 1:C
+        _add_from_block!(us_all[i], block[i], inds_wrapped)
     end
     us_all
 end
 
+# Recursively generate a loop over `d` dimensions, where each dimension is split into 2 sets
+# of indices.
+# This function generates a Julia expression which is included in a @generated function.
+function _generate_split_loop_expr(d, inds, loop_core)
+    if d == 0
+        return loop_core
+    end
+    jd = Symbol(:j_, d)  # e.g. j_3
+    ex_prev = _generate_split_loop_expr(d - 1, inds, loop_core)
+    quote
+        for $jd ∈ $inds[$d][1]
+            $ex_prev
+        end
+        for $jd ∈ $inds[$d][2]
+            $ex_prev
+        end
+    end
+end
+
+function _add_from_block!(
+        us::AbstractArray{T, D},
+        ws::AbstractArray{T, D},
+        inds_wrapped::NTuple{D, NTuple{2, UnitRange}},
+    ) where {T, D}
+    if @generated
+        loop_core = quote
+            n += 1
+            js = @ntuple $D j
+            us[js...] += ws[n]  # us[j_1, j_2, ..., j_D] += ws[n]
+        end
+        ex_loop = _generate_split_loop_expr(D, :inds_wrapped, loop_core)
+        quote
+            number_of_indices_per_dimension = @ntuple($D, i -> sum(length, inds_wrapped[i]))
+            @assert size(ws) == number_of_indices_per_dimension
+            Base.require_one_based_indexing(ws)
+            Base.require_one_based_indexing(us)
+            n = 0
+            @inbounds begin
+                $ex_loop
+            end
+            @assert n == length(ws)
+            us
+        end
+    else
+        @assert size(ws) == map(tup -> sum(length, tup), inds_wrapped)
+        Base.require_one_based_indexing(ws)
+        Base.require_one_based_indexing(us)
+        iters = map(enumerate ∘ Iterators.flatten, inds_wrapped)
+        iter_first, iters_tail =  first(iters), Base.tail(iters)
+        @inbounds for inds_tail ∈ Iterators.product(iters_tail...)
+            is_tail = map(first, inds_tail)
+            js_tail = map(last, inds_tail)
+            for (i, j) ∈ iter_first
+                us[j, js_tail...] += ws[i, is_tail...]
+            end
+        end
+        us
+    end
+end
+
+# TODO: optimise as blocked version, using CartesianIndices.
 function spread_onto_arrays!(
         us::NTuple{C, AbstractArray{T, D}} where {T},
         inds_mapping::NTuple{D, Tuple},
@@ -228,27 +279,55 @@ end
 
 # This is basically the same as the non-blocked version, but uses CartesianIndices instead
 # of tuples (since indices don't "jump" due to periodic wrapping).
-# Moreover, splitting the first index from the other ones seems to improve performance.
 function spread_onto_arrays_blocked!(
-        us::NTuple{C, AbstractArray{T, D}} where {T},
+        us::NTuple{C, AbstractArray{T, D}},
         Is::CartesianIndices{D},
         vals::NTuple{D, Tuple},
-        vs::NTuple{C},
-    ) where {C, D}
-    inds = map(eachindex, vals)
-    inds_first, inds_tail = first(inds), Base.tail(inds)
-    vals_first, vals_tail = first(vals), Base.tail(vals)
-    @inbounds for J_tail ∈ CartesianIndices(inds_tail)
-        js_tail = Tuple(J_tail)
-        gs_tail = map(inbounds_getindex, vals_tail, js_tail)
-        gprod_tail = prod(gs_tail)
-        for j ∈ inds_first
-            I = Is[j, js_tail...]
-            gprod = gprod_tail * vals_first[j]
-            for (u, v) ∈ zip(us, vs)
-                u[I] += v * gprod
-            end
-        end
+        vs::NTuple{C, T},
+    ) where {C, T, D}
+    # NOTE: When C > 1, we found that we gain nothing (in terms of performance) by combining
+    # operations over C arrays at once. Things actually get much slower for some reason.
+    # So we simply perform the same operation C times.
+    for i ∈ 1:C
+        _spread_onto_arrays_blocked!(us[i], Is, vals, vs[i])
     end
     us
+end
+
+function _spread_onto_arrays_blocked!(
+        u::AbstractArray{T, D},
+        Is::CartesianIndices{D},
+        vals::NTuple{D, Tuple},
+        v::T,
+    ) where {T, D}
+    if @generated
+        gprod_init = Symbol(:gprod_, D + 1)  # the name of this variable is important!
+        quote
+            inds = map(eachindex, vals)
+            $gprod_init = v
+            @inbounds @nloops(
+                $D,
+                i,
+                d -> inds[d],  # for i_d ∈ inds[d]
+                d -> begin
+                    gprod_d = gprod_{d + 1} * vals[d][i_d]  # add factor for dimension d
+                end,
+                begin
+                    I = @nref $D Is i  # = Is[i_1, i_2, ..., i_D]
+                    u[I] += gprod_1
+                end,
+            )
+            u
+        end
+    else
+        inds = map(eachindex, vals)
+        Js = CartesianIndices(inds)
+        @inbounds for J ∈ Js
+            gs = map(inbounds_getindex, vals, Tuple(J))
+            gprod = v * prod(gs)
+            I = Is[J]
+            u[I] += gprod
+        end
+        u
+    end
 end
