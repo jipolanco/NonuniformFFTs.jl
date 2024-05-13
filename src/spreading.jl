@@ -130,7 +130,6 @@ function spread_from_points_blocked!(
             Ib = I₀ + CartesianIndex(block_dims) + CartesianIndex(Ms)
             inds_split = split_periodic(Ia, Ib, size(first(us_all)))
 
-
             # Add data from block to output array.
             # Note that only one thread can write at a time.
             lock(lck) do
@@ -248,7 +247,7 @@ function _add_from_block!(
     end
 end
 
-# TODO: optimise as blocked version, using CartesianIndices.
+# TODO: optimise as blocked version, using Base.Cartesian.
 function spread_onto_arrays!(
         us::NTuple{C, AbstractArray{T, D}} where {T},
         inds_mapping::NTuple{D, Tuple},
@@ -299,20 +298,26 @@ function _spread_onto_arrays_blocked!(
         v::T,
     ) where {T, D}
     if @generated
-        gprod_init = Symbol(:gprod_, D + 1)  # the name of this variable is important!
+        gprod_init = Symbol(:gprod_, D)  # the name of this variable is important!
         quote
             inds = map(eachindex, vals)
             $gprod_init = v
             @inbounds @nloops(
-                $D,
+                $(D - 1),
                 i,
-                d -> inds[d],  # for i_d ∈ inds[d]
+                d -> inds[d + 1],  # for i_d ∈ inds[d + 1]
                 d -> begin
-                    gprod_d = gprod_{d + 1} * vals[d][i_d]  # add factor for dimension d
+                    gprod_d = gprod_{d + 1} * vals[d + 1][i_d]  # add factor for dimension d + 1
                 end,
                 begin
-                    I = @nref $D Is i  # = Is[i_1, i_2, ..., i_D]
-                    u[I] += gprod_1
+                    is_tail = @ntuple $(D - 1) i
+                    I₀ = Is[inds[1][1], is_tail...]
+                    n = LinearIndices(u)[I₀]
+                    for i_0 ∈ inds[1]
+                        gprod_0 = gprod_1 * vals[1][i_0]
+                        u[n] += gprod_0
+                        n += 1
+                    end
                 end,
             )
             u
