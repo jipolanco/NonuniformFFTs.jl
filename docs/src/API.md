@@ -3,33 +3,28 @@
 ```@meta
 CurrentModule = NonuniformFFTs
 ```
+## Public API
 
-## Creating plans
+### Creating plans
 
 ```@docs
 PlanNUFFT
 ```
 
-## Setting non-uniform points
+### Setting non-uniform points
 
 ```@docs
 set_points!
 ```
 
-## Executing plans
+### Executing plans
 
 ```@docs
 exec_type1!
 exec_type2!
 ```
 
-## Other functions
-
-```@docs
-size(::PlanNUFFT)
-```
-
-## Available spreading kernels
+### Available spreading kernels
 
 ```@docs
 KaiserBesselKernel
@@ -37,9 +32,14 @@ BackwardsKaiserBesselKernel
 GaussianKernel
 BSplineKernel
 ```
+## Internal API
+```@autodocs
+Modules = [NonuniformFFTs, NonuniformFFTs.Kernels]
+Public = false
+```
 
 ## Index
 
 ```@index
-Pages = ["API.md"]
+Pages = ["api.md"]
 ```
