@@ -19,6 +19,8 @@ makedocs(;
 
 deploydocs(
     repo = "github.com/jipolanco/NonuniformFFTs.jl",
-    forcepush = true,
-    push_preview = false,
+    target = "build", # this is where Vitepress stores its output
+    branch = "gh-pages",
+    devbranch = "master",
+    push_preview = true
 )
