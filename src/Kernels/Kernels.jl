@@ -72,11 +72,11 @@ end
 @inline function point_to_cell(x, Δx)
     r = x / Δx
     i = unsafe_trunc(Int, r)  # assumes r ≥ 0
-    # When x is very close to 2π, then doing (x / Δx) * Δx may actually be ≥ 2π due to
-    # roundoff errors. We account for this below.
-    L = 2 * oftype(x, π)  # = 2π
-    x_new = r * Δx
-    ifelse(x_new < L, i + 1, i)  # index such that xs[j] ≤ x₀ < xs[j + 1]
+    # Increment by 1 (for one-based indexing), except to avoid possible roundoff errors when x
+    # is very close (but slightly smaller) to i * Δx.
+    i += (i * Δx ≤ x)  # this is almost always true (so we increment by 1)
+    # @assert (i - 1) * Δx ≤ x < i * Δx
+    i
 end
 
 @inline function evaluate_kernel(g::AbstractKernelData, x₀)
