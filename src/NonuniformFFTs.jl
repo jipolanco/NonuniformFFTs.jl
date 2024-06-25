@@ -357,8 +357,8 @@ end
 # ntransforms), to avoid huge precompilation times.
 @setup_workload let
     kernels = [default_kernel()]  # only precompile for default kernel
-    ndims_all = (1, 2, 3)
-    ms = map(HalfSupport, (4, 8))
+    ndims_all = (1, 3)
+    ms = map(HalfSupport, (4,))
     # Ts = [Float32, Float64, ComplexF32, ComplexF64]
     Ts = (Float64,)
     σ = 1.25
