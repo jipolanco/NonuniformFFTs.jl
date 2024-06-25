@@ -73,7 +73,7 @@ function spread_from_point_blocked!(
         is .+ δ  # shift to beginning of current block
     end
     Is = CartesianIndices(inds)
-    # Base.checkbounds.(us, Tuple(Is))  # check that indices fall inside the output array
+    # checkbounds.(us, Ref(Is))  # check that indices fall inside the output array
 
     vals = map(g -> g.values, gs_eval)
     spread_onto_arrays_blocked!(us, Is, vals, vs)
