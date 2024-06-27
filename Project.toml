@@ -1,7 +1,7 @@
 name = "NonuniformFFTs"
 uuid = "cd96f58b-6017-4a02-bb9e-f4d81626177f"
 authors = ["Juan Ignacio Polanco <juan-ignacio.polanco@cnrs.fr>"]
-version = "0.3.15"
+version = "0.3.16"
 
 [deps]
 Bessels = "0e736298-9ec6-45e8-9647-e4fc86a2fe38"
@@ -20,7 +20,7 @@ Bumper = "0.6"
 FFTW = "1.7"
 LinearAlgebra = "1.9"
 PrecompileTools = "1.2"
-Static = "0.8"
+Static = "0.8, 1"
 StaticArrays = "1.7"
 StructArrays = "0.6"
 TimerOutputs = "0.5"
