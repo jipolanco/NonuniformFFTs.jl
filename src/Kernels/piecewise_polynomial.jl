@@ -15,19 +15,29 @@
 #   Tornberg (J. Chem. Phys. 2021).
 
 using StaticArrays: SVector
+using LinearAlgebra: lu!, ldiv!
 
-function solve_polynomial_coefficients(f::F, ::Type{T}, ::Val{N}) where {F, T, N}
-    # Note: we could use a MMatrix{N,N,T} to avoid some allocations, but that greatly
-    # increases the compilation time...
-    A = Matrix{T}(undef, N, N)
-    xs = SVector(ntuple(i -> cospi(T(i - 1/2) / N), Val(N)))  # interpolate at Chebyshev points
-    ys = map(f, xs)
-    xs_pow = zero(xs) .+ true  # = 1
-    for j ∈ 1:N
-        A[:, j] = xs_pow
-        xs_pow = map(*, xs_pow, xs)  # = xs_pow .* xs
+# Note: we could use StaticArrays here but that will greatly increase the compilation time
+# (unnecessarily, since this function is called just when creating a plan, and it's quite
+# cheap).
+function solve_polynomial_coefficients!(f::F, bufs) where {F}
+    (; A, xs, xs_pow, ys,) = bufs
+    N = length(xs)
+    @assert size(A) == (N, N)
+    @assert length(xs_pow) == N
+    @assert length(ys) == N
+    for i ∈ eachindex(xs, ys, xs_pow)
+        ys[i] = f(xs[i])
+        xs_pow[i] = 1
     end
-    NTuple{N}(A \ ys)
+    @inbounds for j ∈ 1:N
+        for i ∈ 1:N
+            A[i, j] = xs_pow[i]
+            xs_pow[i] *= xs[i]
+        end
+    end
+    Afact = lu!(A)
+    ldiv!(Afact, ys)
 end
 
 function transpose_tuple_of_tuples(cs::NTuple{L, NTuple{N}}) where {L, N}
@@ -41,14 +51,24 @@ function solve_piecewise_polynomial_coefficients(
         f::F, ::Type{T}, ::Val{M}, ::Val{N},
     ) where {F, T, M, N}
     L = 2M
+    bufs = (
+        A =  Matrix{T}(undef, N, N),
+        xs = Vector{T}(undef, N),
+        xs_pow = Vector{T}(undef, N),
+        ys = Vector{T}(undef, N),
+    )
+    for i ∈ 1:N
+        bufs.xs[i] = cospi(T(i - 1/2) / N)  # interpolate at Chebyshev points
+    end
     cs = ntuple(Val(L)) do j
         # Note: we go from right (+1) to left (-1).
         h = 1 - 2 * (j - 1/2) / L  # midpoint of interval
         δ = 1 / L                  # half-width of interval
-        solve_polynomial_coefficients(T, Val(N)) do x
+        cs_j = solve_polynomial_coefficients!(bufs) do x
             y = h + x * δ  # Transform x ∈ [-1, 1] → y ∈ [h - δ, h + δ]
             f(y)
         end
+        ntuple(i -> cs_j[i], Val(N))
     end
     transpose_tuple_of_tuples(cs)
 end
