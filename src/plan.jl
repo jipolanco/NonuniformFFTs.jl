@@ -55,7 +55,7 @@ function init_plan_data(
 end
 
 """
-    PlanNUFFT([T = ComplexF64], dims::Dims; ntransforms = Val(1), kwargs...)
+    PlanNUFFT([T = ComplexF64], dims::Dims; ntransforms = Val(1), backend = CPU(), kwargs...)
 
 Construct a plan for performing non-uniform FFTs (NUFFTs).
 
@@ -67,6 +67,9 @@ The created plan contains all data needed to perform NUFFTs for non-uniform data
 - `ntransforms = Val(1)`: the number of simultaneous transforms to perform.
   This is useful if one wants to transform multiple scalar quantities at the same
   non-uniform points.
+
+- `backend::KernelAbstractions.Backend = CPU()`: corresponds to the device type where
+  everything will be executed. This could be e.g. `CUDABackend()` if CUDA.jl is loaded.
 
 ## NUFFT parameters
 
@@ -94,7 +97,7 @@ The created plan contains all data needed to perform NUFFTs for non-uniform data
 
 ## Other parameters
 
-- `fftw_flags = FFTW.MEASURE`: parameters passed to the FFTW planner.
+- `fftw_flags = FFTW.MEASURE`: parameters passed to the FFTW planner (only used when `backend = CPU()`).
 
 - `timer = TimerOutput()`: allows to specify a `TimerOutput` (from the
   [TimerOutputs.jl](https://github.com/KristofferC/TimerOutputs.jl) package) where timing
@@ -196,7 +199,7 @@ function _PlanNUFFT(
         fftw_flags = FFTW.MEASURE,
         block_size::Union{Integer, Nothing} = default_block_size(),
         sort_points::StaticBool = False(),
-        backend = KA.CPU(),
+        backend::KA.Backend = CPU(),
     ) where {T <: Number, D}
     ks = init_wavenumbers(T, Ns)
     # Determine dimensions of oversampled grid.
@@ -274,7 +277,7 @@ end
 @inline to_static(ntrans::Int) = Val(ntrans)
 
 # This constructor relies on constant propagation to make the output fully inferred.
-function PlanNUFFT(::Type{T}, Ns::Dims; m = 8, kws...) where {T <: Number}
+@constprop :aggressive function PlanNUFFT(::Type{T}, Ns::Dims; m = 8, kws...) where {T <: Number}
     h = to_halfsupport(m)
     PlanNUFFT(T, Ns, h; kws...)
 end

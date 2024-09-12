@@ -2,7 +2,7 @@ module NonuniformFFTs
 
 using StructArrays: StructVector
 using AbstractFFTs: AbstractFFTs
-using KernelAbstractions: KernelAbstractions as KA, @kernel, @index
+using KernelAbstractions: KernelAbstractions as KA, CPU, @kernel, @index
 using FFTW: FFTW
 using LinearAlgebra: mul!
 using TimerOutputs: TimerOutput, @timeit
@@ -35,6 +35,7 @@ export
     KaiserBesselKernel,
     BackwardsKaiserBesselKernel,
     False, True,
+    CPU,  # from KernelAbstractions
     set_points!,
     exec_type1!,
     exec_type2!
