@@ -136,11 +136,15 @@ function optimal_kernel(kernel::KaiserBesselKernel, h::HalfSupport{M}, Δx, σ; 
     KaiserBesselKernelData(h, backend, Δx, β)
 end
 
-function evaluate_fourier(g::KaiserBesselKernelData, k::Number)
+# This should work on CPU and GPU.
+function evaluate_fourier!(g::KaiserBesselKernelData, gk::AbstractVector, ks::AbstractVector)
+    @assert eachindex(gk) == eachindex(ks)
     (; β², w,) = g
-    q = w * k
-    s = sqrt(β² - q^2)  # this is always real (assuming β ≥ Mπ)
-    2 * w * sinh(s) / s
+    map!(gk, ks) do k
+        q = w * k
+        s = sqrt(β² - q^2)  # this is always real (assuming β ≥ Mπ)
+        2 * w * sinh(s) / s
+    end
 end
 
 function evaluate_kernel(g::KaiserBesselKernelData{M}, x, i::Integer) where {M}

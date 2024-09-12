@@ -88,12 +88,16 @@ function evaluate_kernel(g::BSplineKernelData{M}, x, i::Integer) where {M}
     (; i, values,)
 end
 
-function evaluate_fourier(g::BSplineKernelData{M}, k) where {M}
+# This should work on CPU and GPU.
+function evaluate_fourier!(g::BSplineKernelData{M}, gk::AbstractVector, ks::AbstractVector) where {M}
     (; Δt,) = g
-    kh = k * Δt / 2
-    s = sin(kh) / kh
-    n = 2M
-    ifelse(iszero(k), one(s), s^n) * Δt
+    @assert eachindex(gk) == eachindex(ks)
+    map!(gk, ks) do k
+        kh = k * Δt / 2
+        s = sin(kh) / kh
+        n = 2M
+        ifelse(iszero(k), one(s), s^n) * Δt
+    end
 end
 
 # Adapted from BSplineKit.jl.

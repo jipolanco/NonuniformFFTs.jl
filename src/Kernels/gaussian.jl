@@ -92,9 +92,13 @@ function optimal_kernel(kernel::GaussianKernel, h::HalfSupport{M}, Δx, σ; back
     GaussianKernelData(h, backend, Δx, ℓ)
 end
 
-function evaluate_fourier(g::GaussianKernelData, k::Number)
+# This should work on CPU and GPU.
+function evaluate_fourier!(g::GaussianKernelData, gk::AbstractVector, ks::AbstractVector)
     (; τ,) = g
-    exp(-τ * k^2 / 4) * sqrt(π * τ)  # = exp(-σ² k² / 2) * sqrt(2πσ²)
+    @assert eachindex(gk) == eachindex(ks)
+    map!(gk, ks) do k
+        exp(-τ * k^2 / 4) * sqrt(π * τ)  # = exp(-σ² k² / 2) * sqrt(2πσ²)
+    end
 end
 
 # Fast Gaussian gridding following Greengard & Lee, SIAM Rev. 2004.

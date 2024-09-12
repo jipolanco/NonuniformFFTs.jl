@@ -59,15 +59,12 @@ If the coefficient vector was already computed in a previous call, then this
 function just returns the coefficients.
 """
 function init_fourier_coefficients!(g::AbstractKernelData, ks::AbstractVector)
-    # TODO: GPU case?
     gk = fourier_coefficients(g)
     Nk = length(ks)
     Nk == length(gk) && return gk  # assume coefficients were already computed
     resize!(gk, Nk)
     @assert eachindex(gk) == eachindex(ks)
-    @inbounds for (i, k) ∈ pairs(ks)
-        gk[i] = evaluate_fourier(g, k)
-    end
+    evaluate_fourier!(g, gk, ks)
     gk
 end
 

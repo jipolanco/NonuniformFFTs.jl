@@ -2,7 +2,7 @@ module NonuniformFFTs
 
 using StructArrays: StructVector
 using AbstractFFTs: AbstractFFTs
-using KernelAbstractions: KernelAbstractions as KA, CPU, @kernel, @index
+using KernelAbstractions: KernelAbstractions as KA, CPU, GPU, @kernel, @index
 using FFTW: FFTW
 using LinearAlgebra: mul!
 using TimerOutputs: TimerOutput, @timeit
@@ -279,15 +279,16 @@ function non_oversampled_indices!(
     Nk = length(ks)
     r2c = last(ks) > 0  # true if real-to-complex transform is performed in this dimension
     if r2c
-        copyto!(indmap, ax[begin:(begin + Nk - 1)])
+        # Note: copyto! seems to use scalar indexing on GPUs, and thus fails.
+        @views indmap[:] .= ax[begin:(begin + Nk - 1)]
     elseif iseven(Nk)
         h = Nk ÷ 2
-        @views copyto!(indmap[begin:(begin + h - 1)], ax[begin:(begin + h - 1)])
-        @views copyto!(indmap[(begin + h):end], ax[(end - h + 1):end])
+        @views indmap[begin:(begin + h - 1)] .= ax[begin:(begin + h - 1)]
+        @views indmap[(begin + h):end] .= ax[(end - h + 1):end]
     else
         h = (Nk - 1) ÷ 2
-        @views copyto!(indmap[begin:(begin + h)], ax[begin:(begin + h)])
-        @views copyto!(indmap[(begin + h + 1):end], ax[(end - h + 1):end])
+        @views indmap[begin:(begin + h)] .=  ax[begin:(begin + h)]
+        @views indmap[(begin + h + 1):end] .= ax[(end - h + 1):end]
     end
     indmap
 end
