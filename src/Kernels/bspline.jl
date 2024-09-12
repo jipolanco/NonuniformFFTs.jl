@@ -64,6 +64,10 @@ gridstep(g::BSplineKernelData) = g.Δt  # assume Δx = Δt
 
 BSplineKernelData(::HalfSupport{M}, args...) where {M} = BSplineKernelData{M}(args...)
 
+function Base.show(io::IO, ::BSplineKernelData{M}) where {M}
+    print(io, "BSplineKernel() with half-support M = $M")
+end
+
 # Here we ignore the oversampling factor, this kernel is not very adjustable...
 optimal_kernel(::BSplineKernel, h::HalfSupport, Δx, σ; backend) =
     BSplineKernelData(h, backend, Δx)

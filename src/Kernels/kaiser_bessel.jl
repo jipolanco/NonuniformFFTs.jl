@@ -123,6 +123,11 @@ end
 KaiserBesselKernelData(::HalfSupport{M}, args...) where {M} =
     KaiserBesselKernelData{M}(args...)
 
+function Base.show(io::IO, g::KaiserBesselKernelData{M}) where {M}
+    (; β,) = g
+    print(io, "KaiserBesselKernel(β = $β) with half-support M = $M")
+end
+
 function optimal_kernel(kernel::KaiserBesselKernel, h::HalfSupport{M}, Δx, σ; backend) where {M}
     T = typeof(Δx)
     β = if kernel.β === nothing

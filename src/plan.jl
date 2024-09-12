@@ -1,6 +1,3 @@
-# TODO:
-# - add pretty-printing for plans; include backend
-
 abstract type AbstractNUFFTData{T <: Number, N, Nc} end
 
 struct RealNUFFTData{
@@ -170,6 +167,17 @@ struct PlanNUFFT{
     blocks  :: Blocks
     index_map :: IndexMap
     timer   :: Timer
+end
+
+function Base.show(io::IO, p::PlanNUFFT{T, N, Nc}) where {T, N, Nc}
+    (; kernels, backend, σ, data,) = p
+    print(io, "$N-dimensional PlanNUFFT with input type $T:")
+    print(io, "\n  - backend: ", backend)
+    print(io, "\n  - kernel: ", first(kernels))  # should be the same output in all directions
+    print(io, "\n  - oversampling factor: σ = ", σ)
+    print(io, "\n  - Fourier-space dimensions: ", Base.dims2string(size(p)))
+    print(io, "\n  - simultaneous transforms: ", Nc)
+    nothing
 end
 
 """
