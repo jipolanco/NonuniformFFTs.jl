@@ -1,2 +1,5 @@
 Manifest.toml
 build
+.vscode
+node_modules
+package-lock.json
