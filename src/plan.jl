@@ -49,7 +49,7 @@ end
 
 # Case of complex data
 function init_plan_data(
-        ::Type{Complex{T}}, Ñs::Dims, ks::NTuple, ::Val{Nc};
+        ::Type{Complex{T}}, backend::KA.Backend, Ñs::Dims, ks::NTuple, ::Val{Nc};
         plan_kwargs,
     ) where {T <: AbstractFloat, Nc}
     @assert Nc ≥ 1
@@ -170,12 +170,12 @@ struct PlanNUFFT{
 end
 
 function Base.show(io::IO, p::PlanNUFFT{T, N, Nc}) where {T, N, Nc}
-    (; kernels, backend, σ, data,) = p
+    (; kernels, backend, σ,) = p
     print(io, "$N-dimensional PlanNUFFT with input type $T:")
-    print(io, "\n  - backend: ", backend)
+    print(io, "\n  - backend: ", typeof(backend))
     print(io, "\n  - kernel: ", first(kernels))  # should be the same output in all directions
     print(io, "\n  - oversampling factor: σ = ", σ)
-    print(io, "\n  - Fourier-space dimensions: ", Base.dims2string(size(p)))
+    print(io, "\n  - uniform-space dimensions: ", Base.dims2string(size(p)))
     print(io, "\n  - simultaneous transforms: ", Nc)
     nothing
 end
