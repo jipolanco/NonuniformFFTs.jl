@@ -196,6 +196,7 @@ function _PlanNUFFT(
         fftw_flags = FFTW.MEASURE,
         block_size::Union{Integer, Nothing} = default_block_size(),
         sort_points::StaticBool = False(),
+        backend = KA.CPU(),
     ) where {T <: Number, D}
     ks = init_wavenumbers(T, Ns)
     # Determine dimensions of oversampled grid.
@@ -212,7 +213,7 @@ function _PlanNUFFT(
         @inline
         L = Tr(2π)  # assume 2π period
         Δx̃ = L / Ñ
-        Kernels.optimal_kernel(kernel, h, Δx̃, Ñ / N)
+        Kernels.optimal_kernel(kernel, h, Δx̃, Ñ / N; backend)
     end
     # Precompute Fourier coefficients of the kernels.
     # After doing this, one can call `fourier_coefficients` to get the precomputed

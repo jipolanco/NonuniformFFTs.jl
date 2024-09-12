@@ -1,5 +1,7 @@
 module Kernels
 
+using KernelAbstractions: KernelAbstractions as KA
+
 export HalfSupport
 
 struct HalfSupport{M} end
@@ -57,6 +59,7 @@ If the coefficient vector was already computed in a previous call, then this
 function just returns the coefficients.
 """
 function init_fourier_coefficients!(g::AbstractKernelData, ks::AbstractVector)
+    # TODO: GPU case?
     gk = fourier_coefficients(g)
     Nk = length(ks)
     Nk == length(gk) && return gk  # assume coefficients were already computed

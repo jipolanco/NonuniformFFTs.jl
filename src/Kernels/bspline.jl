@@ -44,16 +44,19 @@ be equal to the grid step ``Δx``.
 This means that the resulting variance of the B-spline kernels is fixed to
 ``σ^2 = (n / 12) Δt^2 = (M / 6) Δx^2``.
 """
-struct BSplineKernelData{M, T <: AbstractFloat} <: AbstractKernelData{BSplineKernel, M, T}
+struct BSplineKernelData{
+        M, T <: AbstractFloat,
+        FourierCoefs <: AbstractVector{T},
+    } <: AbstractKernelData{BSplineKernel, M, T}
     σ  :: T
     Δt :: T          # knot separation
-    gk :: Vector{T}  # values in uniform Fourier grid
-    function BSplineKernelData{M}(Δx::Real) where {M}
+    gk :: FourierCoefs  # values in uniform Fourier grid
+    function BSplineKernelData{M}(backend::KA.Backend, Δx::Real) where {M}
         Δt = Δx
         σ = sqrt(M / 6) * Δt
         T = eltype(Δt)
-        gk = Vector{T}(undef, 0)
-        new{M, T}(T(σ), Δt, gk)
+        gk = KA.allocate(backend, T, 0)
+        new{M, T, typeof(gk)}(T(σ), Δt, gk)
     end
 end
 
@@ -62,8 +65,8 @@ gridstep(g::BSplineKernelData) = g.Δt  # assume Δx = Δt
 BSplineKernelData(::HalfSupport{M}, args...) where {M} = BSplineKernelData{M}(args...)
 
 # Here we ignore the oversampling factor, this kernel is not very adjustable...
-optimal_kernel(::BSplineKernel, h::HalfSupport, Δx, σ) =
-    BSplineKernelData(h, Δx)
+optimal_kernel(::BSplineKernel, h::HalfSupport, Δx, σ; backend) =
+    BSplineKernelData(h, backend, Δx)
 
 """
     order(::BSplineKernelData{M})

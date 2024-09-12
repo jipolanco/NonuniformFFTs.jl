@@ -56,27 +56,31 @@ GaussianKernel() = GaussianKernel(nothing)
 Constructs a Gaussian kernel with standard deviation `σ = α Δx` and half-support `M`, for a
 grid of step `Δx`.
 """
-struct GaussianKernelData{M, T <: AbstractFloat} <: AbstractKernelData{GaussianKernel, M, T}
+struct GaussianKernelData{
+        M, T <: AbstractFloat,
+        FourierCoefs <: AbstractVector{T},
+    } <: AbstractKernelData{GaussianKernel, M, T}
     Δx :: T
     σ  :: T
     τ  :: T
     cs :: NTuple{M, T}  # precomputed exponentials
-    gk :: Vector{T}     # values in uniform Fourier grid
-    function GaussianKernelData{M}(Δx::T, α::T) where {M, T <: AbstractFloat}
+    gk :: FourierCoefs  # values in uniform Fourier grid
+
+    function GaussianKernelData{M}(backend::KA.Backend, Δx::T, α::T) where {M, T <: AbstractFloat}
         σ = α * Δx
         τ = 2 * σ^2
         cs = ntuple(Val(M)) do i
             x = i * Δx
             exp(-x^2 / τ)
         end
-        gk = Vector{T}(undef, 0)
-        new{M, T}(Δx, σ, τ, cs, gk)
+        gk = KA.allocate(backend, T, 0)
+        new{M, T, typeof(gk)}(Δx, σ, τ, cs, gk)
     end
 end
 
 GaussianKernelData(::HalfSupport{M}, args...) where {M} = GaussianKernelData{M}(args...)
 
-function optimal_kernel(kernel::GaussianKernel, h::HalfSupport{M}, Δx, σ) where {M}
+function optimal_kernel(kernel::GaussianKernel, h::HalfSupport{M}, Δx, σ; backend) where {M}
     T = typeof(Δx)
     ℓ = if kernel.ℓ === nothing
         # Set the optimal kernel shape parameter given the wanted support M and the oversampling
@@ -85,7 +89,7 @@ function optimal_kernel(kernel::GaussianKernel, h::HalfSupport{M}, Δx, σ) wher
     else
         T(kernel.ℓ)
     end
-    GaussianKernelData(h, Δx, ℓ)
+    GaussianKernelData(h, backend, Δx, ℓ)
 end
 
 function evaluate_fourier(g::GaussianKernelData, k::Number)

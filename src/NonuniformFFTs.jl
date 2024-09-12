@@ -1,6 +1,8 @@
 module NonuniformFFTs
 
 using StructArrays: StructVector
+using AbstractFFTs: AbstractFFTs
+using KernelAbstractions: KernelAbstractions as KA, @kernel, @index
 using FFTW: FFTW
 using LinearAlgebra: mul!
 using TimerOutputs: TimerOutput, @timeit
