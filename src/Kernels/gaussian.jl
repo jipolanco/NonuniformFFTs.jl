@@ -20,7 +20,7 @@ where ``ℓ`` is the characteristic width of the kernel.
 # Fourier transform
 
 ```math
-ϕ̂(k) = \sqrt{2πσ²} e^{-ℓ² k² / 2}
+ϕ̂(k) = \sqrt{2πℓ²} e^{-ℓ² k² / 2}
 ```
 
 # Parameter selection
@@ -75,6 +75,12 @@ struct GaussianKernelData{M, T <: AbstractFloat} <: AbstractKernelData{GaussianK
 end
 
 GaussianKernelData(::HalfSupport{M}, args...) where {M} = GaussianKernelData{M}(args...)
+
+function Base.show(io::IO, g::GaussianKernelData{M}) where {M}
+    (; σ, Δx,) = g
+    r = σ / Δx
+    print(io, "GaussianKernelData(ℓ/Δx = $r) with half-support M = $M")
+end
 
 function optimal_kernel(kernel::GaussianKernel, h::HalfSupport{M}, Δx, σ) where {M}
     T = typeof(Δx)

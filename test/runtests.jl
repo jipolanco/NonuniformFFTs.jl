@@ -22,6 +22,7 @@ end
     @includetest "errors.jl"
     @includetest "accuracy.jl"
     @includetest "multidimensional.jl"
+    @includetest "abstractNFFTs.jl"
     @includetest "uniform_points.jl"
     @includetest "near_2pi.jl"
 end

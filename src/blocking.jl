@@ -6,13 +6,13 @@ with_blocking(::NullBlockData) = false
 
 # Here the element type of `xp` can be either an NTuple{N, <:Real}, an SVector{N, <:Real},
 # or anything else which has length `N`.
-function set_points!(::NullBlockData, points, xp, timer)
+function set_points!(::NullBlockData, points, xp, timer; transform::F = identity) where {F <: Function}
     resize!(points, length(xp))
     Base.require_one_based_indexing(points)
     N = type_length(eltype(xp))
     @timeit timer "(1) Copy + fold" begin
         @inbounds for (i, x) ∈ enumerate(xp)
-            points[i] = to_unit_cell(NTuple{N}(x))  # converts `x` to Tuple if it's an SVector
+            points[i] = to_unit_cell(transform(NTuple{N}(x)))  # converts `x` to Tuple if it's an SVector
         end
     end
     nothing
@@ -97,7 +97,7 @@ end
 # Blocking is considered to be disabled if there are no allocated buffers.
 with_blocking(bd::BlockData) = !isempty(bd.buffers)
 
-function set_points!(bd::BlockData, points, xp, timer)
+function set_points!(bd::BlockData, points, xp, timer; transform::F = identity) where {F <: Function}
     with_blocking(bd) || return set_points!(NullBlockData(), points, xp, timer)
 
     (; indices, cumulative_npoints_per_block, blockidx, pointperm, block_sizes,) = bd
@@ -112,7 +112,7 @@ function set_points!(bd::BlockData, points, xp, timer)
 
     @timeit timer "(1) Assign blocks" @inbounds for (i, x⃗) ∈ pairs(xp)
         # Get index of block where point x⃗ is located.
-        y⃗ = to_unit_cell(NTuple{N}(x⃗))  # converts `x⃗` to Tuple if it's an SVector
+        y⃗ = to_unit_cell(transform(NTuple{N}(x⃗)))  # converts `x⃗` to Tuple if it's an SVector
         is = map(Kernels.point_to_cell, y⃗, block_sizes)
         if bd.sort_points === False()
             points[i] = y⃗  # copy folded point (doesn't need to be sorted)
@@ -150,7 +150,7 @@ function set_points!(bd::BlockData, points, xp, timer)
             @inbounds for i ∈ eachindex(pointperm)
                 j = pointperm[i]
                 x⃗ = xp[j]
-                y⃗ = to_unit_cell(NTuple{N}(x⃗))  # converts `x⃗` to Tuple if it's an SVector
+                y⃗ = to_unit_cell(transform(NTuple{N}(x⃗)))  # converts `x⃗` to Tuple if it's an SVector
                 points[i] = y⃗
             end
         end
