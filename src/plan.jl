@@ -221,7 +221,6 @@ function Base.show(io::IO, p::PlanNUFFT{T, N, Nc}) where {T, N, Nc}
     print(io, "\n  - simultaneous transforms: ", Nc)
     frequency_order = fftshift ? "increasing" : "FFTW"
     print(io, "\n  - frequency order: ", frequency_order, " (fftshift = $fftshift)")
-    print(io, "\n  - simultaneous transforms: ", Nc)
     nothing
 end
 
