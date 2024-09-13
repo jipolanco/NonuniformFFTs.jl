@@ -18,6 +18,8 @@ window = :kaiser_bessel
 p = PlanNUFFT(xp, Ns)
 p_nfft = NFFT.NFFTPlan(xp, Ns)
 
+@test startswith(repr(p), "2-dimensional PlanNUFFT with input type ComplexF64:")  # test pretty-printing
+
 @testset "Comparison with NFFT.jl" begin
     @test size_in(p) === size_in(p_nfft)
     @test size_out(p) === size_out(p_nfft)
