@@ -198,6 +198,19 @@ struct PlanNUFFT{
     timer   :: Timer
 end
 
+function Base.show(io::IO, p::PlanNUFFT{T, N, Nc}) where {T, N, Nc}
+    (; kernels, σ, fftshift,) = p
+    print(io, "$N-dimensional PlanNUFFT with input type $T:")
+    print(io, "\n  - kernel: ", first(kernels))  # should be the same output in all directions
+    print(io, "\n  - oversampling factor: σ = ", σ)
+    print(io, "\n  - uniform dimensions: ", size(p))
+    print(io, "\n  - simultaneous transforms: ", Nc)
+    frequency_order = fftshift ? "increasing" : "FFTW"
+    print(io, "\n  - frequency order: ", frequency_order, " (fftshift = $fftshift)")
+    print(io, "\n  - simultaneous transforms: ", Nc)
+    nothing
+end
+
 """
     size(p::PlanNUFFT) -> (N₁, N₂, ...)
 
