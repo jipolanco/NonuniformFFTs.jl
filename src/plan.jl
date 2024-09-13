@@ -187,7 +187,7 @@ struct PlanNUFFT{
         Blocks <: AbstractBlockData,
         IndexMap <: NTuple{N, AbstractVector{Int}},
         Timer <: TimerOutput,
-    } <: AbstractNFFTPlan{Treal, N, 1}  # the AbstractNFFTPlan
+    } <: AbstractNFFTPlan{Treal, N, 1}  # the AbstractNFFTPlan only really makes sense when T <: Complex
     kernels :: Kernels
     σ       :: Treal   # oversampling factor (≥ 1)
     points  :: Points  # non-uniform points (real values)
