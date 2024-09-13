@@ -196,6 +196,11 @@ In particular, this means that:
   In FINUFFT, this corresponds to setting [`iflag = -1`](https://ludvigak.github.io/FINUFFT.jl/latest/#FINUFFT.finufft_makeplan-Tuple{Integer,%20Union{Integer,%20Array{Int64}},%20Integer,%20Integer,%20Real}) in type-1 transforms.
   Conversely, type-2 NUFFTs (uniform to non-uniform) are defined with a plus sign, equivalently to the backward DFT in FFTW3.
 
+For compatibility with other packages such as [NFFT.jl](https://github.com/JuliaMath/NFFT.jl), these conventions are *not*
+applied when the AbstractNFFTs.jl interface is used (see example above).
+In this specific case, modes are assumed to be ordered in increasing order, and
+the opposite sign convention is used for Fourier transforms.
+
 ### Differences with [NFFT.jl](https://github.com/JuliaMath/NFFT.jl)
 
 - This package allows NUFFTs of purely real non-uniform data.

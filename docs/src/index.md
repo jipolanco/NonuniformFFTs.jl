@@ -14,7 +14,7 @@ NonuniformFFTs.jl can be simply installed from the Julia REPL with:
 julia> ] add NonuniformFFTs
 ```
 
-## Conventions
+## [Conventions](@id nufft-conventions)
 
 ### Transform definitions
 
@@ -185,7 +185,7 @@ vp_interp = map(similar, vp)
 exec_type2!(vp, plan_nufft, ûs)
 ```
 
-## AbstractNFFTs.jl interface
+## [AbstractNFFTs.jl interface](@id AbstractNFFTs-interface)
 
 This package also implements the [AbstractNFFTs.jl](https://juliamath.github.io/NFFT.jl/stable/abstract/)
 interface as an alternative API for constructing plans and evaluating transforms.
@@ -193,8 +193,17 @@ This can be useful for comparing with similar packages such as [NFFT.jl](https:/
 
 In particular, a specific [`PlanNUFFT`](@ref) constructor is provided which
 supports most of the parameters supported by [NFFT.jl](https://github.com/JuliaMath/NFFT.jl).
+For compatibility with NFFT.jl, the plan generated via this interface **does not
+follow the same conventions**  described [above](@ref nufft-conventions).
 
-Example usage:
+The differences are:
+
+- points are assumed to be in ``[-1/2, 1/2)`` instead of ``[0, 2π)``;
+- the opposite Fourier sign convention is used (e.g. ``e^{-i k x_j}`` becomes ``e^{+2π i k x_j}``);
+- uniform data is in increasing order, with frequencies ``k = -N/2, …, -1, 0,
+  1, …, N/2-1``, as opposed to preserving the order used by FFTW (which starts at ``k = 0``).
+
+### Example usage
 
 ```julia
 using NonuniformFFTs
@@ -254,7 +263,12 @@ In particular, this means that:
   In FINUFFT, this corresponds to setting [`iflag = -1`](https://ludvigak.github.io/FINUFFT.jl/latest/#FINUFFT.finufft_makeplan-Tuple{Integer,%20Union{Integer,%20Array{Int64}},%20Integer,%20Integer,%20Real}) in type-1 transforms.
   Conversely, type-2 NUFFTs (uniform to non-uniform) are defined with a plus sign, equivalently to the backward DFT in FFTW3.
 
-### Differences with [NFFT.jl](https://github.com/JuliaMath/NFFT.jl)
+For compatibility with other packages such as [NFFT.jl](https://github.com/JuliaMath/NFFT.jl), these conventions are *not*
+applied when the [AbstractNFFTs.jl interface](@ref AbstractNFFTs-interface) is used.
+In this specific case, modes are assumed to be ordered in increasing order, and
+the opposite sign convention is used for Fourier transforms.
+
+### Differences with NFFT.jl
 
 - This package allows NUFFTs of purely real non-uniform data.
 
