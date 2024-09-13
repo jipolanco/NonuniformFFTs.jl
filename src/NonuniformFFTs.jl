@@ -1,6 +1,7 @@
 module NonuniformFFTs
 
-using AbstractNFFTs
+using AbstractFFTs: AbstractFFTs
+using AbstractNFFTs: AbstractNFFTs, AbstractNFFTPlan
 using StructArrays: StructVector
 using FFTW: FFTW
 using LinearAlgebra: mul!
@@ -271,8 +272,10 @@ function _type2_fft!(data::ComplexNUFFTData)
 end
 
 # Create index mapping allowing to go from oversampled to non-oversampled wavenumbers.
+# If `fftshift = true`, the output wavenumbers are in increasing order (as opposed to FFTW order, which starts at k = 0).
 function non_oversampled_indices!(
-        indmap::AbstractVector, ks::AbstractVector, ax::AbstractUnitRange,
+        indmap::AbstractVector, ks::AbstractVector, ax::AbstractUnitRange;
+        fftshift = false,
     )
     @assert length(indmap) == length(ks) ≤ length(ax)
     Nk = length(ks)
@@ -281,12 +284,22 @@ function non_oversampled_indices!(
         copyto!(indmap, ax[begin:(begin + Nk - 1)])
     elseif iseven(Nk)
         h = Nk ÷ 2
-        @views copyto!(indmap[begin:(begin + h - 1)], ax[begin:(begin + h - 1)])
-        @views copyto!(indmap[(begin + h):end], ax[(end - h + 1):end])
+        if fftshift
+            @views copyto!(indmap[begin:(begin + h - 1)], ax[(end - h + 1):end])  # k < 0
+            @views copyto!(indmap[(begin + h):end], ax[begin:(begin + h - 1)])    # k ≥ 0
+        else
+            @views copyto!(indmap[begin:(begin + h - 1)], ax[begin:(begin + h - 1)])  # k ≥ 0
+            @views copyto!(indmap[(begin + h):end], ax[(end - h + 1):end])  # k < 0
+        end
     else
         h = (Nk - 1) ÷ 2
-        @views copyto!(indmap[begin:(begin + h)], ax[begin:(begin + h)])
-        @views copyto!(indmap[(begin + h + 1):end], ax[(end - h + 1):end])
+        if fftshift
+            @views copyto!(indmap[begin:(begin + h - 1)], ax[(end - h + 1):end])  # k < 0
+            @views copyto!(indmap[(begin + h):end], ax[begin:(begin + h)])        # k ≥ 0
+        else
+            @views copyto!(indmap[begin:(begin + h)], ax[begin:(begin + h)])
+            @views copyto!(indmap[(begin + h + 1):end], ax[(end - h + 1):end])
+        end
     end
     indmap
 end

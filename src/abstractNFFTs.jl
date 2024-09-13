@@ -33,10 +33,10 @@ end
 # doing x → -x).
 @inline function _transform_point_convention(x::AbstractFloat)  # x ∈ [-1/2, 1/2)
     T = typeof(x)
-    π_ = T(π)
-    x = 2 * π_ * x  # in [-π, π)
+    twopi = 2 * T(π)
+    x = twopi * x  # in [-π, π)
     x = -x  # in (-π, π]
-    x + π_  # in (0, 2π]  // [0, 2π) would be even better, but this works too
+    ifelse(x < 0, x + twopi, x)  # in [0, 2π)
 end
 
 @inline _transform_point_convention(x⃗::NTuple) = map(_transform_point_convention, x⃗)
@@ -82,6 +82,7 @@ Base.@constprop :aggressive function PlanNUFFT(
         xp::AbstractMatrix{Tr}, Ns::Dims;
         fftflags = FFTW.ESTIMATE, blocking = true, sortNodes = false,
         window = default_kernel(),
+        fftshift = true,  # for compatibility with NFFT.jl
         kwargs...,
     ) where {Tr <: AbstractFloat}
     # Note: the NFFT.jl package uses an odd window size, w = 2m + 1.
@@ -91,7 +92,7 @@ Base.@constprop :aggressive function PlanNUFFT(
     sort_points = sortNodes ? True() : False()  # this is type-unstable (unless constant propagation happens)
     block_size = blocking ? default_block_size() : nothing  # also type-unstable
     kernel = window isa AbstractKernel ? window : convert_window_function(window)
-    p = PlanNUFFT(Complex{Tr}, Ns, HalfSupport(m); σ = Tr(σ), sort_points, block_size, kernel, fftw_flags = fftflags)
+    p = PlanNUFFT(Complex{Tr}, Ns, HalfSupport(m); σ = Tr(σ), sort_points, fftshift, block_size, kernel, fftw_flags = fftflags)
     AbstractNFFTs.nodes!(p, xp)
     p
 end
