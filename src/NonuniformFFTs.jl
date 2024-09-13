@@ -1,5 +1,7 @@
 module NonuniformFFTs
 
+using AbstractFFTs: AbstractFFTs
+using AbstractNFFTs: AbstractNFFTs, AbstractNFFTPlan
 using StructArrays: StructVector
 using AbstractFFTs: AbstractFFTs
 using KernelAbstractions: KernelAbstractions as KA, CPU, GPU, @kernel, @index
@@ -52,6 +54,7 @@ include("plan.jl")
 include("set_points.jl")
 include("spreading.jl")
 include("interpolation.jl")
+include("abstractNFFTs.jl")
 
 function check_nufft_uniform_data(p::PlanNUFFT, ûs_all::NTuple{C, AbstractArray{<:Complex}}) where {C}
     (; ks,) = p.data
@@ -272,8 +275,10 @@ function _type2_fft!(data::ComplexNUFFTData)
 end
 
 # Create index mapping allowing to go from oversampled to non-oversampled wavenumbers.
+# If `fftshift = true`, the output wavenumbers are in increasing order (as opposed to FFTW order, which starts at k = 0).
 function non_oversampled_indices!(
-        indmap::AbstractVector, ks::AbstractVector, ax::AbstractUnitRange,
+        indmap::AbstractVector, ks::AbstractVector, ax::AbstractUnitRange;
+        fftshift = false,
     )
     @assert length(indmap) == length(ks) ≤ length(ax)
     Nk = length(ks)
@@ -283,12 +288,22 @@ function non_oversampled_indices!(
         @views indmap[:] .= ax[begin:(begin + Nk - 1)]
     elseif iseven(Nk)
         h = Nk ÷ 2
-        @views indmap[begin:(begin + h - 1)] .= ax[begin:(begin + h - 1)]
-        @views indmap[(begin + h):end] .= ax[(end - h + 1):end]
+        if fftshift
+            @views indmap[begin:(begin + h - 1)] .= ax[(end - h + 1):end]  # k < 0
+            @views indmap[(begin + h):end] .= ax[begin:(begin + h - 1)]    # k ≥ 0
+        else
+            @views indmap[begin:(begin + h - 1)] .= ax[begin:(begin + h - 1)]  # k ≥ 0
+            @views indmap[(begin + h):end] .= ax[(end - h + 1):end]  # k < 0
+        end
     else
         h = (Nk - 1) ÷ 2
-        @views indmap[begin:(begin + h)] .=  ax[begin:(begin + h)]
-        @views indmap[(begin + h + 1):end] .= ax[(end - h + 1):end]
+        if fftshift
+            @views indmap[begin:(begin + h - 1)] .= ax[(end - h + 1):end]  # k < 0
+            @views indmap[(begin + h):end] .= ax[begin:(begin + h)]        # k ≥ 0
+        else
+            @views indmap[begin:(begin + h)] .= ax[begin:(begin + h)]
+            @views indmap[(begin + h + 1):end] .= ax[(end - h + 1):end]
+        end
     end
     indmap
 end

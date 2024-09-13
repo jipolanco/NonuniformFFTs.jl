@@ -127,9 +127,53 @@ exec_type2!(vp, plan_nufft, ûs)
 
 </details>
 
-<br>
+<details>
+<summary><b>Using the AbstractNFFTs.jl interface</b></summary>
 
-More details on optional parameters and on tuning accuracy is coming soon.
+This package also implements the [AbstractNFFTs.jl](https://juliamath.github.io/NFFT.jl/stable/abstract/)
+interface as an alternative API for constructing plans and evaluating transforms.
+This can be useful for comparing with similar packages such as [NFFT.jl](https://github.com/JuliaMath/NFFT.jl).
+
+```julia
+using NonuniformFFTs
+using AbstractNFFTs
+using LinearAlgebra: mul!
+
+Ns = (256, 256)  # number of Fourier modes in each direction
+Np = 1000        # number of non-uniform points
+
+# Generate some non-uniform random data
+T = Float64                      # must be a real data type (Float32, Float64)
+d = length(Ns)                   # number of dimensions (d = 2 here)
+xp = rand(T, (d, Np)) .- T(0.5)  # non-uniform points in [-1/2, 1/2)ᵈ; must be given as a (d, Np) matrix
+vp = randn(Complex{T}, Np)       # random values at points (must be complex)
+
+# Create plan for data of type Complex{T}. Note that we pass the points `xp` as
+# a first argument, which calls an AbstractNFFTs-compatible constructor.
+p = PlanNUFFT(xp, Ns)
+
+# Getting the expected dimensions of input and output data.
+AbstractNFFTs.size_in(p)   # (256, 256)
+AbstractNFFTs.size_out(p)  # (1000,)
+
+# Perform adjoint NFFT, a.k.a. type-1 NUFFT (non-uniform to uniform)
+us = adjoint(p) * vp      # allocates output array `us`
+mul!(us, adjoint(p), vp)  # uses preallocated output array `us`
+
+# Perform forward NFFT, a.k.a. type-2 NUFFT (uniform to non-uniform)
+wp = p * us
+mul!(wp, p, us)
+
+# Setting a different set of non-uniform points
+AbstractNFFTs.nodes!(p, xp)
+```
+
+Note: the AbstractNFFTs.jl interface currently only supports complex-valued non-uniform data.
+For real-to-complex transforms, the NonuniformFFTs.jl API demonstrated above should be used instead.
+
+</details>
+
+<br>
 
 ## Differences with other packages
 
@@ -152,16 +196,16 @@ In particular, this means that:
   In FINUFFT, this corresponds to setting [`iflag = -1`](https://ludvigak.github.io/FINUFFT.jl/latest/#FINUFFT.finufft_makeplan-Tuple{Integer,%20Union{Integer,%20Array{Int64}},%20Integer,%20Integer,%20Real}) in type-1 transforms.
   Conversely, type-2 NUFFTs (uniform to non-uniform) are defined with a plus sign, equivalently to the backward DFT in FFTW3.
 
-### Differences with [NFFT.jl](https://github.com/JuliaMath/NFFT.jl)
+For compatibility with other packages such as [NFFT.jl](https://github.com/JuliaMath/NFFT.jl), these conventions are *not*
+applied when the AbstractNFFTs.jl interface is used (see example above).
+In this specific case, modes are assumed to be ordered in increasing order, and
+the opposite sign convention is used for Fourier transforms.
 
-- This package allows changing the non-uniform points associated to a NUFFT plan.
-  In other words, once a plan already exists, computing a NUFFT for a different set of points is efficient and doesn't need to allocate a new plan.
+### Differences with [NFFT.jl](https://github.com/JuliaMath/NFFT.jl)
 
 - This package allows NUFFTs of purely real non-uniform data.
 
 - Different convention is used: non-uniform points are expected to be in $[0, 2π]$.
-
-- This package allows performing transforms of multiple quantities at the same non-uniform values at once.
 
 ### Differences with FINUFFT / FINUFFT.jl
 

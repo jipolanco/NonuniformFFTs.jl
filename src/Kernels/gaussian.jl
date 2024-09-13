@@ -86,6 +86,12 @@ function Base.show(io::IO, g::GaussianKernelData{M}) where {M}
     print(io, "GaussianKernelData(ℓ/Δx = $r) with half-support M = $M")
 end
 
+function Base.show(io::IO, g::GaussianKernelData{M}) where {M}
+    (; σ, Δx,) = g
+    r = σ / Δx
+    print(io, "GaussianKernelData(ℓ/Δx = $r) with half-support M = $M")
+end
+
 function optimal_kernel(kernel::GaussianKernel, h::HalfSupport{M}, Δx, σ; backend) where {M}
     T = typeof(Δx)
     ℓ = if kernel.ℓ === nothing
