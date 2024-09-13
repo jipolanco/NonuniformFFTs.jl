@@ -20,11 +20,11 @@ end
 
 # Non-uniform to uniform
 function LinearAlgebra.mul!(
-        ûs::AbstractArray{Tc},
-        p::Adjoint{Tc, <:PlanNUFFT{Tc}},
+        ûs::AbstractArray{Tc, N},
+        p::Adjoint{Tc, <:PlanNUFFT{Tc, N}},
         vp::AbstractVector{Tc},
-    ) where {Tc <: Complex}
-    exec_type1!(ûs, p, vp)
+    ) where {Tc <: Complex, N}
+    exec_type1!(ûs, parent(p), vp)
     vp
 end
 
@@ -74,8 +74,39 @@ end
 # Create plan constructor which is compatible with AbstractNFFTs (takes non-uniform points
 # in a matrix as first input).
 # Only complex-to-complex plans can be constructed using this interface.
-# We use @constprop to hopefully avoid some type instabilities when converting some
-# variables to the static domain (not sure if this helps).
+# WARN: this constructor is type unstable (the return type is not inferred) when explicitly
+# passed certain keyword arguments.
+# We use @constprop to hopefully avoid some type instabilities, but that doesn't seem to
+# fully help here.
+"""
+    PlanNUFFT(xp::AbstractMatrix{T}, dims::Dims{D}; kwargs...)
+
+Create a [`PlanNUFFT`](@ref) which is compatible with the
+[AbstractNFFTs.jl](https://juliamath.github.io/NFFT.jl/stable/abstract/) interface.
+
+This constructor requires passing the non-uniform locations `xp` as the first argument.
+These should be given as a matrix of dimensions `(D, Np)`, where `D` is the spatial
+dimension and `Np` the number of non-uniform points.
+
+The second argument is simply the size `(N₁, N₂, …)` of the uniform data arrays.
+
+This variant creates a plan which assumes complex-valued non-uniform data.
+For real-valued data, the other constructor should be used instead.
+
+# Compatibility with NFFT.jl
+
+Most of the [parameters](https://juliamath.github.io/NFFT.jl/stable/overview/#Parameters)
+supported by the NFFT.jl package are also supported by this constructor.
+The currently supported parameters are `reltol`, `m`, `σ`, `window`, `blocking`, `sortNodes` and `fftflags`.
+
+!!! warning "Type instability"
+
+    Explicitly passing some of these parameters may result in type-unstable code, since the
+    exact type of the returned plan cannot be inferred.
+    This is because, in NonuniformFFTs.jl, parameters such as the kernel size (`m`) or the
+    convolution window (`window`) are compile-time constants.
+
+"""
 Base.@constprop :aggressive function PlanNUFFT(
         xp::AbstractMatrix{Tr}, Ns::Dims;
         fftflags = FFTW.ESTIMATE, blocking = true, sortNodes = false,
