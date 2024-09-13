@@ -154,14 +154,9 @@ In particular, this means that:
 
 ### Differences with [NFFT.jl](https://github.com/JuliaMath/NFFT.jl)
 
-- This package allows changing the non-uniform points associated to a NUFFT plan.
-  In other words, once a plan already exists, computing a NUFFT for a different set of points is efficient and doesn't need to allocate a new plan.
-
 - This package allows NUFFTs of purely real non-uniform data.
 
 - Different convention is used: non-uniform points are expected to be in $[0, 2π]$.
-
-- This package allows performing transforms of multiple quantities at the same non-uniform values at once.
 
 ### Differences with FINUFFT / FINUFFT.jl
 
