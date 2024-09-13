@@ -146,7 +146,7 @@ struct PlanNUFFT{
         Blocks <: AbstractBlockData,
         IndexMap <: NTuple{N, AbstractVector{Int}},
         Timer <: TimerOutput,
-    }
+    } <: AbstractNFFTPlan{Treal, N, 1}  # the AbstractNFFTPlan
     kernels :: Kernels
     σ       :: Treal   # oversampling factor (≥ 1)
     points  :: Points  # non-uniform points (real values)
@@ -164,6 +164,8 @@ Return the dimensions of arrays containing uniform values.
 This corresponds to the number of Fourier modes in each direction (in the non-oversampled grid).
 """
 Base.size(p::PlanNUFFT) = map(length, p.data.ks)
+
+Base.ndims(::PlanNUFFT{T, N}) where {T, N} = N
 
 """
     ntransforms(p::PlanNUFFT) -> Int
@@ -273,7 +275,7 @@ end
 @inline to_static(ntrans::Int) = Val(ntrans)
 
 # This constructor relies on constant propagation to make the output fully inferred.
-function PlanNUFFT(::Type{T}, Ns::Dims; m = 8, kws...) where {T <: Number}
+Base.@constprop :aggressive function PlanNUFFT(::Type{T}, Ns::Dims; m = 8, kws...) where {T <: Number}
     h = to_halfsupport(m)
     PlanNUFFT(T, Ns, h; kws...)
 end

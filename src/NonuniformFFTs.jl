@@ -1,5 +1,6 @@
 module NonuniformFFTs
 
+using AbstractNFFTs
 using StructArrays: StructVector
 using FFTW: FFTW
 using LinearAlgebra: mul!
@@ -49,6 +50,7 @@ include("plan.jl")
 include("set_points.jl")
 include("spreading.jl")
 include("interpolation.jl")
+include("abstractNFFTs.jl")
 
 function check_nufft_uniform_data(p::PlanNUFFT, ûs_all::NTuple{C, AbstractArray{<:Complex}}) where {C}
     (; ks,) = p.data
