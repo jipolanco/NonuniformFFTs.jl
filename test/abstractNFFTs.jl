@@ -15,8 +15,8 @@ vp = randn(Complex{T}, Np)       # random values at points (must be complex)
 reltol = 1e-9
 window = :kaiser_bessel
 
-p = PlanNUFFT(xp, Ns)
-p_nfft = NFFT.NFFTPlan(xp, Ns)
+p = PlanNUFFT(xp, Ns; reltol, window,)
+p_nfft = NFFT.NFFTPlan(xp, Ns; reltol, window,)
 
 @test startswith(repr(p), "2-dimensional PlanNUFFT with input type ComplexF64:")  # test pretty-printing
 
