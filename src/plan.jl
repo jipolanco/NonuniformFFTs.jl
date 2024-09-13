@@ -136,6 +136,35 @@ symmetry).
 For convenience, one can call [`size(::PlanNUFFT)`](@ref) on the constructed plan to know in
 advance the dimensions of the uniform data arrays.
 
+---
+
+    PlanNUFFT(xp::AbstractMatrix{T}, dims::Dims{D}; kwargs...)
+
+Create a [`PlanNUFFT`](@ref) which is compatible with the
+[AbstractNFFTs.jl](https://juliamath.github.io/NFFT.jl/stable/abstract/) interface.
+
+This constructor requires passing the non-uniform locations `xp` as the first argument.
+These should be given as a matrix of dimensions `(D, Np)`, where `D` is the spatial
+dimension and `Np` the number of non-uniform points.
+
+The second argument is simply the size `(N₁, N₂, …)` of the uniform data arrays.
+
+This variant creates a plan which assumes complex-valued non-uniform data.
+For real-valued data, the other constructor should be used instead.
+
+# Compatibility with NFFT.jl
+
+Most of the [parameters](https://juliamath.github.io/NFFT.jl/stable/overview/#Parameters)
+supported by the NFFT.jl package are also supported by this constructor.
+The currently supported parameters are `reltol`, `m`, `σ`, `window`, `blocking`, `sortNodes` and `fftflags`.
+
+!!! warning "Type instability"
+
+    Explicitly passing some of these parameters may result in type-unstable code, since the
+    exact type of the returned plan cannot be inferred.
+    This is because, in NonuniformFFTs.jl, parameters such as the kernel size (`m`) or the
+    convolution window (`window`) are included in the plan type (they are compile-time constants).
+
 """
 struct PlanNUFFT{
         T <: Number, N, Nc, M,
