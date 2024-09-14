@@ -40,6 +40,10 @@ end
 function set_points!(p::PlanNUFFT, xp::AbstractMatrix{T}; kwargs...) where {T}
     N = ndims(p)
     size(xp, 1) == N || throw(DimensionMismatch(lazy"expected input matrix to have dimensions ($N, Np)"))
-    xp_vec = reinterpret(reshape, NTuple{N, T}, xp) :: AbstractVector  # TODO: performance of reinterpret?
+    if N == 1
+        xp_vec = vec(xp)
+    else
+        xp_vec = reinterpret(reshape, NTuple{N, T}, xp) :: AbstractVector  # TODO: performance of reinterpret?
+    end
     set_points!(p, xp_vec; kwargs...)
 end
