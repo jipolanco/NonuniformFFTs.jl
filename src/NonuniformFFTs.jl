@@ -2,7 +2,7 @@ module NonuniformFFTs
 
 using AbstractFFTs: AbstractFFTs
 using AbstractNFFTs: AbstractNFFTs, AbstractNFFTPlan
-using StructArrays: StructVector
+using StructArrays: StructArrays, StructVector
 using AbstractFFTs: AbstractFFTs
 using KernelAbstractions: KernelAbstractions as KA, CPU, GPU, @kernel, @index
 using FFTW: FFTW

@@ -93,6 +93,7 @@ The created plan contains all data needed to perform NUFFTs for non-uniform data
   Using block partitioning is required for running with multiple threads.
   Blocking can be completely disabled by passing `block_size = nothing` (but this is
   generally slower, even when running on a single thread).
+  This parameter is ignored in GPU implementations.
 
 - `sort_points = False()`: whether to internally permute the order of the non-uniform points.
   This can be enabled by passing `sort_points = True()`.

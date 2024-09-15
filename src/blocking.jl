@@ -4,24 +4,38 @@ abstract type AbstractBlockData end
 struct NullBlockData <: AbstractBlockData end
 with_blocking(::NullBlockData) = false
 
+@kernel function copy_points_unblocked_kernel!(@Const(transform::F), points::NTuple, @Const(xp)) where {F}
+    I = @index(Global, Linear)
+    @inbounds x⃗ = xp[I]
+    for n ∈ eachindex(x⃗)
+        @inbounds points[n][I] = to_unit_cell(transform(x⃗[n]))
+    end
+    nothing
+end
+
 # Here the element type of `xp` can be either an NTuple{N, <:Real}, an SVector{N, <:Real},
 # or anything else which has length `N`.
-function set_points!(::NullBlockData, points, xp, timer; transform::F = identity) where {F <: Function}
-    resize!(points, length(xp))
+function set_points!(::NullBlockData, points::StructVector, xp, timer; transform::F = identity) where {F <: Function}
+    # TODO: avoid implicit copy in resize!? (can be costly, especially on GPU)
+    length(points) == length(xp) || resize!(points, length(xp))
     Base.require_one_based_indexing(points)
-    N = type_length(eltype(xp))
     @timeit timer "(1) Copy + fold" begin
-        @inbounds for (i, x) ∈ enumerate(xp)
-            points[i] = to_unit_cell(transform(NTuple{N}(x)))  # converts `x` to Tuple if it's an SVector
-        end
+        # NOTE: we explicitly iterate through StructVector components because CUDA.jl
+        # currently fails when implicitly writing to a StructArray (compilation fails,
+        # tested on Julia 1.11-rc3 and CUDA.jl v5.4.3).
+        points_comp = StructArrays.components(points)
+        backend = KA.get_backend(points_comp[1])
+        kernel! = copy_points_unblocked_kernel!(backend)
+        kernel!(transform, points_comp, xp; ndrange = size(xp))
+        KA.synchronize(backend)  # mostly to get accurate timings
     end
     nothing
 end
 
 # "Folds" location onto unit cell [0, 2π]ᵈ.
-to_unit_cell(x⃗) = map(_to_unit_cell, x⃗)
+to_unit_cell(x⃗::Tuple) = map(to_unit_cell, x⃗)
 
-function _to_unit_cell(x::Real)
+function to_unit_cell(x::Real)
     L = oftype(x, 2π)
     while x < 0
         x += L
@@ -97,7 +111,7 @@ end
 # Blocking is considered to be disabled if there are no allocated buffers.
 with_blocking(bd::BlockData) = !isempty(bd.buffers)
 
-function set_points!(bd::BlockData, points, xp, timer; transform::F = identity) where {F <: Function}
+function set_points!(bd::BlockData, points::StructVector, xp, timer; transform::F = identity) where {F <: Function}
     with_blocking(bd) || return set_points!(NullBlockData(), points, xp, timer)
 
     (; indices, cumulative_npoints_per_block, blockidx, pointperm, block_sizes,) = bd
