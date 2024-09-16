@@ -198,7 +198,7 @@ See also [`exec_type1!`](@ref).
 function exec_type2! end
 
 function exec_type2!(vp::NTuple{C, AbstractVector}, p::PlanNUFFT, ûs_k::NTuple{C, AbstractArray{<:Complex}}) where {C}
-    (; points, kernels, data, blocks, index_map, timer,) = p
+    (; backend, points, kernels, data, blocks, index_map, timer,) = p
     (; us,) = data
     @timeit timer "Execute type 2" begin
         check_nufft_uniform_data(p, ûs_k)
@@ -215,7 +215,11 @@ function exec_type2!(vp::NTuple{C, AbstractVector}, p::PlanNUFFT, ûs_k::NTuple
         # TODO: specialise and optimise for 1D case? In that case it might actually be worth
         # it to zero-out only the oversampled region.
         @timeit timer "(0) Fill with zeros" begin
-            fill_with_zeros_threaded!(ûs)
+            local ndrange = size(ûs[1])
+            local workgroupsize = default_workgroupsize(backend, ndrange)
+            local kernel! = fill_with_zeros_kernel!(backend, workgroupsize, ndrange)
+            kernel!(ûs)
+            KA.synchronize(backend)
         end
 
         @timeit timer "(1) Deconvolution" begin
