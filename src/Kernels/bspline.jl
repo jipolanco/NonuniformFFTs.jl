@@ -81,18 +81,9 @@ Note: the polynomial degree is `n - 1`.
 """
 order(::BSplineKernelData{M}) where {M} = 2M
 
-function evaluate_kernel(g::BSplineKernelData{M}, x, i::Integer) where {M}
+function evaluate_kernel_func(g::BSplineKernelData{M}) where {M}
     # The integral of a single B-spline, using its standard definition, is Δt.
     # This can be shown using the partition of unity property.
-    (; Δt,) = g
-    x′ = i - (x / Δt)  # normalised coordinate, 0 < x′ ≤ 1 (this assumes Δx = Δt)
-    # @assert 0 ≤ x′ ≤ 1
-    k = 2M  # B-spline order
-    values = bsplines_evaluate_all(x′, Val(k), typeof(Δt))
-    (; i, values,)
-end
-
-function evaluate_kernel_func(g::BSplineKernelData{M}) where {M}
     (; Δt,) = g
     function (x)
         i = point_to_cell(x, Δt)  # assume Δx = Δt

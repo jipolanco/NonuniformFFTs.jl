@@ -108,18 +108,6 @@ function evaluate_fourier!(g::GaussianKernelData, gk::AbstractVector, ks::Abstra
 end
 
 # Fast Gaussian gridding following Greengard & Lee, SIAM Rev. 2004.
-@inline @fastmath function evaluate_kernel(g::GaussianKernelData{M}, x, i::Integer) where {M}
-    # Evaluate in-between grid points xs[(i - M):(i + M)].
-    # Note: xs[j] = (j - 1) * Δx
-    (; τ, Δx, cs,) = g
-    X = x - (i - 1) * Δx  # source position relative to xs[i]
-    # @assert 0 ≤ X < i * Δx
-    a = exp(-X^2 / τ)
-    b = exp(2X * Δx / τ)
-    values = gaussian_gridding(a, b, cs)
-    (; i, values,)
-end
-
 function evaluate_kernel_func(g::GaussianKernelData{M}) where {M}
     (; τ, Δx, cs,) = g
     @inline @fastmath function (x)
