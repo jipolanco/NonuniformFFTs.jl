@@ -89,54 +89,6 @@ function check_nufft_nonuniform_data(p::PlanNUFFT, vp_all::NTuple{C, AbstractVec
     nothing
 end
 
-# We find it's faster to use a low-level call to memset (as opposed to a `for` loop, or
-# `fill!`), parallelised over all threads.
-# In fact, this mostly seems to be the case for complex data, while for real data using
-# `fill!` gives the same performance...
-# Using memset only makes sense if the arrays are contiguous in memory (DenseArray).
-function fill_with_zeros_threaded!(
-        us_all::NTuple{C, A};
-        nthreads = Threads.nthreads(),
-    ) where {C, A <: DenseArray}
-    # We assume all arrays in the tuple have the same type and shape.
-    inds = eachindex(first(us_all)) :: AbstractVector  # make sure array uses linear indices
-    @assert isone(first(inds))  # 1-based indexing
-    @assert all(us -> eachindex(us) === inds, us_all)  # all arrays have the same indices
-    GC.@preserve us_all begin
-        Threads.@threads :static for n ∈ 1:nthreads
-            a = ((n - 1) * length(inds)) ÷ nthreads
-            b = ((n - 0) * length(inds)) ÷ nthreads
-            # checkbounds(inds, (a + 1):b)
-            for us ∈ us_all
-                # This requires `us` to be a DenseArray (contiguous in memory).
-                p = pointer(us, a + 1)
-                n = (b - a) * sizeof(eltype(us))
-                val = zero(Cint)
-                ccall(:memset, Ptr{Cvoid}, (Ptr{Cvoid}, Cint, Csize_t), p, val, n)
-                # @views fill!(us[(a + 1):b], zero(eltype(us)))  # alternative (slower for complex data)
-            end
-        end
-    end
-    us_all
-end
-
-function fill_with_zeros_serial!(us_all::NTuple{C, A}) where {C, A <: DenseArray}
-    # We assume all arrays in the tuple have the same type and shape.
-    inds = eachindex(first(us_all)) :: AbstractVector  # make sure array uses linear indices
-    @assert isone(first(inds))  # 1-based indexing
-    @assert all(us -> eachindex(us) === inds, us_all)  # all arrays have the same indices
-    GC.@preserve us_all begin
-        for us ∈ us_all
-            p = pointer(us)
-            n = length(us) * sizeof(eltype(us))
-            val = zero(Cint)
-            ccall(:memset, Ptr{Cvoid}, (Ptr{Cvoid}, Cint, Csize_t), p, val, n)
-        end
-    end
-    us_all
-end
-
-# TODO: remove above implementations, keep only this one?
 @kernel function fill_with_zeros_kernel!(us::NTuple)
     I = @index(Global, Linear)
     for u ∈ us
@@ -175,7 +127,7 @@ function exec_type1!(ûs_k::NTuple{C, AbstractArray{<:Complex}}, p::PlanNUFFT, 
             local ndrange = size(us[1])
             local workgroupsize = default_workgroupsize(backend, ndrange)
             local kernel! = fill_with_zeros_kernel!(backend, workgroupsize, ndrange)
-            @time kernel!(us)
+            kernel!(us)
             KA.synchronize(backend)
         end
 
