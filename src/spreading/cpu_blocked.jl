@@ -60,6 +60,26 @@ function spread_from_point_blocked!(
     us
 end
 
+# We find it's faster to use a low-level call to memset (as opposed to a `for` loop, or
+# `fill!`). In fact, this mostly seems to be the case for complex data, while for real data
+# using `fill!` gives the same performance...
+# Using memset only makes sense if the arrays are contiguous in memory (DenseArray).
+function fill_with_zeros_serial!(us_all::NTuple{C, A}) where {C, A <: DenseArray}
+    # We assume all arrays in the tuple have the same type and shape.
+    inds = eachindex(first(us_all)) :: AbstractVector  # make sure array uses linear indices
+    @assert isone(first(inds))  # 1-based indexing
+    @assert all(us -> eachindex(us) === inds, us_all)  # all arrays have the same indices
+    GC.@preserve us_all begin
+        for us ∈ us_all
+            p = pointer(us)
+            n = length(us) * sizeof(eltype(us))
+            val = zero(Cint)
+            ccall(:memset, Ptr{Cvoid}, (Ptr{Cvoid}, Cint, Csize_t), p, val, n)
+        end
+    end
+    us_all
+end
+
 function spread_from_points_blocked!(
         ::CPU,
         gs,
