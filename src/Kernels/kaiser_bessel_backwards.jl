@@ -126,9 +126,21 @@ end
 function evaluate_kernel(g::BackwardsKaiserBesselKernelData{M}, x, i::Integer) where {M}
     # Evaluate in-between grid points xs[(i - M):(i + M)].
     # Note: xs[j] = (j - 1) * Δx
-    (; w,) = g
+    (; w, cs,) = g
     X = x / w - (i - 1) / M  # source position relative to xs[i]
     # @assert 0 ≤ X < 1 / M
-    values = evaluate_piecewise(X, g.cs)
+    values = evaluate_piecewise(X, cs)
     (; i, values,)
+end
+
+# TODO: define this for other kernels
+function evaluate_kernel_func(g::BackwardsKaiserBesselKernelData{M}) where {M}
+    (; w, Δx, cs,) = g
+    function (x)
+        i = point_to_cell(x, Δx)
+        X = x / w - (i - 1) / M  # source position relative to xs[i]
+        # @assert 0 ≤ X < 1 / M
+        values = evaluate_piecewise(X, cs)
+        (; i, values,)
+    end
 end

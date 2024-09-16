@@ -61,6 +61,7 @@ function spread_from_point_blocked!(
 end
 
 function spread_from_points_blocked!(
+        ::CPU,
         gs,
         bd::BlockData,
         us_all::NTuple{C, AbstractArray},

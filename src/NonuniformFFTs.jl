@@ -2,9 +2,11 @@ module NonuniformFFTs
 
 using AbstractFFTs: AbstractFFTs
 using AbstractNFFTs: AbstractNFFTs, AbstractNFFTPlan
+using GPUArraysCore: AbstractGPUArray, AbstractGPUVector
 using StructArrays: StructArrays, StructVector
 using AbstractFFTs: AbstractFFTs
-using KernelAbstractions: KernelAbstractions as KA, CPU, GPU, @kernel, @index
+using KernelAbstractions: KernelAbstractions as KA, CPU, GPU, @kernel, @index, @Const
+using Atomix: Atomix
 using FFTW: FFTW
 using LinearAlgebra: mul!
 using TimerOutputs: TimerOutput, @timeit
@@ -48,12 +50,18 @@ default_kernel() = BackwardsKaiserBesselKernel()
 # the @inbounds is applied.
 inbounds_getindex(v, i) = @inbounds v[i]
 
+function default_workgroupsize(backend, ndrange::Dims)
+    # This currently assumes 1024 available threads, which might fail in some GPUs (AMD?).
+    KA.default_cpu_workgroupsize(ndrange)
+end
+
 include("sorting.jl")
 include("blocking.jl")
 include("plan.jl")
 include("set_points.jl")
 include("spreading/cpu_nonblocked.jl")
 include("spreading/cpu_blocked.jl")
+include("spreading/gpu.jl")
 include("interpolation.jl")
 include("abstractNFFTs.jl")
 
@@ -128,6 +136,15 @@ function fill_with_zeros_serial!(us_all::NTuple{C, A}) where {C, A <: DenseArray
     us_all
 end
 
+# TODO: remove above implementations, keep only this one?
+@kernel function fill_with_zeros_kernel!(us::NTuple)
+    I = @index(Global, Linear)
+    for u ∈ us
+        @inbounds u[I] = zero(eltype(u))
+    end
+    nothing
+end
+
 """
     exec_type1!(ûs::AbstractArray{<:Complex}, p::PlanNUFFT, vp::AbstractVector{<:Number})
     exec_type1!(ûs::NTuple{N, AbstractArray{<:Complex}}, p::PlanNUFFT, vp::NTuple{N, AbstractVector{<:Number}})
@@ -147,31 +164,44 @@ See also [`exec_type2!`](@ref).
 function exec_type1! end
 
 function exec_type1!(ûs_k::NTuple{C, AbstractArray{<:Complex}}, p::PlanNUFFT, vp::NTuple{C}) where {C}
-    (; points, kernels, data, blocks, index_map, timer,) = p
+    (; backend, points, kernels, data, blocks, index_map, timer,) = p
     (; us,) = data
+
     @timeit timer "Execute type 1" begin
         check_nufft_uniform_data(p, ûs_k)
         check_nufft_nonuniform_data(p, vp)
 
-        @timeit timer "(0) Fill with zeros" begin
-            fill_with_zeros_threaded!(us)
+        @timeit timer "(0) Fill with zeros" let
+            local ndrange = size(us[1])
+            local workgroupsize = default_workgroupsize(backend, ndrange)
+            local kernel! = fill_with_zeros_kernel!(backend, workgroupsize, ndrange)
+            @time kernel!(us)
+            KA.synchronize(backend)
         end
 
-        @timeit timer "(1) Spreading" if with_blocking(blocks)
-            spread_from_points_blocked!(kernels, blocks, us, points, vp)
-        else
-            spread_from_points!(kernels, us, points, vp)  # single-threaded case?
+        @timeit timer "(1) Spreading" begin
+            if with_blocking(blocks)
+                spread_from_points_blocked!(backend, kernels, blocks, us, points, vp)  # CPU-only
+            else
+                spread_from_points!(backend, kernels, us, points, vp)  # single-threaded case? Also GPU case.
+            end
+            KA.synchronize(backend)
         end
 
-        @timeit timer "(2) Forward FFT" ûs = _type1_fft!(data)
+        @timeit timer "(2) Forward FFT" begin
+            ûs = _type1_fft!(data)
+            KA.synchronize(backend)
+        end
 
         @timeit timer "(3) Deconvolution" begin
             T = real(eltype(first(us)))
             normfactor::T = prod(N -> 2π / N, size(first(us)))  # FFT normalisation factor
             ϕ̂s = map(fourier_coefficients, kernels)
-            copy_deconvolve_to_non_oversampled!(ûs_k, ûs, index_map, ϕ̂s, normfactor)  # truncate to original grid + normalise
+            copy_deconvolve_to_non_oversampled!(backend, ûs_k, ûs, index_map, ϕ̂s, normfactor)  # truncate to original grid + normalise
+            KA.synchronize(backend)
         end
     end
+
     ûs_k
 end
 
@@ -310,7 +340,7 @@ function non_oversampled_indices!(
 end
 
 function copy_deconvolve_to_non_oversampled!(
-        ŵs_all::NTuple{C}, ûs_all::NTuple{C}, index_map, ϕ̂s, normfactor,
+        ::CPU, ŵs_all::NTuple{C}, ûs_all::NTuple{C}, index_map, ϕ̂s, normfactor,
     ) where {C}
     @assert C > 0
     inds_out = axes(first(ŵs_all))
@@ -338,6 +368,30 @@ function copy_deconvolve_to_non_oversampled!(
         end
     end
 
+    ŵs_all
+end
+
+@kernel function copy_deconvolve_to_non_oversampled_kernel!(
+        ŵs_all::NTuple{C}, @Const(ûs_all::NTuple{C}), @Const(index_map), @Const(ϕ̂s), @Const(normfactor),
+    ) where {C}
+    is = @index(Global, NTuple)                 # output index
+    js = map(inbounds_getindex, index_map, is)  # input index
+    ϕs_local = map(inbounds_getindex, ϕ̂s, is)   # convolution coefficients (one for each Cartesian direction)
+    β = normfactor / prod(ϕs_local)
+    for (w, u) ∈ zip(ŵs_all, ûs_all)
+        @inbounds w[is...] = β * u[js...]
+    end
+    nothing
+end
+
+function copy_deconvolve_to_non_oversampled!(
+        backend::GPU, ŵs_all::NTuple{C}, ûs_all::NTuple{C}, index_map, ϕ̂s, normfactor,
+    ) where {C}
+    @assert C > 0
+    ndrange = size(first(ŵs_all))  # size of output array (uniform grid, non oversampled)
+    workgroupsize = default_workgroupsize(backend, ndrange)
+    kernel! = copy_deconvolve_to_non_oversampled_kernel!(backend, workgroupsize, ndrange)
+    kernel!(ŵs_all, ûs_all, index_map, ϕ̂s, normfactor)
     ŵs_all
 end
 

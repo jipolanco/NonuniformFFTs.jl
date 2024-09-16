@@ -92,6 +92,18 @@ function evaluate_kernel(g::BSplineKernelData{M}, x, i::Integer) where {M}
     (; i, values,)
 end
 
+function evaluate_kernel_func(g::BSplineKernelData{M}) where {M}
+    (; Δt,) = g
+    function (x)
+        i = point_to_cell(x, Δt)  # assume Δx = Δt
+        x′ = i - (x / Δt)  # normalised coordinate, 0 < x′ ≤ 1 (this assumes Δx = Δt)
+        # @assert 0 ≤ x′ ≤ 1
+        k = 2M  # B-spline order
+        values = bsplines_evaluate_all(x′, Val(k), typeof(Δt))
+        (; i, values,)
+    end
+end
+
 # This should work on CPU and GPU.
 function evaluate_fourier!(g::BSplineKernelData{M}, gk::AbstractVector, ks::AbstractVector) where {M}
     (; Δt,) = g

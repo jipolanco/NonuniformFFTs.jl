@@ -120,6 +120,19 @@ end
     (; i, values,)
 end
 
+function evaluate_kernel_func(g::GaussianKernelData{M}) where {M}
+    (; τ, Δx, cs,) = g
+    @inline @fastmath function (x)
+        i = point_to_cell(x, Δx)
+        X = x - (i - 1) * Δx  # source position relative to xs[i]
+        # @assert 0 ≤ X < i * Δx
+        a = exp(-X^2 / τ)
+        b = exp(2X * Δx / τ)
+        values = gaussian_gridding(a, b, cs)
+        (; i, values,)
+    end
+end
+
 @inline function gaussian_gridding(a, b, cs::NTuple{M}) where {M}
     if @generated
         v₀ = Symbol(:v_, M)

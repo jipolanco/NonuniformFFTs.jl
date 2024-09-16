@@ -85,10 +85,18 @@ end
     evaluate_kernel(g, x₀, i)
 end
 
+@inline function kernel_indices(i, ::AbstractKernelData{K, M}, args...) where {K, M}
+    kernel_indices(i, HalfSupport(M), args...)
+end
+
+function kernel_indices_func(::AbstractKernelData{K, M}) where {K, M}
+    @inline (i, args...) -> kernel_indices(i, HalfSupport(M), args...)
+end
+
 # Takes into account periodic wrapping.
 # This is equivalent to calling mod1(j, N) for each j, but much much faster.
 # We assume the central index `i` is in 1:N and that M < N / 2.
-function kernel_indices(i, ::AbstractKernelData{K, M}, N::Integer) where {K, M}
+function kernel_indices(i, ::HalfSupport{M}, N::Integer) where {M}
     L = 2M
     j = i - M
     j = ifelse(j < 0, j + N, j)
@@ -102,7 +110,7 @@ end
 
 # This variant can be used when periodic wrapping is not needed.
 # (Used when doing block partitioning for parallelisation using threads.)
-function kernel_indices(i, ::AbstractKernelData{K, M}) where {K, M}
+function kernel_indices(i, ::HalfSupport{M}) where {M}
     (i - M + 1):(i + M)
 end
 
