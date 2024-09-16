@@ -79,16 +79,15 @@ end
     i
 end
 
-@inline function evaluate_kernel(g::AbstractKernelData, x₀)
-    dx = gridstep(g)
-    i = point_to_cell(x₀, dx)
-    evaluate_kernel(g, x₀, i)
-end
+# Note: evaluate_kernel_func generates a function which is callable from GPU kernels.
+# (Directly passing an AbstractKernelData to a GPU kernel fails, at least with CUDA).
+@inline evaluate_kernel(g::AbstractKernelData, x₀) = evaluate_kernel_func(g)(x₀)
 
 @inline function kernel_indices(i, ::AbstractKernelData{K, M}, args...) where {K, M}
     kernel_indices(i, HalfSupport(M), args...)
 end
 
+# Returns a function which is callable from GPU kernels.
 function kernel_indices_func(::AbstractKernelData{K, M}) where {K, M}
     @inline (i, args...) -> kernel_indices(i, HalfSupport(M), args...)
 end

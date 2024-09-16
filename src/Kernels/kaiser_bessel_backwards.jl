@@ -133,7 +133,6 @@ function evaluate_kernel(g::BackwardsKaiserBesselKernelData{M}, x, i::Integer) w
     (; i, values,)
 end
 
-# TODO: define this for other kernels
 function evaluate_kernel_func(g::BackwardsKaiserBesselKernelData{M}) where {M}
     (; w, Δx, cs,) = g
     function (x)
