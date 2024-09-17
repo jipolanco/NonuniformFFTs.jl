@@ -62,7 +62,8 @@ include("set_points.jl")
 include("spreading/cpu_nonblocked.jl")
 include("spreading/cpu_blocked.jl")
 include("spreading/gpu.jl")
-include("interpolation.jl")
+include("interpolation/cpu_nonblocked.jl")
+include("interpolation/cpu_blocked.jl")
 include("abstractNFFTs.jl")
 
 function check_nufft_uniform_data(p::PlanNUFFT, ûs_all::NTuple{C, AbstractArray{<:Complex}}) where {C}
