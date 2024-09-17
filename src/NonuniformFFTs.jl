@@ -59,11 +59,15 @@ include("sorting.jl")
 include("blocking.jl")
 include("plan.jl")
 include("set_points.jl")
+
 include("spreading/cpu_nonblocked.jl")
 include("spreading/cpu_blocked.jl")
 include("spreading/gpu.jl")
+
 include("interpolation/cpu_nonblocked.jl")
 include("interpolation/cpu_blocked.jl")
+include("interpolation/gpu.jl")
+
 include("abstractNFFTs.jl")
 
 function check_nufft_uniform_data(p::PlanNUFFT, ûs_all::NTuple{C, AbstractArray{<:Complex}}) where {C}
@@ -201,6 +205,7 @@ function exec_type2! end
 function exec_type2!(vp::NTuple{C, AbstractVector}, p::PlanNUFFT, ûs_k::NTuple{C, AbstractArray{<:Complex}}) where {C}
     (; backend, points, kernels, data, blocks, index_map, timer,) = p
     (; us,) = data
+
     @timeit timer "Execute type 2" begin
         check_nufft_uniform_data(p, ûs_k)
         check_nufft_nonuniform_data(p, vp)
@@ -225,19 +230,25 @@ function exec_type2!(vp::NTuple{C, AbstractVector}, p::PlanNUFFT, ûs_k::NTuple
 
         @timeit timer "(1) Deconvolution" begin
             ϕ̂s = map(fourier_coefficients, kernels)
-            copy_deconvolve_to_oversampled!(ûs, ûs_k, index_map, ϕ̂s)
+            copy_deconvolve_to_oversampled!(backend, ûs, ûs_k, index_map, ϕ̂s)
+            KA.synchronize(backend)
         end
 
-        @timeit timer "(2) Backward FFT" _type2_fft!(data)
+        @timeit timer "(2) Backward FFT" begin
+            _type2_fft!(data)
+            KA.synchronize(backend)
+        end
 
         @timeit timer "(3) Interpolation" begin
             if with_blocking(blocks)
-                interpolate_blocked!(kernels, blocks, vp, us, points)
+                interpolate_blocked!(kernels, blocks, vp, us, points)  # CPU-onlu
             else
-                interpolate!(kernels, vp, us, points)
+                interpolate!(backend, kernels, vp, us, points)  # single-threaded case? Also GPU case.
             end
+            KA.synchronize(backend)
         end
     end
+
     vp
 end
 
@@ -353,7 +364,7 @@ function copy_deconvolve_to_non_oversampled!(
 end
 
 function copy_deconvolve_to_oversampled!(
-        ûs_all::NTuple{C, DenseArray}, ŵs_all::NTuple{C}, index_map, ϕ̂s,
+        backend::CPU, ûs_all::NTuple{C, DenseArray}, ŵs_all::NTuple{C}, index_map, ϕ̂s,
     ) where {C}
     @assert C > 0
     inds_out = axes(first(ŵs_all))
@@ -382,6 +393,30 @@ function copy_deconvolve_to_oversampled!(
     end
 
     ûs_all
+end
+
+@kernel function copy_deconvolve_to_oversampled_kernel!(
+        ûs_all::NTuple{C}, @Const(ŵs_all::NTuple{C}), @Const(index_map), @Const(ϕ̂s),
+    ) where {C}
+    is = @index(Global, NTuple)                 # input index (on non-oversampled grid)
+    js = map(inbounds_getindex, index_map, is)  # output index (on oversampled grid)
+    ϕs_local = map(inbounds_getindex, ϕ̂s, is)   # convolution coefficients (one for each Cartesian direction)
+    β = 1 / prod(ϕs_local)                      # deconvolution factor
+    for (ŵs, ûs) ∈ zip(ŵs_all, ûs_all)
+        @inbounds ûs[js...] = β * ŵs[is...]
+    end
+    nothing
+end
+
+function copy_deconvolve_to_oversampled!(
+        backend::GPU, ûs_all::NTuple{C}, ŵs_all::NTuple{C}, index_map, ϕ̂s,
+    ) where {C}
+    @assert C > 0
+    ndrange = size(first(ŵs_all))  # size of input array (uniform grid, non oversampled)
+    workgroupsize = default_workgroupsize(backend, ndrange)
+    kernel! = copy_deconvolve_to_oversampled_kernel!(backend, workgroupsize, ndrange)
+    kernel!(ûs_all, ŵs_all, index_map, ϕ̂s)
+    ŵs_all
 end
 
 # Precompile a small subset of possible static parameter combinations (m, kernel, T, ndims,

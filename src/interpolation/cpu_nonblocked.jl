@@ -1,4 +1,5 @@
 function interpolate!(
+        backend::CPU,
         gs,
         vp_all::NTuple{C, AbstractVector},
         us::NTuple{C, AbstractArray},

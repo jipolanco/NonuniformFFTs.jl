@@ -1,6 +1,8 @@
 # Spread from a single point
-@kernel function spread_from_points_naive_kernel!(
-        us::NTuple{C}, @Const(points::NTuple{D}), @Const(vp::NTuple{C}),
+@kernel function spread_from_point_naive_kernel!(
+        us::NTuple{C},
+        @Const(points::NTuple{D}),
+        @Const(vp::NTuple{C}),
         evaluate::NTuple{D, <:Function},  # can't be marked Const for some reason
         to_indices::NTuple{D, <:Function},
     ) where {C, D}
@@ -8,10 +10,7 @@
     x⃗ = map(xs -> @inbounds(xs[i]), points)
     v⃗ = map(v -> @inbounds(v[i]), vp)
 
-    # Evaluate 1D kernels.
-    gs_eval = map((f, x) -> f(x), evaluate, x⃗)
-
-    # Determine indices to write in `u` arrays.
+    # Determine grid dimensions.
     Z = eltype(v⃗)
     Ns = size(first(us))
     if Z <: Complex
@@ -19,6 +18,10 @@
         Ns = Base.setindex(Ns, Ns[1] >> 1, 1)  # actual number of complex elements in first dimension
     end
 
+    # Evaluate 1D kernels.
+    gs_eval = map((f, x) -> f(x), evaluate, x⃗)
+
+    # Determine indices to write in `u` arrays.
     inds = map(to_indices, gs_eval, Ns) do f, gdata, N
         f(gdata.i, N)
     end
@@ -58,10 +61,12 @@ end
 # Atomix.@atomic currently fails for complex data (https://github.com/JuliaGPU/KernelAbstractions.jl/issues/497),
 # so the output must be a real array `u`.
 @inline function _atomic_add!(u::DenseArray{T}, v::Complex{T}, inds::Tuple) where {T <: Real}
-    @inbounds i₁ = 2 * (inds[1] - 1)  # convert from logical index (equivalent complex array) to memory index (real array)
-    @inbounds itail = Base.tail(inds)
-    @inbounds Atomix.@atomic u[i₁ + 1, itail...] += real(v)
-    @inbounds Atomix.@atomic u[i₁ + 2, itail...] += imag(v)
+    @inbounds begin
+        i₁ = 2 * (inds[1] - 1)  # convert from logical index (equivalent complex array) to memory index (real array)
+        itail = Base.tail(inds)
+        Atomix.@atomic u[i₁ + 1, itail...] += real(v)
+        Atomix.@atomic u[i₁ + 2, itail...] += imag(v)
+    end
     nothing
 end
 
@@ -94,9 +99,10 @@ function spread_from_points!(
         map(u -> reinterpret(T, u), us_all)  # note: we don't use reshape, so the first dimension has 2x elements
     end
 
+    # TODO: use dynamically sized kernel? (to avoid recompilation, since number of points may change from one call to another)
     ndrange = size(x⃗s)  # iterate through points
     workgroupsize = default_workgroupsize(backend, ndrange)
-    kernel! = spread_from_points_naive_kernel!(backend, workgroupsize, ndrange)
+    kernel! = spread_from_point_naive_kernel!(backend, workgroupsize, ndrange)
     kernel!(us_real, xs_comp, vp_all, evaluate, to_indices)
 
     us_all
