@@ -33,21 +33,56 @@
     nothing
 end
 
-function spread_onto_arrays_gpu!(
-        us::NTuple{C, AbstractArray{T, D}} where {T},
+# Currently the @generated function doesn't seem to speed-up things, but that might change
+# if we find a way of avoiding atomic writes (which seem to be the bottleneck here).
+@inline function spread_onto_arrays_gpu!(
+        us::NTuple{C, AbstractArray{T, D}},
         inds_mapping::NTuple{D, Tuple},
-        vals::NTuple{D, Tuple},
+        vals::NTuple{D, NTuple{M, Tg}},
         vs::NTuple{C},
-    ) where {C, D}
-    inds = map(eachindex, inds_mapping)
-    @inbounds for J ∈ CartesianIndices(inds)
-        js = Tuple(J)
-        is = map(inbounds_getindex, inds_mapping, js)
-        gs = map(inbounds_getindex, vals, js)
-        gprod = prod(gs)
-        for (u, v) ∈ zip(us, vs)
-            w = v * gprod
-            _atomic_add!(u, w, is)
+    ) where {T, C, D, M, Tg <: AbstractFloat}
+    if @generated
+        gprod_init = Symbol(:gprod_, D + 1)  # the name of this variable is important!
+        quote
+            inds = map(eachindex, inds_mapping)
+            $gprod_init = one($Tg)
+            @nloops(
+                $D, i,
+                d -> inds[d],  # for i_d ∈ inds[d]
+                d -> begin
+                    @inbounds gprod_d = gprod_{d + 1} * vals[d][i_d]  # add factor for dimension d
+                    @inbounds j_d = inds_mapping[d][i_d]
+                end,
+                begin
+                    # gprod_1 contains the product vals[1][i_1] * vals[2][i_2] * ...
+                    js = @ntuple $D j
+                    @inbounds for n ∈ 1:$C
+                        w = vs[n] * gprod_1
+                        _atomic_add!(us[n], w, js)
+                    end
+                end
+            )
+            nothing
+        end
+    else
+        inds = map(eachindex, inds_mapping)
+        inds_first, inds_tail = first(inds), Base.tail(inds)
+        vals_first, vals_tail = first(vals), Base.tail(vals)
+        imap_first, imap_tail = first(inds_mapping), Base.tail(inds_mapping)
+        @inbounds for J_tail ∈ CartesianIndices(inds_tail)
+            js_tail = Tuple(J_tail)
+            is_tail = map(inbounds_getindex, imap_tail, js_tail)
+            gs_tail = map(inbounds_getindex, vals_tail, js_tail)
+            gprod_tail = prod(gs_tail)
+            for j ∈ inds_first
+                i = imap_first[j]
+                is = (i, is_tail...)
+                gprod = gprod_tail * vals_first[j]
+                for (u, v) ∈ zip(us, vs)
+                    w = v * gprod
+                    _atomic_add!(u, w, is)
+                end
+            end
         end
     end
     nothing
