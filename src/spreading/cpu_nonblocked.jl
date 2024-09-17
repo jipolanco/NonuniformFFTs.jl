@@ -60,8 +60,7 @@ function spread_onto_arrays!(
         us::NTuple{C, AbstractArray{T, D}} where {T},
         inds_mapping::NTuple{D, Tuple},
         vals::NTuple{D, Tuple},
-        vs::NTuple{C};
-        atomic = Val(false),  # set to true in the GPU version
+        vs::NTuple{C},
     ) where {C, D}
     inds = map(eachindex, inds_mapping)
     inds_first, inds_tail = first(inds), Base.tail(inds)
@@ -77,11 +76,7 @@ function spread_onto_arrays!(
             gprod = gprod_tail * vals_first[j]
             for (u, v) ∈ zip(us, vs)
                 w = v * gprod
-                if atomic === Val(true)
-                    Atomix.@atomic u[i, is_tail...] += w
-                else
-                    u[i, is_tail...] += w
-                end
+                u[i, is_tail...] += w
             end
         end
     end
