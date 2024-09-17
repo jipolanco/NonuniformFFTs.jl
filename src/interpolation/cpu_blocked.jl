@@ -33,15 +33,15 @@ end
 
 # This is equivalent to spread_onto_arrays_blocked! in spreading.
 function interpolate_from_arrays_blocked(
-        us::NTuple{C, AbstractArray{Tu, D}},  # `Tu` can be complex
+        us::NTuple{C, AbstractArray{T, D}},  # `T` can be complex
         Is::CartesianIndices{D},
         vals::NTuple{D, NTuple{M, Tg}},       # `Tg` is always real
-    ) where {C, D, M, Tu, Tg <: AbstractFloat}
+    ) where {C, D, M, T, Tg <: AbstractFloat}
     if @generated
         gprod_init = Symbol(:gprod_, D)  # the name of this variable is important!
         quote
             inds = map(eachindex, vals)
-            @nexprs $C j -> (v_j = zero($Tu))
+            @nexprs $C j -> (v_j = zero($T))
             @nextract $C u us  # creates variables u_1, u_2, ..., u_C
             $gprod_init = one($Tg)
             # Split loop onto dimensions 1 and 2:D.
