@@ -39,9 +39,9 @@ function init_plan_data(
         plan_kwargs,
     ) where {T <: AbstractFloat, Nc}
     @assert Nc ≥ 1
-    us = ntuple(_ -> KA.allocate(backend, T, Ñs), Val(Nc))
+    us = ntuple(_ -> KA.zeros(backend, T, Ñs), Val(Nc))
     dims_out = (Ñs[1] ÷ 2 + 1, Base.tail(Ñs)...)
-    ûs = ntuple(_ -> KA.allocate(backend, Complex{T}, dims_out), Val(Nc))
+    ûs = ntuple(_ -> KA.zeros(backend, Complex{T}, dims_out), Val(Nc))
     plan_fw = AbstractFFTs.plan_rfft(first(us); plan_kwargs...)
     plan_bw = AbstractFFTs.plan_brfft(first(ûs), Ñs[1]; plan_kwargs...)
     RealNUFFTData(ks, us, ûs, plan_fw, plan_bw)
@@ -53,7 +53,7 @@ function init_plan_data(
         plan_kwargs,
     ) where {T <: AbstractFloat, Nc}
     @assert Nc ≥ 1
-    us = ntuple(_ -> KA.allocate(backend, Complex{T}, Ñs), Val(Nc))
+    us = ntuple(_ -> KA.zeros(backend, Complex{T}, Ñs), Val(Nc))
     plan_fw = AbstractFFTs.plan_fft!(first(us); plan_kwargs...)
     plan_bw = AbstractFFTs.plan_bfft!(first(us); plan_kwargs...)
     ComplexNUFFTData(ks, us, plan_fw, plan_bw)
