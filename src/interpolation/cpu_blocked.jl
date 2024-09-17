@@ -41,9 +41,9 @@ function interpolate_from_arrays_blocked(
         gprod_init = Symbol(:gprod_, D)  # the name of this variable is important!
         quote
             inds = map(eachindex, vals)
-            @nexprs $C j -> (v_j = zero($u))
+            @nexprs $C j -> (v_j = zero($Tu))
             @nextract $C u us  # creates variables u_1, u_2, ..., u_C
-            $gprod_init = one($Tv)
+            $gprod_init = one($Tg)
             # Split loop onto dimensions 1 and 2:D.
             # The loop over the first (fastest) dimension is avoided and SVectors are used
             # instead.
