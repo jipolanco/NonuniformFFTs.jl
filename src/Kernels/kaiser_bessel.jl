@@ -152,11 +152,11 @@ function evaluate_fourier!(g::KaiserBesselKernelData, gk::AbstractVector, ks::Ab
     end
 end
 
-function evaluate_kernel_func(g::KaiserBesselKernelData{M}) where {M}
+function evaluate_kernel_func(g::KaiserBesselKernelData{M, T}) where {M, T}
     (; w, Δx, cs,) = g
     function (x)
         i = point_to_cell(x, Δx)
-        X = x / w - (i - 1) / M  # source position relative to xs[i]
+        X = x / w - T(i - 1) / M  # source position relative to xs[i]
         # @assert 0 ≤ X < 1 / M
         values = evaluate_piecewise(X, cs)
         (; i, values,)
