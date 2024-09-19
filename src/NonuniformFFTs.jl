@@ -64,6 +64,7 @@ end
 default_workgroupsize(::GPU, ndrange::Dims{1}) = (min(64, ndrange[1]),)
 
 include("sorting.jl")
+include("sorting_hilbert.jl")
 include("blocking.jl")
 include("plan.jl")
 include("set_points.jl")
