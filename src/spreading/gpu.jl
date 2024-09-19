@@ -88,14 +88,14 @@ end
     nothing
 end
 
-@inline function _atomic_add!(u::DenseArray{T}, v::T, inds::Tuple) where {T <: Real}
+@inline function _atomic_add!(u::AbstractArray{T}, v::T, inds::Tuple) where {T <: Real}
     @inbounds Atomix.@atomic u[inds...] += v
     nothing
 end
 
 # Atomix.@atomic currently fails for complex data (https://github.com/JuliaGPU/KernelAbstractions.jl/issues/497),
 # so the output must be a real array `u`.
-@inline function _atomic_add!(u::DenseArray{T}, v::Complex{T}, inds::Tuple) where {T <: Real}
+@inline function _atomic_add!(u::AbstractArray{T}, v::Complex{T}, inds::Tuple) where {T <: Real}
     @inbounds begin
         i₁ = 2 * (inds[1] - 1)  # convert from logical index (equivalent complex array) to memory index (real array)
         itail = Base.tail(inds)
