@@ -7,9 +7,12 @@
 
 Yet another package for computing multidimensional [non-uniform fast Fourier transforms (NUFFTs)](https://en.wikipedia.org/wiki/NUFFT) in Julia.
 
-Like other [existing packages](#differences-with-other-packages), computations
+Like other [existing packages](#differences-with-other-packages), CPU computations
 are parallelised using threads.
 By default, all available Julia threads are used.
+
+Preliminary support for GPUs is also available.
+In principle all kinds of GPU are supported.
 
 ## Basic usage
 
@@ -27,7 +30,7 @@ xp = rand(T, Np) .* T(2π)  # non-uniform points in [0, 2π]
 vp = randn(T, Np)          # random values at points
 
 # Create plan for data of type T
-plan_nufft = PlanNUFFT(T, N; m = HalfSupport(8))  # larger support increases accuracy
+plan_nufft = PlanNUFFT(T, N; m = HalfSupport(4))  # larger support increases accuracy
 
 # Set non-uniform points
 set_points!(plan_nufft, xp)
@@ -51,7 +54,7 @@ xp = rand(T, Np) .* T(2π)          # non-uniform points in [0, 2π]
 ûs = randn(Complex{T}, N ÷ 2 + 1)  # random values at points (we need to store roughly half the Fourier modes for complex-to-real transform)
 
 # Create plan for data of type T
-plan_nufft = PlanNUFFT(T, N; m = HalfSupport(8))
+plan_nufft = PlanNUFFT(T, N; m = HalfSupport(4))
 
 # Set non-uniform points
 set_points!(plan_nufft, xp)
@@ -80,7 +83,7 @@ xp = [T(2π) * rand(SVector{d, T}) for _ ∈ 1:Np]  # non-uniform points in [0, 
 vp = randn(T, Np)                                # random values at points
 
 # Create plan for data of type T
-plan_nufft = PlanNUFFT(T, Ns; m = HalfSupport(8))
+plan_nufft = PlanNUFFT(T, Ns; m = HalfSupport(4))
 
 # Set non-uniform points
 set_points!(plan_nufft, xp)
@@ -122,6 +125,59 @@ exec_type1!(ûs, plan_nufft, vp)
 
 # Perform type-2 NUFFT on preallocated output (one vector per transformed quantity)
 vp_interp = map(similar, vp)
+exec_type2!(vp, plan_nufft, ûs)
+```
+
+</details>
+
+<details>
+<summary><b>Transforms on the GPU</b></summary>
+
+Below is a GPU version of the multidimensional transform example above.
+The only differences are:
+
+- we import CUDA.jl and Adapt.jl (optional)
+- we pass `backend = CUDABackend()` to `PlanNUFFT` (`CUDABackend` is a [KernelAbstractions backend](https://juliagpu.github.io/KernelAbstractions.jl/stable/#Supported-backends) and is exported by CUDA.jl).
+  The default is `backend = CPU()`.
+- we copy input arrays to the GPU before calling any NUFFT-related functions (`set_points!`, `exec_type1!`, `exec_type2!`)
+
+The example is for an Nvidia GPU (using [CUDA.jl](https://github.com/JuliaGPU/CUDA.jl)), but should also work with e.g. [AMDGPU.jl](https://github.com/JuliaGPU/AMDGPU.jl)
+by simply choosing `backend = ROCBackend()` (this hasn't been tested yet).
+
+```julia
+using NonuniformFFTs
+using StaticArrays: SVector  # for convenience
+using CUDA
+using Adapt: adapt  # optional (see below)
+
+backend = CUDABackend()  # other options are CPU() or ROCBackend() (untested)
+
+Ns = (256, 256)  # number of Fourier modes in each direction
+Np = 1000        # number of non-uniform points
+
+# Generate some non-uniform random data
+T = Float64                                          # non-uniform data is real (can also be complex)
+d = length(Ns)                                       # number of dimensions (d = 2 here)
+xp_cpu = [T(2π) * rand(SVector{d, T}) for _ ∈ 1:Np]  # non-uniform points in [0, 2π]ᵈ
+vp_cpu = randn(T, Np)                                # random values at points
+
+# Copy data to the GPU (using Adapt is optional but it makes code more generic).
+# Note that all data needs to be on the GPU before setting points or executing transforms.
+# We could have also generated the data directly on the GPU.
+xp = adapt(backend, xp_cpu)  # returns a CuArray if backend = CUDABackend
+vp = adapt(backend, vp_cpu)
+
+# Create plan for data of type T
+plan_nufft = PlanNUFFT(T, Ns; m = HalfSupport(4), backend)
+
+# Set non-uniform points
+set_points!(plan_nufft, xp)
+
+# Perform type-1 NUFFT on preallocated output
+ûs = similar(vp, Complex{T}, size(plan_nufft))  # initialises a GPU array for the output
+exec_type1!(ûs, plan_nufft, vp)
+
+# Perform type-2 NUFFT on preallocated output
 exec_type2!(vp, plan_nufft, ûs)
 ```
 
