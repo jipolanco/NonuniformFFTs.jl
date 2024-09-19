@@ -186,6 +186,9 @@ can be overridden) so that the uniform data ordering is the same as in NFFT.jl.
     This is because, in NonuniformFFTs.jl, parameters such as the kernel size (`m`) or the
     convolution window (`window`) are included in the plan type (they are compile-time constants).
 
+# GPU usage
+
+To create a GPU plan, simply pass the locations `xp` as a GPU array (e.g. a `CuArray` in CUDA).
 """
 struct PlanNUFFT{
         T <: Number,  # non-uniform data type (can be real or complex)
