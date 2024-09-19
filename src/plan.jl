@@ -188,7 +188,8 @@ can be overridden) so that the uniform data ordering is the same as in NFFT.jl.
 
 # GPU usage
 
-To create a GPU plan, simply pass the locations `xp` as a GPU array (e.g. a `CuArray` in CUDA).
+To create a GPU-compatible plan, simply pass the locations `xp` as a GPU array (e.g. a `CuArray` in CUDA).
+Unlike the first constructor, the `backend` argument is not needed here and will be simply ignored.
 """
 struct PlanNUFFT{
         T <: Number,  # non-uniform data type (can be real or complex)
