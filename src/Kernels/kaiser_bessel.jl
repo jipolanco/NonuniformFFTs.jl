@@ -97,6 +97,7 @@ size of the grid of interest.
 """
 struct KaiserBesselKernelData{
         M, T <: AbstractFloat, ApproxCoefs <: NTuple,
+        FourierCoefs <: AbstractVector{T},
     } <: AbstractKernelData{KaiserBesselKernel, M, T}
     Δx :: T  # grid spacing
     σ  :: T  # equivalent kernel width (for comparison with Gaussian)
@@ -104,18 +105,18 @@ struct KaiserBesselKernelData{
     β  :: T  # KB parameter
     β² :: T
     cs :: ApproxCoefs  # coefficients of polynomial approximation
-    gk :: Vector{T}
+    gk :: FourierCoefs
 
-    function KaiserBesselKernelData{M}(Δx::T, β::T) where {M, T <: AbstractFloat}
+    function KaiserBesselKernelData{M}(backend::KA.Backend, Δx::T, β::T) where {M, T <: AbstractFloat}
         w = M * Δx
         σ = sqrt(kb_equivalent_variance(β)) * w
         β² = β * β
-        gk = Vector{T}(undef, 0)
+        gk = KA.allocate(backend, T, 0)
         Npoly = M + 4  # degree of polynomial is d = Npoly - 1
         cs = solve_piecewise_polynomial_coefficients(T, Val(M), Val(Npoly)) do x
             besseli0(β * sqrt(1 - x^2))
         end
-        new{M, T, typeof(cs)}(Δx, σ, w, β, β², cs, gk)
+        new{M, T, typeof(cs), typeof(gk)}(Δx, σ, w, β, β², cs, gk)
     end
 end
 
@@ -127,7 +128,7 @@ function Base.show(io::IO, g::KaiserBesselKernelData{M}) where {M}
     print(io, "KaiserBesselKernel(β = $β) with half-support M = $M")
 end
 
-function optimal_kernel(kernel::KaiserBesselKernel, h::HalfSupport{M}, Δx, σ) where {M}
+function optimal_kernel(kernel::KaiserBesselKernel, h::HalfSupport{M}, Δx, σ; backend) where {M}
     T = typeof(Δx)
     β = if kernel.β === nothing
         # Set the optimal kernel shape parameter given the wanted support M and the oversampling
@@ -137,22 +138,27 @@ function optimal_kernel(kernel::KaiserBesselKernel, h::HalfSupport{M}, Δx, σ) 
     else
         T(kernel.β)
     end
-    KaiserBesselKernelData(h, Δx, β)
+    KaiserBesselKernelData(h, backend, Δx, β)
 end
 
-function evaluate_fourier(g::KaiserBesselKernelData, k::Number)
+# This should work on CPU and GPU.
+function evaluate_fourier!(g::KaiserBesselKernelData, gk::AbstractVector, ks::AbstractVector)
+    @assert eachindex(gk) == eachindex(ks)
     (; β², w,) = g
-    q = w * k
-    s = sqrt(β² - q^2)  # this is always real (assuming β ≥ Mπ)
-    2 * w * sinh(s) / s
+    map!(gk, ks) do k
+        q = w * k
+        s = sqrt(β² - q^2)  # this is always real (assuming β ≥ Mπ)
+        2 * w * sinh(s) / s
+    end
 end
 
-function evaluate_kernel(g::KaiserBesselKernelData{M}, x, i::Integer) where {M}
-    # Evaluate in-between grid points xs[(i - M):(i + M)].
-    # Note: xs[j] = (j - 1) * Δx
-    (; w,) = g
-    X = x / w - (i - 1) / M  # source position relative to xs[i]
-    # @assert 0 ≤ X < 1 / M
-    values = evaluate_piecewise(X, g.cs)
-    (; i, values,)
+function evaluate_kernel_func(g::KaiserBesselKernelData{M, T}) where {M, T}
+    (; w, Δx, cs,) = g
+    function (x)
+        i = point_to_cell(x, Δx)
+        X = x / w - T(i - 1) / M  # source position relative to xs[i]
+        # @assert 0 ≤ X < 1 / M
+        values = evaluate_piecewise(X, cs)
+        (; i, values,)
+    end
 end

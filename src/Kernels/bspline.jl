@@ -44,16 +44,19 @@ be equal to the grid step ``Δx``.
 This means that the resulting variance of the B-spline kernels is fixed to
 ``σ^2 = (n / 12) Δt^2 = (M / 6) Δx^2``.
 """
-struct BSplineKernelData{M, T <: AbstractFloat} <: AbstractKernelData{BSplineKernel, M, T}
+struct BSplineKernelData{
+        M, T <: AbstractFloat,
+        FourierCoefs <: AbstractVector{T},
+    } <: AbstractKernelData{BSplineKernel, M, T}
     σ  :: T
     Δt :: T          # knot separation
-    gk :: Vector{T}  # values in uniform Fourier grid
-    function BSplineKernelData{M}(Δx::Real) where {M}
+    gk :: FourierCoefs  # values in uniform Fourier grid
+    function BSplineKernelData{M}(backend::KA.Backend, Δx::Real) where {M}
         Δt = Δx
         σ = sqrt(M / 6) * Δt
         T = eltype(Δt)
-        gk = Vector{T}(undef, 0)
-        new{M, T}(T(σ), Δt, gk)
+        gk = KA.allocate(backend, T, 0)
+        new{M, T, typeof(gk)}(T(σ), Δt, gk)
     end
 end
 
@@ -66,8 +69,8 @@ function Base.show(io::IO, ::BSplineKernelData{M}) where {M}
 end
 
 # Here we ignore the oversampling factor, this kernel is not very adjustable...
-optimal_kernel(::BSplineKernel, h::HalfSupport, Δx, σ) =
-    BSplineKernelData(h, Δx)
+optimal_kernel(::BSplineKernel, h::HalfSupport, Δx, σ; backend) =
+    BSplineKernelData(h, backend, Δx)
 
 """
     order(::BSplineKernelData{M})
@@ -78,23 +81,30 @@ Note: the polynomial degree is `n - 1`.
 """
 order(::BSplineKernelData{M}) where {M} = 2M
 
-function evaluate_kernel(g::BSplineKernelData{M}, x, i::Integer) where {M}
+function evaluate_kernel_func(g::BSplineKernelData{M}) where {M}
     # The integral of a single B-spline, using its standard definition, is Δt.
     # This can be shown using the partition of unity property.
     (; Δt,) = g
-    x′ = i - (x / Δt)  # normalised coordinate, 0 < x′ ≤ 1 (this assumes Δx = Δt)
-    # @assert 0 ≤ x′ ≤ 1
-    k = 2M  # B-spline order
-    values = bsplines_evaluate_all(x′, Val(k), typeof(Δt))
-    (; i, values,)
+    function (x)
+        i = point_to_cell(x, Δt)  # assume Δx = Δt
+        x′ = i - (x / Δt)  # normalised coordinate, 0 < x′ ≤ 1 (this assumes Δx = Δt)
+        # @assert 0 ≤ x′ ≤ 1
+        k = 2M  # B-spline order
+        values = bsplines_evaluate_all(x′, Val(k), typeof(Δt))
+        (; i, values,)
+    end
 end
 
-function evaluate_fourier(g::BSplineKernelData{M}, k) where {M}
+# This should work on CPU and GPU.
+function evaluate_fourier!(g::BSplineKernelData{M}, gk::AbstractVector, ks::AbstractVector) where {M}
     (; Δt,) = g
-    kh = k * Δt / 2
-    s = sin(kh) / kh
-    n = 2M
-    ifelse(iszero(k), one(s), s^n) * Δt
+    @assert eachindex(gk) == eachindex(ks)
+    map!(gk, ks) do k
+        kh = k * Δt / 2
+        s = sin(kh) / kh
+        n = 2M
+        ifelse(iszero(k), one(s), s^n) * Δt
+    end
 end
 
 # Adapted from BSplineKit.jl.

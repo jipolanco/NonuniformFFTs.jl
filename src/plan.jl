@@ -3,12 +3,14 @@ abstract type AbstractNUFFTData{T <: Number, N, Nc} end
 struct RealNUFFTData{
         T <: AbstractFloat, N, Nc,
         WaveNumbers <: NTuple{N, AbstractVector{T}},
-        PlanFFT_fw <: FFTW.Plan{T},
-        PlanFFT_bw <: FFTW.Plan{Complex{T}},
+        FieldsR <: NTuple{Nc, AbstractArray{T, N}},
+        FieldsC <: NTuple{Nc, AbstractArray{Complex{T}, N}},
+        PlanFFT_fw <: AbstractFFTs.Plan{T},
+        PlanFFT_bw <: AbstractFFTs.Plan{Complex{T}},
     } <: AbstractNUFFTData{T, N, Nc}
     ks      :: WaveNumbers  # wavenumbers in *non-oversampled* Fourier grid
-    us      :: NTuple{Nc, Array{T, N}}  # values in oversampled grid
-    ûs      :: NTuple{Nc, Array{Complex{T}, N}}  # Fourier coefficients in oversampled grid
+    us      :: FieldsR      # values in oversampled grid (real)
+    ûs      :: FieldsC      # Fourier coefficients in oversampled grid (complex)
     plan_fw :: PlanFFT_fw
     plan_bw :: PlanFFT_bw
 end
@@ -16,11 +18,12 @@ end
 struct ComplexNUFFTData{
         T <: AbstractFloat, N, Nc,
         WaveNumbers <: NTuple{N, AbstractVector{T}},
-        PlanFFT_fw <: FFTW.Plan{Complex{T}},
-        PlanFFT_bw <: FFTW.Plan{Complex{T}},
+        FieldsC <: NTuple{Nc, AbstractArray{Complex{T}, N}},
+        PlanFFT_fw <: AbstractFFTs.Plan{Complex{T}},
+        PlanFFT_bw <: AbstractFFTs.Plan{Complex{T}},
     } <: AbstractNUFFTData{Complex{T}, N, Nc}
     ks      :: WaveNumbers
-    us      :: NTuple{Nc, Array{Complex{T}, N}}
+    us      :: FieldsC
     plan_fw :: PlanFFT_fw  # in-place transform
     plan_bw :: PlanFFT_bw  # inverse in-place transform
 end
@@ -32,30 +35,32 @@ output_field(data::ComplexNUFFTData) = data.us  # output === input
 
 # Case of real data
 function init_plan_data(
-        ::Type{T}, Ñs::Dims, ks::NTuple, ::Val{Nc}; fftw_flags,
+        ::Type{T}, backend::KA.Backend, Ñs::Dims, ks::NTuple, ::Val{Nc};
+        plan_kwargs,
     ) where {T <: AbstractFloat, Nc}
     @assert Nc ≥ 1
-    us = ntuple(_ -> Array{T}(undef, Ñs), Val(Nc))
+    us = ntuple(_ -> KA.zeros(backend, T, Ñs), Val(Nc))
     dims_out = (Ñs[1] ÷ 2 + 1, Base.tail(Ñs)...)
-    ûs = ntuple(_ -> Array{Complex{T}}(undef, dims_out), Val(Nc))
-    plan_fw = FFTW.plan_rfft(first(us); flags = fftw_flags)
-    plan_bw = FFTW.plan_brfft(first(ûs), Ñs[1]; flags = fftw_flags)
+    ûs = ntuple(_ -> KA.zeros(backend, Complex{T}, dims_out), Val(Nc))
+    plan_fw = AbstractFFTs.plan_rfft(first(us); plan_kwargs...)
+    plan_bw = AbstractFFTs.plan_brfft(first(ûs), Ñs[1]; plan_kwargs...)
     RealNUFFTData(ks, us, ûs, plan_fw, plan_bw)
 end
 
 # Case of complex data
 function init_plan_data(
-        ::Type{Complex{T}}, Ñs::Dims, ks::NTuple, ::Val{Nc}; fftw_flags,
+        ::Type{Complex{T}}, backend::KA.Backend, Ñs::Dims, ks::NTuple, ::Val{Nc};
+        plan_kwargs,
     ) where {T <: AbstractFloat, Nc}
     @assert Nc ≥ 1
-    us = ntuple(_ -> Array{Complex{T}}(undef, Ñs), Val(Nc))
-    plan_fw = FFTW.plan_fft!(first(us); flags = fftw_flags)
-    plan_bw = FFTW.plan_bfft!(first(us); flags = fftw_flags)
+    us = ntuple(_ -> KA.zeros(backend, Complex{T}, Ñs), Val(Nc))
+    plan_fw = AbstractFFTs.plan_fft!(first(us); plan_kwargs...)
+    plan_bw = AbstractFFTs.plan_bfft!(first(us); plan_kwargs...)
     ComplexNUFFTData(ks, us, plan_fw, plan_bw)
 end
 
 """
-    PlanNUFFT([T = ComplexF64], dims::Dims; ntransforms = Val(1), kwargs...)
+    PlanNUFFT([T = ComplexF64], dims::Dims; ntransforms = Val(1), backend = CPU(), kwargs...)
 
 Construct a plan for performing non-uniform FFTs (NUFFTs).
 
@@ -67,6 +72,9 @@ The created plan contains all data needed to perform NUFFTs for non-uniform data
 - `ntransforms = Val(1)`: the number of simultaneous transforms to perform.
   This is useful if one wants to transform multiple scalar quantities at the same
   non-uniform points.
+
+- `backend::KernelAbstractions.Backend = CPU()`: corresponds to the device type where
+  everything will be executed. This could be e.g. `CUDABackend()` if CUDA.jl is loaded.
 
 ## NUFFT parameters
 
@@ -85,6 +93,7 @@ The created plan contains all data needed to perform NUFFTs for non-uniform data
   Using block partitioning is required for running with multiple threads.
   Blocking can be completely disabled by passing `block_size = nothing` (but this is
   generally slower, even when running on a single thread).
+  This parameter is ignored in GPU implementations.
 
 - `sort_points = False()`: whether to internally permute the order of the non-uniform points.
   This can be enabled by passing `sort_points = True()`.
@@ -94,7 +103,7 @@ The created plan contains all data needed to perform NUFFTs for non-uniform data
 
 ## Other parameters
 
-- `fftw_flags = FFTW.MEASURE`: parameters passed to the FFTW planner.
+- `fftw_flags = FFTW.MEASURE`: parameters passed to the FFTW planner (only used when `backend = CPU()`).
 
 - `fftshift = false`: determines the order of wavenumbers in uniform space.
   If `false` (default), the same order used by FFTW is used, with positive wavenumbers first
@@ -179,7 +188,11 @@ can be overridden) so that the uniform data ordering is the same as in NFFT.jl.
 
 """
 struct PlanNUFFT{
-        T <: Number, N, Nc, M,
+        T <: Number,  # non-uniform data type (can be real or complex)
+        N,   # number of dimensions
+        Nc,  # number of "components" (simultaneous transforms)
+        M,   # kernel half-width
+        Backend <: KA.Backend,
         Treal <: AbstractFloat,  # this is real(T)
         Kernels <: NTuple{N, AbstractKernelData{<:AbstractKernel, M, Treal}},
         Points <: StructVector{NTuple{N, Treal}},
@@ -189,6 +202,7 @@ struct PlanNUFFT{
         Timer <: TimerOutput,
     } <: AbstractNFFTPlan{Treal, N, 1}  # the AbstractNFFTPlan only really makes sense when T <: Complex
     kernels :: Kernels
+    backend :: Backend  # CPU, GPU, ...
     σ       :: Treal   # oversampling factor (≥ 1)
     points  :: Points  # non-uniform points (real values)
     data    :: Data
@@ -199,15 +213,15 @@ struct PlanNUFFT{
 end
 
 function Base.show(io::IO, p::PlanNUFFT{T, N, Nc}) where {T, N, Nc}
-    (; kernels, σ, fftshift,) = p
+    (; kernels, backend, σ, fftshift,) = p
     print(io, "$N-dimensional PlanNUFFT with input type $T:")
+    print(io, "\n  - backend: ", typeof(backend))
     print(io, "\n  - kernel: ", first(kernels))  # should be the same output in all directions
     print(io, "\n  - oversampling factor: σ = ", σ)
     print(io, "\n  - uniform dimensions: ", size(p))
     print(io, "\n  - simultaneous transforms: ", Nc)
     frequency_order = fftshift ? "increasing" : "FFTW"
     print(io, "\n  - frequency order: ", frequency_order, " (fftshift = $fftshift)")
-    print(io, "\n  - simultaneous transforms: ", Nc)
     nothing
 end
 
@@ -254,6 +268,7 @@ function _PlanNUFFT(
         fftshift = false,
         block_size::Union{Integer, Nothing} = default_block_size(),
         sort_points::StaticBool = False(),
+        backend::KA.Backend = CPU(),
     ) where {T <: Number, D}
     ks = init_wavenumbers(T, Ns)
     # Determine dimensions of oversampled grid.
@@ -270,7 +285,7 @@ function _PlanNUFFT(
         @inline
         L = Tr(2π)  # assume 2π period
         Δx̃ = L / Ñ
-        Kernels.optimal_kernel(kernel, h, Δx̃, Ñ / N)
+        Kernels.optimal_kernel(kernel, h, Δx̃, Ñ / N; backend)
     end
     # Precompute Fourier coefficients of the kernels.
     # After doing this, one can call `fourier_coefficients` to get the precomputed
@@ -281,22 +296,23 @@ function _PlanNUFFT(
     else
         foreach(init_fourier_coefficients!, kernel_data, ks)
     end
-    points = StructVector(ntuple(_ -> Tr[], Val(D)))
-    if block_size === nothing
+    points = StructVector(ntuple(_ -> KA.allocate(backend, Tr, 0), Val(D)))  # empty vector of points
+    if block_size === nothing || backend isa GPU
         blocks = NullBlockData()  # disable blocking (→ can't use multithreading when spreading)
-        FFTW.set_num_threads(1)   # also disable FFTW threading (avoids allocations)
+        backend isa CPU && FFTW.set_num_threads(1)   # also disable FFTW threading (avoids allocations)
     else
         block_dims = get_block_dims(Ñs, block_size)
         blocks = BlockData(T, block_dims, Ñs, h, num_transforms, sort_points)
-        FFTW.set_num_threads(Threads.nthreads())
+        backend isa CPU && FFTW.set_num_threads(Threads.nthreads())
     end
-    nufft_data = init_plan_data(T, Ñs, ks, num_transforms; fftw_flags)
+    plan_kwargs = backend isa CPU ? (flags = fftw_flags,) : (;)
+    nufft_data = init_plan_data(T, backend, Ñs, ks, num_transforms; plan_kwargs)
     ûs = first(output_field(nufft_data)) :: AbstractArray{<:Complex}
     index_map = map(ks, axes(ûs)) do k, inds
-        indmap = similar(inds, length(k))
+        indmap = KA.allocate(backend, eltype(inds), length(k))
         non_oversampled_indices!(indmap, k, inds; fftshift)
     end
-    PlanNUFFT(kernel_data, σ, points, nufft_data, blocks, fftshift, index_map, timer)
+    PlanNUFFT(kernel_data, backend, σ, points, nufft_data, blocks, fftshift, index_map, timer)
 end
 
 function check_nufft_size(Ñ, ::HalfSupport{M}) where M
@@ -315,11 +331,11 @@ end
 init_wavenumbers(::Type{T}, Ns::Dims) where {T <: AbstractFloat} = ntuple(Val(length(Ns))) do i
     N = Ns[i]
     # This assumes L = 2π:
-    i == 1 ? FFTW.rfftfreq(N, T(N)) : FFTW.fftfreq(N, T(N))
+    i == 1 ? AbstractFFTs.rfftfreq(N, T(N)) : AbstractFFTs.fftfreq(N, T(N))
 end
 
 init_wavenumbers(::Type{Complex{T}}, Ns::Dims) where {T <: AbstractFloat} = map(Ns) do N
-    FFTW.fftfreq(N, T(N))  # this assumes L = 2π
+    AbstractFFTs.fftfreq(N, T(N))  # this assumes L = 2π
 end
 
 function PlanNUFFT(

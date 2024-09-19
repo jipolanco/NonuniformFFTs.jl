@@ -56,21 +56,25 @@ GaussianKernel() = GaussianKernel(nothing)
 Constructs a Gaussian kernel with standard deviation `σ = α Δx` and half-support `M`, for a
 grid of step `Δx`.
 """
-struct GaussianKernelData{M, T <: AbstractFloat} <: AbstractKernelData{GaussianKernel, M, T}
+struct GaussianKernelData{
+        M, T <: AbstractFloat,
+        FourierCoefs <: AbstractVector{T},
+    } <: AbstractKernelData{GaussianKernel, M, T}
     Δx :: T
     σ  :: T
     τ  :: T
     cs :: NTuple{M, T}  # precomputed exponentials
-    gk :: Vector{T}     # values in uniform Fourier grid
-    function GaussianKernelData{M}(Δx::T, α::T) where {M, T <: AbstractFloat}
+    gk :: FourierCoefs  # values in uniform Fourier grid
+
+    function GaussianKernelData{M}(backend::KA.Backend, Δx::T, α::T) where {M, T <: AbstractFloat}
         σ = α * Δx
         τ = 2 * σ^2
         cs = ntuple(Val(M)) do i
             x = i * Δx
             exp(-x^2 / τ)
         end
-        gk = Vector{T}(undef, 0)
-        new{M, T}(Δx, σ, τ, cs, gk)
+        gk = KA.allocate(backend, T, 0)
+        new{M, T, typeof(gk)}(Δx, σ, τ, cs, gk)
     end
 end
 
@@ -82,7 +86,7 @@ function Base.show(io::IO, g::GaussianKernelData{M}) where {M}
     print(io, "GaussianKernelData(ℓ/Δx = $r) with half-support M = $M")
 end
 
-function optimal_kernel(kernel::GaussianKernel, h::HalfSupport{M}, Δx, σ) where {M}
+function optimal_kernel(kernel::GaussianKernel, h::HalfSupport{M}, Δx, σ; backend) where {M}
     T = typeof(Δx)
     ℓ = if kernel.ℓ === nothing
         # Set the optimal kernel shape parameter given the wanted support M and the oversampling
@@ -91,25 +95,30 @@ function optimal_kernel(kernel::GaussianKernel, h::HalfSupport{M}, Δx, σ) wher
     else
         T(kernel.ℓ)
     end
-    GaussianKernelData(h, Δx, ℓ)
+    GaussianKernelData(h, backend, Δx, ℓ)
 end
 
-function evaluate_fourier(g::GaussianKernelData, k::Number)
+# This should work on CPU and GPU.
+function evaluate_fourier!(g::GaussianKernelData, gk::AbstractVector, ks::AbstractVector)
     (; τ,) = g
-    exp(-τ * k^2 / 4) * sqrt(π * τ)  # = exp(-σ² k² / 2) * sqrt(2πσ²)
+    @assert eachindex(gk) == eachindex(ks)
+    map!(gk, ks) do k
+        exp(-τ * k^2 / 4) * sqrt(π * τ)  # = exp(-σ² k² / 2) * sqrt(2πσ²)
+    end
 end
 
 # Fast Gaussian gridding following Greengard & Lee, SIAM Rev. 2004.
-@inline @fastmath function evaluate_kernel(g::GaussianKernelData{M}, x, i::Integer) where {M}
-    # Evaluate in-between grid points xs[(i - M):(i + M)].
-    # Note: xs[j] = (j - 1) * Δx
+function evaluate_kernel_func(g::GaussianKernelData{M}) where {M}
     (; τ, Δx, cs,) = g
-    X = x - (i - 1) * Δx  # source position relative to xs[i]
-    # @assert 0 ≤ X < i * Δx
-    a = exp(-X^2 / τ)
-    b = exp(2X * Δx / τ)
-    values = gaussian_gridding(a, b, cs)
-    (; i, values,)
+    @inline @fastmath function (x)
+        i = point_to_cell(x, Δx)
+        X = x - (i - 1) * Δx  # source position relative to xs[i]
+        # @assert 0 ≤ X < i * Δx
+        a = exp(-X^2 / τ)
+        b = exp(2X * Δx / τ)
+        values = gaussian_gridding(a, b, cs)
+        (; i, values,)
+    end
 end
 
 @inline function gaussian_gridding(a, b, cs::NTuple{M}) where {M}

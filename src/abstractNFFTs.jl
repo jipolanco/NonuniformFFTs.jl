@@ -43,7 +43,7 @@ end
 
 # Takes locations in [-1/2, 1/2)ᵈ, so we need to transform the point convention.
 # Note: the `transform` argument is an internal of set_points! and is not documented.
-# It takes an NTuple (a point location x⃗) as input.
+# It takes either an NTuple (a point location x⃗) or a scalar (coordinate xᵢ) as input.
 function AbstractNFFTs.nodes!(p::PlanNUFFT, xp::AbstractMatrix{T}) where {T <: AbstractFloat}
     set_points!(p, xp; transform = _transform_point_convention)
 end

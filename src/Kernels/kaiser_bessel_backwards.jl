@@ -69,23 +69,25 @@ BackwardsKaiserBesselKernel() = BackwardsKaiserBesselKernel(nothing)
 
 struct BackwardsKaiserBesselKernelData{
         M, T <: AbstractFloat, ApproxCoefs <: NTuple,
+        FourierCoefs <: AbstractVector{T},
     } <: AbstractKernelData{BackwardsKaiserBesselKernel, M, T}
     Δx :: T  # grid spacing
     σ  :: T  # equivalent kernel width (for comparison with Gaussian)
     w  :: T  # actual kernel half-width (= M * Δx)
     β  :: T  # KB parameter
     cs :: ApproxCoefs  # coefficients of polynomial approximation
-    gk :: Vector{T}
-    function BackwardsKaiserBesselKernelData{M}(Δx::T, β::T) where {M, T <: AbstractFloat}
+    gk :: FourierCoefs
+
+    function BackwardsKaiserBesselKernelData{M}(backend::KA.Backend, Δx::T, β::T) where {M, T <: AbstractFloat}
         w = M * Δx
         σ = sqrt(backwards_kb_equivalent_variance(β)) * w
-        gk = Vector{T}(undef, 0)
+        gk = KA.allocate(backend, T, 0)
         Npoly = M + 4  # degree of polynomial is d = Npoly - 1
         cs = solve_piecewise_polynomial_coefficients(T, Val(M), Val(Npoly)) do x
             s = sqrt(1 - x^2)
             sinh(β * s) / (s * oftype(x, π))
         end
-        new{M, T, typeof(cs)}(Δx, σ, w, β, cs, gk)
+        new{M, T, typeof(cs), typeof(gk)}(Δx, σ, w, β, cs, gk)
     end
 end
 
@@ -97,7 +99,7 @@ function Base.show(io::IO, g::BackwardsKaiserBesselKernelData{M}) where {M}
     print(io, "BackwardsKaiserBesselKernel(β = $β) with half-support M = $M")
 end
 
-function optimal_kernel(kernel::BackwardsKaiserBesselKernel, h::HalfSupport{M}, Δx, σ) where {M}
+function optimal_kernel(kernel::BackwardsKaiserBesselKernel, h::HalfSupport{M}, Δx, σ; backend) where {M}
     T = typeof(Δx)
     β = if kernel.β === nothing
         # Set the optimal kernel shape parameter given the wanted support M and the oversampling
@@ -107,22 +109,27 @@ function optimal_kernel(kernel::BackwardsKaiserBesselKernel, h::HalfSupport{M}, 
     else
         T(kernel.β)
     end
-    BackwardsKaiserBesselKernelData(h, Δx, β)
+    BackwardsKaiserBesselKernelData(h, backend, Δx, β)
 end
 
-function evaluate_fourier(g::BackwardsKaiserBesselKernelData, k::Number)
+# This should work on CPU and GPU.
+function evaluate_fourier!(g::BackwardsKaiserBesselKernelData, gk::AbstractVector, ks::AbstractVector)
+    @assert eachindex(gk) == eachindex(ks)
     (; β, w,) = g
-    q = w * k
-    s = sqrt(β^2 - q^2)  # this is always real (assuming β ≥ Mπ)
-    w * besseli0(s)
+    map!(gk, ks) do k
+        q = w * k
+        s = sqrt(β^2 - q^2)  # this is always real (assuming β ≥ Mπ)
+        w * besseli0(s)
+    end
 end
 
-function evaluate_kernel(g::BackwardsKaiserBesselKernelData{M}, x, i::Integer) where {M}
-    # Evaluate in-between grid points xs[(i - M):(i + M)].
-    # Note: xs[j] = (j - 1) * Δx
-    (; w,) = g
-    X = x / w - (i - 1) / M  # source position relative to xs[i]
-    # @assert 0 ≤ X < 1 / M
-    values = evaluate_piecewise(X, g.cs)
-    (; i, values,)
+function evaluate_kernel_func(g::BackwardsKaiserBesselKernelData{M, T}) where {M, T}
+    (; w, Δx, cs,) = g
+    function (x)
+        i = point_to_cell(x, Δx)
+        X = x / w - T(i - 1) / M  # source position relative to xs[i]
+        # @assert 0 ≤ X < 1 / M
+        values = evaluate_piecewise(X, cs)
+        (; i, values,)
+    end
 end

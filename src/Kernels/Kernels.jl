@@ -1,5 +1,7 @@
 module Kernels
 
+using KernelAbstractions: KernelAbstractions as KA
+
 export HalfSupport
 
 struct HalfSupport{M} end
@@ -62,9 +64,7 @@ function init_fourier_coefficients!(g::AbstractKernelData, ks::AbstractVector)
     Nk == length(gk) && return gk  # assume coefficients were already computed
     resize!(gk, Nk)
     @assert eachindex(gk) == eachindex(ks)
-    @inbounds for (i, k) ∈ pairs(ks)
-        gk[i] = evaluate_fourier(g, k)
-    end
+    evaluate_fourier!(g, gk, ks)
     gk
 end
 
@@ -79,16 +79,23 @@ end
     i
 end
 
-@inline function evaluate_kernel(g::AbstractKernelData, x₀)
-    dx = gridstep(g)
-    i = point_to_cell(x₀, dx)
-    evaluate_kernel(g, x₀, i)
+# Note: evaluate_kernel_func generates a function which is callable from GPU kernels.
+# (Directly passing an AbstractKernelData to a GPU kernel fails, at least with CUDA).
+@inline evaluate_kernel(g::AbstractKernelData, x₀) = evaluate_kernel_func(g)(x₀)
+
+@inline function kernel_indices(i, ::AbstractKernelData{K, M}, args...) where {K, M}
+    kernel_indices(i, HalfSupport(M), args...)
+end
+
+# Returns a function which is callable from GPU kernels.
+function kernel_indices_func(::AbstractKernelData{K, M}) where {K, M}
+    @inline (i, args...) -> kernel_indices(i, HalfSupport(M), args...)
 end
 
 # Takes into account periodic wrapping.
 # This is equivalent to calling mod1(j, N) for each j, but much much faster.
 # We assume the central index `i` is in 1:N and that M < N / 2.
-function kernel_indices(i, ::AbstractKernelData{K, M}, N::Integer) where {K, M}
+function kernel_indices(i, ::HalfSupport{M}, N::Integer) where {M}
     L = 2M
     j = i - M
     j = ifelse(j < 0, j + N, j)
@@ -102,7 +109,7 @@ end
 
 # This variant can be used when periodic wrapping is not needed.
 # (Used when doing block partitioning for parallelisation using threads.)
-function kernel_indices(i, ::AbstractKernelData{K, M}) where {K, M}
+function kernel_indices(i, ::HalfSupport{M}) where {M}
     (i - M + 1):(i + M)
 end
 

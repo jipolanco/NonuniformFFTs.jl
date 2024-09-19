@@ -2,7 +2,11 @@ module NonuniformFFTs
 
 using AbstractFFTs: AbstractFFTs
 using AbstractNFFTs: AbstractNFFTs, AbstractNFFTPlan
-using StructArrays: StructVector
+using GPUArraysCore: AbstractGPUArray, AbstractGPUVector
+using StructArrays: StructArrays, StructVector
+using AbstractFFTs: AbstractFFTs
+using KernelAbstractions: KernelAbstractions as KA, CPU, GPU, @kernel, @index, @Const
+using Atomix: Atomix
 using FFTW: FFTW
 using LinearAlgebra: mul!
 using TimerOutputs: TimerOutput, @timeit
@@ -35,6 +39,7 @@ export
     KaiserBesselKernel,
     BackwardsKaiserBesselKernel,
     False, True,
+    CPU,  # from KernelAbstractions
     set_points!,
     exec_type1!,
     exec_type2!
@@ -45,12 +50,32 @@ default_kernel() = BackwardsKaiserBesselKernel()
 # the @inbounds is applied.
 inbounds_getindex(v, i) = @inbounds v[i]
 
+function default_workgroupsize(backend, ndrange::Dims)
+    # This currently assumes 1024 available threads, which might fail in some GPUs (AMD?).
+    KA.default_cpu_workgroupsize(ndrange)
+end
+
+# Reducing the number of threads to 64 for 1D GPU kernels seems to improve performance
+# (tested on Nvidia A100). 1D kernels are those iterating over non-uniform points, i.e.
+# spreading and interpolation, which usually dominate performance.
+# TODO: this seems to be only true when data is randomly located and sorting is not
+# performed. With sorting, it looks like larger workgroups are faster, so we should revert
+# this when sorting on GPU is implemented.
+default_workgroupsize(::GPU, ndrange::Dims{1}) = (min(64, ndrange[1]),)
+
 include("sorting.jl")
 include("blocking.jl")
 include("plan.jl")
 include("set_points.jl")
-include("spreading.jl")
-include("interpolation.jl")
+
+include("spreading/cpu_nonblocked.jl")
+include("spreading/cpu_blocked.jl")
+include("spreading/gpu.jl")
+
+include("interpolation/cpu_nonblocked.jl")
+include("interpolation/cpu_blocked.jl")
+include("interpolation/gpu.jl")
+
 include("abstractNFFTs.jl")
 
 function check_nufft_uniform_data(p::PlanNUFFT, ûs_all::NTuple{C, AbstractArray{<:Complex}}) where {C}
@@ -77,51 +102,12 @@ function check_nufft_nonuniform_data(p::PlanNUFFT, vp_all::NTuple{C, AbstractVec
     nothing
 end
 
-# We find it's faster to use a low-level call to memset (as opposed to a `for` loop, or
-# `fill!`), parallelised over all threads.
-# In fact, this mostly seems to be the case for complex data, while for real data using
-# `fill!` gives the same performance...
-# Using memset only makes sense if the arrays are contiguous in memory (DenseArray).
-function fill_with_zeros_threaded!(
-        us_all::NTuple{C, A};
-        nthreads = Threads.nthreads(),
-    ) where {C, A <: DenseArray}
-    # We assume all arrays in the tuple have the same type and shape.
-    inds = eachindex(first(us_all)) :: AbstractVector  # make sure array uses linear indices
-    @assert isone(first(inds))  # 1-based indexing
-    @assert all(us -> eachindex(us) === inds, us_all)  # all arrays have the same indices
-    GC.@preserve us_all begin
-        Threads.@threads :static for n ∈ 1:nthreads
-            a = ((n - 1) * length(inds)) ÷ nthreads
-            b = ((n - 0) * length(inds)) ÷ nthreads
-            # checkbounds(inds, (a + 1):b)
-            for us ∈ us_all
-                # This requires `us` to be a DenseArray (contiguous in memory).
-                p = pointer(us, a + 1)
-                n = (b - a) * sizeof(eltype(us))
-                val = zero(Cint)
-                ccall(:memset, Ptr{Cvoid}, (Ptr{Cvoid}, Cint, Csize_t), p, val, n)
-                # @views fill!(us[(a + 1):b], zero(eltype(us)))  # alternative (slower for complex data)
-            end
-        end
+@kernel function fill_with_zeros_kernel!(us::NTuple)
+    I = @index(Global, Linear)
+    for u ∈ us
+        @inbounds u[I] = zero(eltype(u))
     end
-    us_all
-end
-
-function fill_with_zeros_serial!(us_all::NTuple{C, A}) where {C, A <: DenseArray}
-    # We assume all arrays in the tuple have the same type and shape.
-    inds = eachindex(first(us_all)) :: AbstractVector  # make sure array uses linear indices
-    @assert isone(first(inds))  # 1-based indexing
-    @assert all(us -> eachindex(us) === inds, us_all)  # all arrays have the same indices
-    GC.@preserve us_all begin
-        for us ∈ us_all
-            p = pointer(us)
-            n = length(us) * sizeof(eltype(us))
-            val = zero(Cint)
-            ccall(:memset, Ptr{Cvoid}, (Ptr{Cvoid}, Cint, Csize_t), p, val, n)
-        end
-    end
-    us_all
+    nothing
 end
 
 """
@@ -143,31 +129,44 @@ See also [`exec_type2!`](@ref).
 function exec_type1! end
 
 function exec_type1!(ûs_k::NTuple{C, AbstractArray{<:Complex}}, p::PlanNUFFT, vp::NTuple{C}) where {C}
-    (; points, kernels, data, blocks, index_map, timer,) = p
+    (; backend, points, kernels, data, blocks, index_map, timer,) = p
     (; us,) = data
+
     @timeit timer "Execute type 1" begin
         check_nufft_uniform_data(p, ûs_k)
         check_nufft_nonuniform_data(p, vp)
 
-        @timeit timer "(0) Fill with zeros" begin
-            fill_with_zeros_threaded!(us)
+        @timeit timer "(0) Fill with zeros" let
+            local ndrange = size(us[1])
+            local workgroupsize = default_workgroupsize(backend, ndrange)
+            local kernel! = fill_with_zeros_kernel!(backend, workgroupsize, ndrange)
+            kernel!(us)
+            KA.synchronize(backend)
         end
 
-        @timeit timer "(1) Spreading" if with_blocking(blocks)
-            spread_from_points_blocked!(kernels, blocks, us, points, vp)
-        else
-            spread_from_points!(kernels, us, points, vp)  # single-threaded case?
+        @timeit timer "(1) Spreading" begin
+            if with_blocking(blocks)
+                spread_from_points_blocked!(backend, kernels, blocks, us, points, vp)  # CPU-only
+            else
+                spread_from_points!(backend, kernels, us, points, vp)  # single-threaded case? Also GPU case.
+            end
+            KA.synchronize(backend)
         end
 
-        @timeit timer "(2) Forward FFT" ûs = _type1_fft!(data)
+        @timeit timer "(2) Forward FFT" begin
+            ûs = _type1_fft!(data)
+            KA.synchronize(backend)
+        end
 
         @timeit timer "(3) Deconvolution" begin
             T = real(eltype(first(us)))
             normfactor::T = prod(N -> 2π / N, size(first(us)))  # FFT normalisation factor
             ϕ̂s = map(fourier_coefficients, kernels)
-            copy_deconvolve_to_non_oversampled!(ûs_k, ûs, index_map, ϕ̂s, normfactor)  # truncate to original grid + normalise
+            copy_deconvolve_to_non_oversampled!(backend, ûs_k, ûs, index_map, ϕ̂s, normfactor)  # truncate to original grid + normalise
+            KA.synchronize(backend)
         end
     end
+
     ûs_k
 end
 
@@ -212,8 +211,9 @@ See also [`exec_type1!`](@ref).
 function exec_type2! end
 
 function exec_type2!(vp::NTuple{C, AbstractVector}, p::PlanNUFFT, ûs_k::NTuple{C, AbstractArray{<:Complex}}) where {C}
-    (; points, kernels, data, blocks, index_map, timer,) = p
+    (; backend, points, kernels, data, blocks, index_map, timer,) = p
     (; us,) = data
+
     @timeit timer "Execute type 2" begin
         check_nufft_uniform_data(p, ûs_k)
         check_nufft_nonuniform_data(p, vp)
@@ -229,24 +229,34 @@ function exec_type2!(vp::NTuple{C, AbstractVector}, p::PlanNUFFT, ûs_k::NTuple
         # TODO: specialise and optimise for 1D case? In that case it might actually be worth
         # it to zero-out only the oversampled region.
         @timeit timer "(0) Fill with zeros" begin
-            fill_with_zeros_threaded!(ûs)
+            local ndrange = size(ûs[1])
+            local workgroupsize = default_workgroupsize(backend, ndrange)
+            local kernel! = fill_with_zeros_kernel!(backend, workgroupsize, ndrange)
+            kernel!(ûs)
+            KA.synchronize(backend)
         end
 
         @timeit timer "(1) Deconvolution" begin
             ϕ̂s = map(fourier_coefficients, kernels)
-            copy_deconvolve_to_oversampled!(ûs, ûs_k, index_map, ϕ̂s)
+            copy_deconvolve_to_oversampled!(backend, ûs, ûs_k, index_map, ϕ̂s)
+            KA.synchronize(backend)
         end
 
-        @timeit timer "(2) Backward FFT" _type2_fft!(data)
+        @timeit timer "(2) Backward FFT" begin
+            _type2_fft!(data)
+            KA.synchronize(backend)
+        end
 
         @timeit timer "(3) Interpolation" begin
             if with_blocking(blocks)
-                interpolate_blocked!(kernels, blocks, vp, us, points)
+                interpolate_blocked!(kernels, blocks, vp, us, points)  # CPU-onlu
             else
-                interpolate!(kernels, vp, us, points)
+                interpolate!(backend, kernels, vp, us, points)  # single-threaded case? Also GPU case.
             end
+            KA.synchronize(backend)
         end
     end
+
     vp
 end
 
@@ -281,31 +291,32 @@ function non_oversampled_indices!(
     Nk = length(ks)
     r2c = last(ks) > 0  # true if real-to-complex transform is performed in this dimension
     if r2c
-        copyto!(indmap, ax[begin:(begin + Nk - 1)])
+        # Note: copyto! seems to use scalar indexing on GPUs, and thus fails.
+        @views indmap[:] .= ax[begin:(begin + Nk - 1)]
     elseif iseven(Nk)
         h = Nk ÷ 2
         if fftshift
-            @views copyto!(indmap[begin:(begin + h - 1)], ax[(end - h + 1):end])  # k < 0
-            @views copyto!(indmap[(begin + h):end], ax[begin:(begin + h - 1)])    # k ≥ 0
+            @views indmap[begin:(begin + h - 1)] .= ax[(end - h + 1):end]  # k < 0
+            @views indmap[(begin + h):end] .= ax[begin:(begin + h - 1)]    # k ≥ 0
         else
-            @views copyto!(indmap[begin:(begin + h - 1)], ax[begin:(begin + h - 1)])  # k ≥ 0
-            @views copyto!(indmap[(begin + h):end], ax[(end - h + 1):end])  # k < 0
+            @views indmap[begin:(begin + h - 1)] .= ax[begin:(begin + h - 1)]  # k ≥ 0
+            @views indmap[(begin + h):end] .= ax[(end - h + 1):end]  # k < 0
         end
     else
         h = (Nk - 1) ÷ 2
         if fftshift
-            @views copyto!(indmap[begin:(begin + h - 1)], ax[(end - h + 1):end])  # k < 0
-            @views copyto!(indmap[(begin + h):end], ax[begin:(begin + h)])        # k ≥ 0
+            @views indmap[begin:(begin + h - 1)] .= ax[(end - h + 1):end]  # k < 0
+            @views indmap[(begin + h):end] .= ax[begin:(begin + h)]        # k ≥ 0
         else
-            @views copyto!(indmap[begin:(begin + h)], ax[begin:(begin + h)])
-            @views copyto!(indmap[(begin + h + 1):end], ax[(end - h + 1):end])
+            @views indmap[begin:(begin + h)] .= ax[begin:(begin + h)]
+            @views indmap[(begin + h + 1):end] .= ax[(end - h + 1):end]
         end
     end
     indmap
 end
 
 function copy_deconvolve_to_non_oversampled!(
-        ŵs_all::NTuple{C}, ûs_all::NTuple{C}, index_map, ϕ̂s, normfactor,
+        ::CPU, ŵs_all::NTuple{C}, ûs_all::NTuple{C}, index_map, ϕ̂s, normfactor,
     ) where {C}
     @assert C > 0
     inds_out = axes(first(ŵs_all))
@@ -336,8 +347,32 @@ function copy_deconvolve_to_non_oversampled!(
     ŵs_all
 end
 
+@kernel function copy_deconvolve_to_non_oversampled_kernel!(
+        ŵs_all::NTuple{C}, @Const(ûs_all::NTuple{C}), @Const(index_map), @Const(ϕ̂s), @Const(normfactor),
+    ) where {C}
+    is = @index(Global, NTuple)                 # output index
+    js = map(inbounds_getindex, index_map, is)  # input index
+    ϕs_local = map(inbounds_getindex, ϕ̂s, is)   # convolution coefficients (one for each Cartesian direction)
+    β = normfactor / prod(ϕs_local)
+    for (w, u) ∈ zip(ŵs_all, ûs_all)
+        @inbounds w[is...] = β * u[js...]
+    end
+    nothing
+end
+
+function copy_deconvolve_to_non_oversampled!(
+        backend::GPU, ŵs_all::NTuple{C}, ûs_all::NTuple{C}, index_map, ϕ̂s, normfactor,
+    ) where {C}
+    @assert C > 0
+    ndrange = size(first(ŵs_all))  # size of output array (uniform grid, non oversampled)
+    workgroupsize = default_workgroupsize(backend, ndrange)
+    kernel! = copy_deconvolve_to_non_oversampled_kernel!(backend, workgroupsize, ndrange)
+    kernel!(ŵs_all, ûs_all, index_map, ϕ̂s, normfactor)
+    ŵs_all
+end
+
 function copy_deconvolve_to_oversampled!(
-        ûs_all::NTuple{C, DenseArray}, ŵs_all::NTuple{C}, index_map, ϕ̂s,
+        backend::CPU, ûs_all::NTuple{C, DenseArray}, ŵs_all::NTuple{C}, index_map, ϕ̂s,
     ) where {C}
     @assert C > 0
     inds_out = axes(first(ŵs_all))
@@ -366,6 +401,30 @@ function copy_deconvolve_to_oversampled!(
     end
 
     ûs_all
+end
+
+@kernel function copy_deconvolve_to_oversampled_kernel!(
+        ûs_all::NTuple{C}, @Const(ŵs_all::NTuple{C}), @Const(index_map), @Const(ϕ̂s),
+    ) where {C}
+    is = @index(Global, NTuple)                 # input index (on non-oversampled grid)
+    js = map(inbounds_getindex, index_map, is)  # output index (on oversampled grid)
+    ϕs_local = map(inbounds_getindex, ϕ̂s, is)   # convolution coefficients (one for each Cartesian direction)
+    β = 1 / prod(ϕs_local)                      # deconvolution factor
+    for (ŵs, ûs) ∈ zip(ŵs_all, ûs_all)
+        @inbounds ûs[js...] = β * ŵs[is...]
+    end
+    nothing
+end
+
+function copy_deconvolve_to_oversampled!(
+        backend::GPU, ûs_all::NTuple{C}, ŵs_all::NTuple{C}, index_map, ϕ̂s,
+    ) where {C}
+    @assert C > 0
+    ndrange = size(first(ŵs_all))  # size of input array (uniform grid, non oversampled)
+    workgroupsize = default_workgroupsize(backend, ndrange)
+    kernel! = copy_deconvolve_to_oversampled_kernel!(backend, workgroupsize, ndrange)
+    kernel!(ûs_all, ŵs_all, index_map, ϕ̂s)
+    ŵs_all
 end
 
 # Precompile a small subset of possible static parameter combinations (m, kernel, T, ndims,
