@@ -55,6 +55,14 @@ function default_workgroupsize(backend, ndrange::Dims)
     KA.default_cpu_workgroupsize(ndrange)
 end
 
+# Reducing the number of threads to 64 for 1D GPU kernels seems to improve performance
+# (tested on Nvidia A100). 1D kernels are those iterating over non-uniform points, i.e.
+# spreading and interpolation, which usually dominate performance.
+# TODO: this seems to be only true when data is randomly located and sorting is not
+# performed. With sorting, it looks like larger workgroups are faster, so we should revert
+# this when sorting on GPU is implemented.
+default_workgroupsize(::GPU, ndrange::Dims{1}) = (min(64, ndrange[1]),)
+
 include("sorting.jl")
 include("blocking.jl")
 include("plan.jl")
