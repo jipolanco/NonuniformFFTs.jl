@@ -53,6 +53,23 @@ function run_plan(p::PlanNUFFT, xp_init::AbstractArray, vp_init::AbstractVector)
 
     set_points!(p, xp)
 
+    save_points_sorted = false # this can be useful for verifying Hilbert sorting graphically
+
+    if backend isa PseudoGPU && save_points_sorted
+        inds = NonuniformFFTs.get_pointperm(p.blocks)
+        if inds !== nothing
+            open("points_sorted.dat", "w") do io
+                for i ∈ inds
+                    x⃗ = xp[i]
+                    for x ∈ x⃗
+                        print(io, "\t", x)
+                    end
+                    print(io, "\n")
+                end
+            end
+        end
+    end
+
     T = eltype(p)  # this is actually defined in AbstractNFFTs; it represents the type in Fourier space (always complex)
     @test T <: Complex
     dims = size(p)
@@ -65,7 +82,7 @@ function run_plan(p::PlanNUFFT, xp_init::AbstractArray, vp_init::AbstractVector)
     (; backend, us, wp,)
 end
 
-function compare_with_cpu(::Type{T}, dims; Np = prod(dims)) where {T <: Number}
+function compare_with_cpu(::Type{T}, dims; Np = prod(dims), kws...) where {T <: Number}
     # Generate some non-uniform random data on the CPU
     rng = Xoshiro(42)
     N = length(dims)    # number of dimensions
@@ -73,7 +90,7 @@ function compare_with_cpu(::Type{T}, dims; Np = prod(dims)) where {T <: Number}
     xp_init = [rand(rng, SVector{N, Tr}) * Tr(2π) for _ ∈ 1:Np]  # non-uniform points in [0, 2π]ᵈ
     vp_init = randn(rng, T, Np)          # random values at points
 
-    params = (; m = HalfSupport(4), kernel = KaiserBesselKernel(), σ = 1.5,)
+    params = (; m = HalfSupport(4), kernel = KaiserBesselKernel(), σ = 1.5, kws...)
     p_cpu = PlanNUFFT(T, dims; params..., backend = CPU())
     p_gpu = PlanNUFFT(T, dims; params..., backend = PseudoGPU())
 
@@ -87,9 +104,14 @@ function compare_with_cpu(::Type{T}, dims; Np = prod(dims)) where {T <: Number}
 end
 
 @testset "GPU implementation (using CPU)" begin
-    types = (Float32, ComplexF32)
     dims = (35, 64, 40)
-    @testset "T = $T" for T ∈ types
+    @testset "T = $T" for T ∈ (Float32, ComplexF32)
         compare_with_cpu(T, dims)
+    end
+    @testset "sort_points = $sort_points" for sort_points ∈ (False(), True())
+        compare_with_cpu(Float64, dims; sort_points)
+    end
+    @testset "No blocking" begin  # Hilbert sorting disabled
+        compare_with_cpu(ComplexF64, dims; block_size = nothing)
     end
 end
