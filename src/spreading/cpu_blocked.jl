@@ -80,10 +80,10 @@ function fill_with_zeros_serial!(us_all::NTuple{C, A}) where {C, A <: DenseArray
     us_all
 end
 
-function spread_from_points_blocked!(
+function spread_from_points!(
         ::CPU,
-        gs,
         bd::BlockData,
+        gs,
         us_all::NTuple{C, AbstractArray},
         xp::AbstractVector,
         vp_all::NTuple{C, AbstractVector},

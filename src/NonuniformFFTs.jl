@@ -55,15 +55,11 @@ function default_workgroupsize(backend, ndrange::Dims)
     KA.default_cpu_workgroupsize(ndrange)
 end
 
-# Reducing the number of threads to 64 for 1D GPU kernels seems to improve performance
-# (tested on Nvidia A100). 1D kernels are those iterating over non-uniform points, i.e.
-# spreading and interpolation, which usually dominate performance.
-# TODO: this seems to be only true when data is randomly located and sorting is not
-# performed. With sorting, it looks like larger workgroups are faster, so we should revert
-# this when sorting on GPU is implemented.
-default_workgroupsize(::GPU, ndrange::Dims{1}) = (min(64, ndrange[1]),)
+# Case of 1D kernels on the GPU (typically, kernels which iterate over non-uniform points).
+default_workgroupsize(::GPU, ndrange::Dims{1}) = (min(512, ndrange[1]),)
 
 include("sorting.jl")
+include("sorting_hilbert.jl")
 include("blocking.jl")
 include("plan.jl")
 include("set_points.jl")
@@ -145,11 +141,7 @@ function exec_type1!(ûs_k::NTuple{C, AbstractArray{<:Complex}}, p::PlanNUFFT, 
         end
 
         @timeit timer "(1) Spreading" begin
-            if with_blocking(blocks)
-                spread_from_points_blocked!(backend, kernels, blocks, us, points, vp)  # CPU-only
-            else
-                spread_from_points!(backend, kernels, us, points, vp)  # single-threaded case? Also GPU case.
-            end
+            spread_from_points!(backend, blocks, kernels, us, points, vp)
             KA.synchronize(backend)
         end
 
@@ -248,11 +240,7 @@ function exec_type2!(vp::NTuple{C, AbstractVector}, p::PlanNUFFT, ûs_k::NTuple
         end
 
         @timeit timer "(3) Interpolation" begin
-            if with_blocking(blocks)
-                interpolate_blocked!(kernels, blocks, vp, us, points)  # CPU-onlu
-            else
-                interpolate!(backend, kernels, vp, us, points)  # single-threaded case? Also GPU case.
-            end
+            interpolate!(backend, blocks, kernels, vp, us, points)
             KA.synchronize(backend)
         end
     end

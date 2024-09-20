@@ -32,7 +32,7 @@ function test_nufft_type1(
         Np = 2 * first(Ns),
         m = HalfSupport(8),
         σ = 1.25,
-        block_size = NonuniformFFTs.default_block_size(),
+        block_size = NonuniformFFTs.default_block_size(CPU()),
         sort_points = False(),
     ) where {T <: Number}
     Tr = real(T)
@@ -79,7 +79,7 @@ function test_nufft_type2(
         Np = 2 * first(Ns),
         m = HalfSupport(8),
         σ = 1.25,
-        block_size = NonuniformFFTs.default_block_size(),
+        block_size = NonuniformFFTs.default_block_size(CPU()),
         sort_points = False(),
     ) where {T <: Number}
     Tr = real(T)

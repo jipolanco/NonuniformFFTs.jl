@@ -4,6 +4,10 @@ abstract type AbstractBlockData end
 struct NullBlockData <: AbstractBlockData end
 with_blocking(::NullBlockData) = false
 
+# For now these are only used in the GPU implementation
+get_pointperm(::NullBlockData) = nothing
+get_sort_points(::NullBlockData) = False()
+
 @kernel function copy_points_unblocked_kernel!(@Const(transform::F), points::NTuple, @Const(xp)) where {F}
     I = @index(Global, Linear)
     @inbounds x⃗ = xp[I]
@@ -15,16 +19,15 @@ end
 
 # Here the element type of `xp` can be either an NTuple{N, <:Real}, an SVector{N, <:Real},
 # or anything else which has length `N`.
-function set_points!(::NullBlockData, points::StructVector, xp, timer; transform::F = identity) where {F <: Function}
-    # TODO: avoid implicit copy in resize!? (can be costly, especially on GPU)
-    length(points) == length(xp) || resize!(points, length(xp))
+function set_points!(backend, ::NullBlockData, points::StructVector, xp, timer; transform::F = identity) where {F <: Function}
+    length(points) == length(xp) || resize_no_copy!(points, length(xp))
+    KA.synchronize(backend)
     Base.require_one_based_indexing(points)
     @timeit timer "(1) Copy + fold" begin
         # NOTE: we explicitly iterate through StructVector components because CUDA.jl
         # currently fails when implicitly writing to a StructArray (compilation fails,
         # tested on Julia 1.11-rc3 and CUDA.jl v5.4.3).
         points_comp = StructArrays.components(points)
-        backend = KA.get_backend(points_comp[1])
         kernel! = copy_points_unblocked_kernel!(backend)
         kernel!(transform, points_comp, xp; ndrange = size(xp))
         KA.synchronize(backend)  # mostly to get accurate timings
@@ -51,6 +54,194 @@ type_length(::Type{<:NTuple{N}}) where {N} = N
 
 # ================================================================================ #
 
+# Maximum number of bits allowed for Hilbert sort.
+# Hilbert sorting divides the domain in a grid of size N^d, where `d` is the dimension and
+# N = 2^b. Here `b` is the number of bits used in the algorithm.
+# This means that `b = 16` corresponds to a grid of dimensions 65536 *in each direction*,
+# which is far larger than anything we will ever need in practice.
+# (Also note that the Hilbert "grid" is generally coarser than the actual NUFFT grid where
+# values are spread and interpolated.)
+const MAX_BITS_HILBERT_SORT = 16
+
+# GPU implementation
+struct BlockDataGPU{
+        PermVector <: AbstractVector{<:Integer},
+        SortPoints <: StaticBool,
+    } <: AbstractBlockData
+    pointperm     :: PermVector
+    nbits_hilbert :: Int  # number of bits required in Hilbert sorting
+    sort_points   :: SortPoints
+
+    BlockDataGPU(pointperm::P, nbits, sort::S) where {P, S} =
+        new{P, S}(pointperm, nbits, sort)
+end
+
+with_blocking(::BlockDataGPU) = true
+
+# In the case of Hilbert sorting, what we call "block" corresponds to the size of the
+# minimal box in the Hilbert curve algorithm.
+function BlockDataGPU(backend::KA.Backend, block_dims::Dims{D}, Ñs::Dims{D}, sort_points) where {D}
+    # We use a Hilbert sorting algorithm which requires the same number of blocks in each
+    # direction. In the best case, blocks will have the size required by `block_dims`. If
+    # that's not possible, we will prefer to use a smaller block size (so more blocks).
+    # This makes sense if the input block size was tuned as proportional to some memory
+    # limit (e.g. shared memory size on GPUs).
+    nblocks_per_dir_wanted = map(Ñs, block_dims) do N, B
+        cld(N, B)  # ≥ 1
+    end
+    nblocks = max(nblocks_per_dir_wanted...)  # this makes the actual block size ≤ the wanted block size
+    nbits = exponent(nblocks - 1) + 1
+    @assert UInt(2)^(nbits - 1) < nblocks ≤ UInt(2)^nbits  # verify that we got the right value of nbits
+    nbits = min(nbits, MAX_BITS_HILBERT_SORT)  # just in case; in practice nbits < MAX_BITS_HILBERT_SORT all the time
+    pointperm = KA.allocate(backend, Int, 0)   # stores permutation indices
+    BlockDataGPU(pointperm, nbits, sort_points)
+end
+
+get_pointperm(bd::BlockDataGPU) = bd.pointperm
+get_sort_points(bd::BlockDataGPU) = bd.sort_points
+
+function set_points!(
+        backend::GPU, bd::BlockDataGPU, points::StructVector, xp, timer;
+        transform::F = identity,
+    ) where {F <: Function}
+
+    # Recursively iterate over possible values of nbits_hilbert to avoid type instability.
+    # We start by nbits = 1, and increase until nbits == bd.nbits_hilbert.
+    @assert bd.nbits_hilbert ≤ MAX_BITS_HILBERT_SORT
+    _set_points_hilbert!(Val(1), backend, bd, points, xp, timer, transform)
+
+    nothing
+end
+
+@inline function _set_points_hilbert!(::Val{nbits}, backend, bd, points, xp, args...) where {nbits}
+    if nbits > MAX_BITS_HILBERT_SORT  # this is to avoid the compiler from exploding if it thinks the recursion is infinite
+        nothing
+    elseif nbits == bd.nbits_hilbert
+        N = type_length(eltype(xp))  # = number of dimensions
+        alg = GlobalGrayStatic(nbits, N)  # should be inferred, since nbits is statically known
+        _set_points_hilbert!(alg, backend, bd, points, xp, args...)  # call method defined further below
+    else
+        _set_points_hilbert!(Val(nbits + 1), backend, bd, points, xp, args...)  # keep iterating
+    end
+end
+
+function _set_points_hilbert!(
+        sortalg::HilbertSortingAlgorithm, backend, bd::BlockDataGPU,
+        points::StructVector, xp, timer, transform::F,
+    ) where {F}
+    (; pointperm, sort_points,) = bd
+
+    B = nbits(sortalg)  # static value
+    nblocks = 1 << B    # same number of blocks in all directions (= 2^B)
+
+    Np = length(xp)
+    resize_no_copy!(pointperm, Np)
+    resize_no_copy!(points, Np)
+    @assert eachindex(points) == eachindex(xp)
+
+    # Allocate temporary array for holding Hilbert indices (manually deallocated later)
+    T = eltype(sortalg)
+    inds = KA.zeros(backend, T, Np)
+
+    # We avoid passing a StructVector to the kernel, so we pass `points` as a tuple of
+    # vectors. The kernel might fail if `xp` is also a StructVector, which is not imposed
+    # nor disallowed.
+    points_comp = StructArrays.components(points)
+
+    ndrange = size(points)
+    workgroupsize = default_workgroupsize(backend, ndrange)
+    kernel! = hilbert_sort_kernel!(backend)
+    @timeit timer "(1) Hilbert encoding" begin
+        kernel!(inds, points_comp, xp, sortalg, nblocks, sort_points, transform; workgroupsize, ndrange)
+        KA.synchronize(backend)
+    end
+
+    # Compute permutation needed to sort Hilbert indices.
+    @timeit timer "(2) Sortperm" begin
+        sortperm!(pointperm, inds)
+        KA.synchronize(backend)
+    end
+
+    KA.unsafe_free!(inds)
+
+    # `pointperm` now contains the permutation needed to sort points
+    if sort_points === True()
+        @timeit timer "(3) Permute points" let
+            local kernel! = permute_kernel!(backend)
+            kernel!(points_comp, xp, pointperm, transform; ndrange, workgroupsize)
+            KA.synchronize(backend)
+        end
+    end
+
+    nothing
+end
+
+# This kernel may do multiple things at once:
+# - Compute Hilbert index associated to a point
+# - Copy point from `xp` to `points`, after transformations and folding, if sort_points === False().
+@kernel function hilbert_sort_kernel!(
+        inds::AbstractVector{<:Unsigned},
+        points::NTuple,
+        @Const(xp),
+        @Const(sortalg::HilbertSortingAlgorithm),
+        @Const(nblocks::Integer),  # TODO: can we pass this as a compile-time constant? (Val)
+        @Const(sort_points),
+        @Const(transform::F),
+    ) where {F}
+    I = @index(Global, Linear)
+    @inbounds x⃗ = xp[I]
+    y⃗ = to_unit_cell(transform(Tuple(x⃗))) :: NTuple
+    T = eltype(y⃗)
+    @assert T <: AbstractFloat
+
+    L = T(2) * π
+    block_size = L / nblocks
+
+    is = map(y⃗) do y
+        i = Kernels.point_to_cell(y, block_size)
+        i - one(i)  # Hilbert sorting requires zero-based indices
+    end
+
+    @inbounds inds[I] = encode_hilbert_zero(sortalg, is)  # compute Hilbert index for sorting
+
+    # If points need to be sorted, then we fill `points` some time later (in permute_kernel!).
+    if sort_points === False()
+        for n ∈ eachindex(x⃗)
+            @inbounds points[n][I] = y⃗[n]
+        end
+    end
+
+    nothing
+end
+
+@kernel function permute_kernel!(
+        points::NTuple,
+        @Const(xp::AbstractVector),
+        @Const(perm::AbstractVector{<:Integer}),
+        @Const(transform::F),
+    ) where {F}
+    i = @index(Global, Linear)
+    j = @inbounds perm[i]
+    x⃗ = @inbounds xp[j]
+    y⃗ = to_unit_cell(transform(Tuple(x⃗))) :: NTuple  # note: we perform the transform + folding twice per point...
+    for n ∈ eachindex(x⃗)
+        @inbounds points[n][i] = y⃗[n]
+    end
+    nothing
+end
+
+# Resize vector trying to avoid copy when N is larger than the original length.
+# In other words, we completely discard the original contents of x, which is not the
+# original behaviour of resize!. This can save us some device-to-device copies.
+function resize_no_copy!(x, N)
+    resize!(x, 0)
+    resize!(x, N)
+    x
+end
+
+# ================================================================================ #
+
+# CPU only
 struct BlockData{
         T, N, Nc,
         Tr,  # = real(T)
@@ -82,7 +273,7 @@ function BlockData(
         @assert N - M > 0
         min(B, N ÷ 2, N - M)
     end
-    dims = block_dims .+ 2M  # include padding for values outside of block
+    dims = block_dims .+ 2M  # include padding for values outside of block (TODO: include padding in original block_dims? requires minimal block_size in each direction)
     Tr = real(T)
     block_sizes = map(Ñs, block_dims) do N, B
         @inline
@@ -108,11 +299,9 @@ function BlockData(
     )
 end
 
-# Blocking is considered to be disabled if there are no allocated buffers.
-with_blocking(bd::BlockData) = !isempty(bd.buffers)
-
-function set_points!(bd::BlockData, points::StructVector, xp, timer; transform::F = identity) where {F <: Function}
-    with_blocking(bd) || return set_points!(NullBlockData(), points, xp, timer)
+function set_points!(backend::CPU, bd::BlockData, points::StructVector, xp, timer; transform::F = identity) where {F <: Function}
+    # This technically never happens, but we might use it as a way to disable blocking.
+    isempty(bd.buffers) && return set_points!(backend, NullBlockData(), points, xp, timer; transform)
 
     (; indices, cumulative_npoints_per_block, blockidx, pointperm, block_sizes,) = bd
     N = type_length(eltype(xp))  # = number of dimensions
@@ -120,9 +309,9 @@ function set_points!(bd::BlockData, points::StructVector, xp, timer; transform::
     fill!(cumulative_npoints_per_block, 0)
     to_linear_index = LinearIndices(axes(indices))  # maps Cartesian to linear index of a block
     Np = length(xp)
-    resize!(blockidx, Np)
-    resize!(pointperm, Np)
-    resize!(points, Np)
+    resize_no_copy!(blockidx, Np)
+    resize_no_copy!(pointperm, Np)
+    resize_no_copy!(points, Np)
 
     @timeit timer "(1) Assign blocks" @inbounds for (i, x⃗) ∈ pairs(xp)
         # Get index of block where point x⃗ is located.

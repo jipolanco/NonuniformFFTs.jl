@@ -3,12 +3,20 @@
         us::NTuple{C},
         @Const(points::NTuple{D}),
         @Const(vp::NTuple{C}),
+        @Const(pointperm),
         evaluate::NTuple{D, <:Function},  # can't be marked Const for some reason
         to_indices::NTuple{D, <:Function},
     ) where {C, D}
     i = @index(Global, Linear)
-    x⃗ = map(xs -> @inbounds(xs[i]), points)
-    v⃗ = map(v -> @inbounds(v[i]), vp)
+
+    j = if pointperm === nothing
+        i
+    else
+        @inbounds pointperm[i]
+    end
+
+    x⃗ = map(xs -> @inbounds(xs[j]), points)
+    v⃗ = map(v -> @inbounds(v[j]), vp)
 
     # Determine grid dimensions.
     Z = eltype(v⃗)
@@ -109,6 +117,7 @@ end
 # We assume all arrays are already on the GPU.
 function spread_from_points!(
         backend::GPU,
+        bd::Union{BlockDataGPU, NullBlockData},
         gs,
         us_all::NTuple{C, AbstractGPUArray},
         x⃗s::StructVector,
@@ -134,11 +143,43 @@ function spread_from_points!(
         map(u -> reinterpret(T, u), us_all)  # note: we don't use reshape, so the first dimension has 2x elements
     end
 
-    # TODO: use dynamically sized kernel? (to avoid recompilation, since number of points may change from one call to another)
+    pointperm = get_pointperm(bd)                  # nothing in case of NullBlockData
+    sort_points = get_sort_points(bd)::StaticBool  # False in the case of NullBlockData
+
+    if pointperm !== nothing
+        @assert eachindex(pointperm) == eachindex(x⃗s)
+    end
+
+    # We use dynamically sized kernels to avoid recompilation, since number of points may
+    # change from one call to another.
     ndrange = size(x⃗s)  # iterate through points
     workgroupsize = default_workgroupsize(backend, ndrange)
-    kernel! = spread_from_point_naive_kernel!(backend, workgroupsize, ndrange)
-    kernel!(us_real, xs_comp, vp_all, evaluate, to_indices)
+
+    if sort_points === True()
+        vp_sorted = map(similar, vp_all)  # allocate temporary arrays for sorted non-uniform data
+        kernel_perm! = spread_permute_kernel!(backend)
+        kernel_perm!(vp_sorted, vp_all, pointperm; workgroupsize, ndrange)
+        pointperm_ = nothing  # we don't need any further permutations (all accesses to non-uniform data will be contiguous)
+    else
+        vp_sorted = vp_all
+        pointperm_ = pointperm
+    end
+
+    kernel! = spread_from_point_naive_kernel!(backend)
+    kernel!(us_real, xs_comp, vp_sorted, pointperm_, evaluate, to_indices; workgroupsize, ndrange)
+
+    if sort_points === True()
+        foreach(KA.unsafe_free!, vp_sorted)  # manually deallocate temporary arrays
+    end
 
     us_all
+end
+
+@kernel function spread_permute_kernel!(vp::NTuple{N}, @Const(vp_in::NTuple{N}), @Const(perm::AbstractVector)) where {N}
+    i = @index(Global, Linear)
+    j = @inbounds perm[i]
+    for n ∈ 1:N
+        @inbounds vp[n][i] = vp_in[n][j]
+    end
+    nothing
 end

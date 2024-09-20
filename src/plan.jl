@@ -88,15 +88,20 @@ The created plan contains all data needed to perform NUFFTs for non-uniform data
 
 ## Performance parameters
 
-- `block_size = 4096`: the linear block size (in number of elements) when using block partitioning.
+- `block_size::Int`: the linear block size (in number of elements) when using block partitioning
+  or when sorting is enabled.
   This can be tuned for maximal performance.
-  Using block partitioning is required for running with multiple threads.
-  Blocking can be completely disabled by passing `block_size = nothing` (but this is
-  generally slower, even when running on a single thread).
-  This parameter is ignored in GPU implementations.
+  The current defaults are 4096 (CPU) and 1024 (GPU), but these may change in the future or
+  even depend on the actual computing device.
+  On the CPU, using block partitioning is required for running with multiple threads.
+  On the GPU, this will perform spatial sorting using a Hilbert curve algorithm, whose
+  minimal scale is proportional to the value of `block_size`.
+  Blocking / spatial sorting can be completely disabled by passing `block_size = nothing` (but this is
+  generally slower).
 
 - `sort_points = False()`: whether to internally permute the order of the non-uniform points.
   This can be enabled by passing `sort_points = True()`.
+  Ignored when `block_size = nothing` (which disables spatial sorting).
   In this case, more time will be spent in [`set_points!`](@ref) and less time on the actual transforms.
   This can improve performance if executing multiple transforms on the same non-uniform points.
   Note that, even when enabled, this does not modify the `points` argument passed to `set_points!`.
@@ -247,7 +252,10 @@ Return the number of datasets which are simultaneously transformed by a plan.
 """
 ntransforms(::PlanNUFFT{T, N, Nc}) where {T, N, Nc} = Nc
 
-default_block_size() = 4096  # in number of linear elements
+default_block_size(::CPU) = 4096  # in number of linear elements
+
+# TODO: adapt this based on size of shared memory and on element type T (and padding 2M)?
+default_block_size(::GPU) = 1024  # a bit faster than 4096 on A100 (with 256³ oversampled grid)
 
 function get_block_dims(Ñs::Dims, bsize::Int)
     d = length(Ñs)
@@ -270,9 +278,9 @@ function _PlanNUFFT(
         timer = TimerOutput(),
         fftw_flags = FFTW.MEASURE,
         fftshift = false,
-        block_size::Union{Integer, Nothing} = default_block_size(),
         sort_points::StaticBool = False(),
         backend::KA.Backend = CPU(),
+        block_size::Union{Integer, Nothing} = default_block_size(backend),
     ) where {T <: Number, D}
     ks = init_wavenumbers(T, Ns)
     # Determine dimensions of oversampled grid.
@@ -301,13 +309,17 @@ function _PlanNUFFT(
         foreach(init_fourier_coefficients!, kernel_data, ks)
     end
     points = StructVector(ntuple(_ -> KA.allocate(backend, Tr, 0), Val(D)))  # empty vector of points
-    if block_size === nothing || backend isa GPU
+    if block_size === nothing
         blocks = NullBlockData()  # disable blocking (→ can't use multithreading when spreading)
         backend isa CPU && FFTW.set_num_threads(1)   # also disable FFTW threading (avoids allocations)
     else
         block_dims = get_block_dims(Ñs, block_size)
-        blocks = BlockData(T, block_dims, Ñs, h, num_transforms, sort_points)
-        backend isa CPU && FFTW.set_num_threads(Threads.nthreads())
+        if backend isa GPU
+            blocks = BlockDataGPU(backend, block_dims, Ñs, sort_points)
+        else
+            blocks = BlockData(T, block_dims, Ñs, h, num_transforms, sort_points)
+            FFTW.set_num_threads(Threads.nthreads())
+        end
     end
     plan_kwargs = backend isa CPU ? (flags = fftw_flags,) : (;)
     nufft_data = init_plan_data(T, backend, Ñs, ks, num_transforms; plan_kwargs)
