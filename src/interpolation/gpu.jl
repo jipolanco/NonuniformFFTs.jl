@@ -6,7 +6,6 @@ using StaticArrays: MVector
         @Const(points::NTuple{D}),
         @Const(us::NTuple{C}),
         @Const(pointperm),
-        @Const(sort_points::StaticBool),
         @Const(Δxs::NTuple{D}),           # grid step in each direction (oversampled grid)
         evaluate::NTuple{D, <:Function},  # can't be marked Const for some reason
         to_indices::NTuple{D, <:Function},
@@ -19,13 +18,7 @@ using StaticArrays: MVector
         @inbounds pointperm[i]
     end
 
-    i_x = if sort_points === True()
-        i  # points have already been sorted, so we access them contiguously (should be faster, once the permutation has been done)
-    else
-        j  # don't access points contiguously in memory, but interpolate in a localised region in space (and GPU memory?)
-    end
-
-    x⃗ = map(xs -> @inbounds(xs[i_x]), points)
+    x⃗ = map(xs -> @inbounds(xs[j]), points)
 
     # Determine grid dimensions.
     # Unlike in spreading, here `us` can be made of arrays of complex numbers, because we
@@ -44,7 +37,6 @@ using StaticArrays: MVector
         geval.values .* Δx
     end
 
-    # v⃗ = @inline interpolate_from_arrays(us, inds, vals)
     v⃗ = interpolate_from_arrays_gpu(us, inds, vals)
 
     for (dst, v) ∈ zip(vp, v⃗)
@@ -78,11 +70,25 @@ function interpolate!(
         @assert eachindex(pointperm) == eachindex(x⃗s)
     end
 
+    if sort_points === True()
+        vp_sorted = map(similar, vp_all)  # allocate temporary arrays for sorted non-uniform data
+        pointperm_ = nothing  # we don't need permutations in interpolation kernel (all accesses to non-uniform data will be contiguous)
+    else
+        vp_sorted = vp_all
+        pointperm_ = pointperm
+    end
+
     # TODO: use dynamically sized kernel? (to avoid recompilation, since number of points may change from one call to another)
     ndrange = size(x⃗s)  # iterate through points
     workgroupsize = default_workgroupsize(backend, ndrange)
     kernel! = interpolate_to_point_naive_kernel!(backend, workgroupsize, ndrange)
-    kernel!(vp_all, xs_comp, us, pointperm, sort_points, Δxs, evaluate, to_indices)
+    kernel!(vp_sorted, xs_comp, us, pointperm_, Δxs, evaluate, to_indices)
+
+    if sort_points === True()
+        kernel_perm! = interp_permute_kernel!(backend, workgroupsize, ndrange)
+        kernel_perm!(vp_all, vp_sorted, pointperm)
+        foreach(KA.unsafe_free!, vp_sorted)  # manually deallocate temporary arrays
+    end
 
     vp_all
 end
@@ -138,4 +144,14 @@ end
         end
         Tuple(vs)
     end
+end
+
+# This applies the *inverse* permutation by switching i ↔ j indices (opposite of spread_permute_kernel!).
+@kernel function interp_permute_kernel!(vp::NTuple{N}, @Const(vp_in::NTuple{N}), @Const(perm::AbstractVector)) where {N}
+    i = @index(Global, Linear)
+    j = @inbounds perm[i]
+    for n ∈ 1:N
+        @inbounds vp[n][j] = vp_in[n][i]
+    end
+    nothing
 end

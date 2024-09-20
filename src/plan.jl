@@ -88,10 +88,12 @@ The created plan contains all data needed to perform NUFFTs for non-uniform data
 
 ## Performance parameters
 
-- `block_size = 4096`: the linear block size (in number of elements) when using block partitioning
+- `block_size::Int`: the linear block size (in number of elements) when using block partitioning
   or when sorting is enabled.
   This can be tuned for maximal performance.
-  Using block partitioning is required for running with multiple threads.
+  The current defaults are 4096 (CPU) and 1024 (GPU), but these may change in the future or
+  even depend on the actual computing device.
+  On the CPU, using block partitioning is required for running with multiple threads.
   On the GPU, this will perform spatial sorting using a Hilbert curve algorithm, whose
   minimal scale is proportional to the value of `block_size`.
   Blocking / spatial sorting can be completely disabled by passing `block_size = nothing` (but this is
@@ -253,7 +255,7 @@ ntransforms(::PlanNUFFT{T, N, Nc}) where {T, N, Nc} = Nc
 default_block_size(::CPU) = 4096  # in number of linear elements
 
 # TODO: adapt this based on size of shared memory and on element type T (and padding 2M)?
-default_block_size(::GPU) = 4096
+default_block_size(::GPU) = 1024  # a bit faster than 4096 on A100 (with 256³ oversampled grid)
 
 function get_block_dims(Ñs::Dims, bsize::Int)
     d = length(Ñs)

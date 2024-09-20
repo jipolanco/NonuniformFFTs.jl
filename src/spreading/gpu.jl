@@ -4,7 +4,6 @@
         @Const(points::NTuple{D}),
         @Const(vp::NTuple{C}),
         @Const(pointperm),
-        @Const(sort_points::StaticBool),
         evaluate::NTuple{D, <:Function},  # can't be marked Const for some reason
         to_indices::NTuple{D, <:Function},
     ) where {C, D}
@@ -16,13 +15,7 @@
         @inbounds pointperm[i]
     end
 
-    i_x = if sort_points === True()
-        i  # points have already been sorted, so we access them contiguously (should be faster, once the permutation has been done)
-    else
-        j  # don't access points contiguously in memory, but spread onto a localised region in space (and GPU memory?)
-    end
-
-    x⃗ = map(xs -> @inbounds(xs[i_x]), points)
+    x⃗ = map(xs -> @inbounds(xs[j]), points)
     v⃗ = map(v -> @inbounds(v[j]), vp)
 
     # Determine grid dimensions.
@@ -161,8 +154,32 @@ function spread_from_points!(
     # may change from one call to another)
     ndrange = size(x⃗s)  # iterate through points
     workgroupsize = default_workgroupsize(backend, ndrange)
+
+    if sort_points === True()
+        vp_sorted = map(similar, vp_all)  # allocate temporary arrays for sorted non-uniform data
+        kernel_perm! = spread_permute_kernel!(backend, workgroupsize, ndrange)
+        kernel_perm!(vp_sorted, vp_all, pointperm)
+        pointperm_ = nothing  # we don't need any further permutations (all accesses to non-uniform data will be contiguous)
+    else
+        vp_sorted = vp_all
+        pointperm_ = pointperm
+    end
+
     kernel! = spread_from_point_naive_kernel!(backend, workgroupsize, ndrange)
-    kernel!(us_real, xs_comp, vp_all, pointperm, sort_points, evaluate, to_indices)
+    kernel!(us_real, xs_comp, vp_sorted, pointperm_, evaluate, to_indices)
+
+    if sort_points === True()
+        foreach(KA.unsafe_free!, vp_sorted)  # manually deallocate temporary arrays
+    end
 
     us_all
+end
+
+@kernel function spread_permute_kernel!(vp::NTuple{N}, @Const(vp_in::NTuple{N}), @Const(perm::AbstractVector)) where {N}
+    i = @index(Global, Linear)
+    j = @inbounds perm[i]
+    for n ∈ 1:N
+        @inbounds vp[n][i] = vp_in[n][j]
+    end
+    nothing
 end

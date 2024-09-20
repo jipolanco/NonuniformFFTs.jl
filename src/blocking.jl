@@ -21,6 +21,7 @@ end
 # or anything else which has length `N`.
 function set_points!(backend, ::NullBlockData, points::StructVector, xp, timer; transform::F = identity) where {F <: Function}
     length(points) == length(xp) || resize_no_copy!(points, length(xp))
+    KA.synchronize(backend)
     Base.require_one_based_indexing(points)
     @timeit timer "(1) Copy + fold" begin
         # NOTE: we explicitly iterate through StructVector components because CUDA.jl
