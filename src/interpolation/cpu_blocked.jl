@@ -89,9 +89,10 @@ function interpolate_from_arrays_blocked(
     end
 end
 
-function interpolate_blocked!(
-        gs,
+function interpolate!(
+        backend::CPU,
         bd::BlockData,
+        gs,
         vp_all::NTuple{C, AbstractVector},
         us::NTuple{C, AbstractArray},
         x⃗s::AbstractArray,

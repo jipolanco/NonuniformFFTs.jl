@@ -146,11 +146,7 @@ function exec_type1!(ûs_k::NTuple{C, AbstractArray{<:Complex}}, p::PlanNUFFT, 
         end
 
         @timeit timer "(1) Spreading" begin
-            if with_blocking(blocks)
-                spread_from_points_blocked!(backend, kernels, blocks, us, points, vp)  # CPU-only
-            else
-                spread_from_points!(backend, kernels, us, points, vp)  # single-threaded case? Also GPU case.
-            end
+            spread_from_points!(backend, blocks, kernels, us, points, vp)
             KA.synchronize(backend)
         end
 
@@ -249,11 +245,7 @@ function exec_type2!(vp::NTuple{C, AbstractVector}, p::PlanNUFFT, ûs_k::NTuple
         end
 
         @timeit timer "(3) Interpolation" begin
-            if with_blocking(blocks)
-                interpolate_blocked!(kernels, blocks, vp, us, points)  # CPU-onlu
-            else
-                interpolate!(backend, kernels, vp, us, points)  # single-threaded case? Also GPU case.
-            end
+            interpolate!(backend, blocks, kernels, vp, us, points)
             KA.synchronize(backend)
         end
     end

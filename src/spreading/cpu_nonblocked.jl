@@ -39,6 +39,7 @@ end
 
 function spread_from_points!(
         ::CPU,
+        ::NullBlockData,  # no blocking
         gs,
         us_all::NTuple{C, AbstractArray},
         x⃗s::AbstractVector,

@@ -109,6 +109,7 @@ end
 # We assume all arrays are already on the GPU.
 function spread_from_points!(
         backend::GPU,
+        bd::Union{BlockDataGPU, NullBlockData},
         gs,
         us_all::NTuple{C, AbstractGPUArray},
         x⃗s::StructVector,

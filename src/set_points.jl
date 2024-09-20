@@ -32,7 +32,7 @@ function set_points!(p::PlanNUFFT, xp::AbstractVector; kwargs...)
     (; points, timer,) = p
     N = ndims(p)
     type_length(eltype(xp)) == N || throw(DimensionMismatch(lazy"expected $N-dimensional points"))
-    @timeit timer "Set points" set_points!(p.blocks, points, xp, timer; kwargs...)
+    @timeit timer "Set points" set_points!(p.backend, p.blocks, points, xp, timer; kwargs...)
     p
 end
 

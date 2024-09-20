@@ -41,6 +41,7 @@ end
 
 function interpolate!(
         backend::GPU,
+        bd::Union{BlockDataGPU, NullBlockData},
         gs,
         vp_all::NTuple{C, AbstractVector},
         us::NTuple{C, AbstractArray},

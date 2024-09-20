@@ -24,8 +24,13 @@
 # See also https://computingkitchen.com/BijectiveHilbert.jl/stable/globalgray/#Global-Gray
 # for some details on the algorithm.
 
+abstract type HilbertSortingAlgorithm{T, B} end
+
+Base.eltype(::HilbertSortingAlgorithm{T}) where {T} = T
+nbits(::HilbertSortingAlgorithm{T, B}) where {T, B} = B
+
 """
-    GlobalGrayStatic(T <: Unsigned, B::Int)
+    GlobalGrayStatic(T <: Unsigned, B::Int) <: HilbertSortingAlgorithm{T, B}
     GlobalGrayStatic(B::Int, N::Int)
 
 Hilbert sorting algorithm adapted from the `GlobalGray` algorithm in BijectiveHilbert.jl.
@@ -43,9 +48,7 @@ The total number of bits required is `nbits = B * N`. For instance, if `N = 3` a
 smallest possible type `T` is `UInt16`, whose size is `8 * sizeof(UInt16) = 16` bits (as its
 name suggests!).
 """
-struct GlobalGrayStatic{T, B} end
-
-Base.eltype(::GlobalGrayStatic{T}) where {T} = T
+struct GlobalGrayStatic{T, B} <: HilbertSortingAlgorithm{T, B} end
 
 GlobalGrayStatic(::Type{T}, B::Int) where {T} = GlobalGrayStatic{T, B}()
 
@@ -79,6 +82,8 @@ end
     encode_hilbert_zero(algorithm::GlobalGrayStatic{T}, X::NTuple{N, <:Integer}) -> T
 
 Return Hilbert index associated to location `X` in `N`-dimensional space.
+
+Values in `X` usually correspond to indices on a grid. This function takes indices which start at 0 (!!).
 """
 function encode_hilbert_zero(::GlobalGrayStatic{T, B}, X::NTuple) where {T, B}
     X = axes_to_transpose(X, Val(B))
