@@ -3,12 +3,27 @@
         us::NTuple{C},
         @Const(points::NTuple{D}),
         @Const(vp::NTuple{C}),
+        @Const(pointperm),
+        @Const(sort_points::StaticBool),
         evaluate::NTuple{D, <:Function},  # can't be marked Const for some reason
         to_indices::NTuple{D, <:Function},
     ) where {C, D}
     i = @index(Global, Linear)
-    x⃗ = map(xs -> @inbounds(xs[i]), points)
-    v⃗ = map(v -> @inbounds(v[i]), vp)
+
+    j = if pointperm === nothing
+        i
+    else
+        @inbounds pointperm[i]
+    end
+
+    i_x = if sort_points === True()
+        i  # points have already been sorted, so we access them contiguously (should be faster, once the permutation has been done)
+    else
+        j  # don't access points contiguously in memory, but spread onto a localised region in space (and GPU memory?)
+    end
+
+    x⃗ = map(xs -> @inbounds(xs[i_x]), points)
+    v⃗ = map(v -> @inbounds(v[j]), vp)
 
     # Determine grid dimensions.
     Z = eltype(v⃗)
@@ -135,11 +150,19 @@ function spread_from_points!(
         map(u -> reinterpret(T, u), us_all)  # note: we don't use reshape, so the first dimension has 2x elements
     end
 
-    # TODO: use dynamically sized kernel? (to avoid recompilation, since number of points may change from one call to another)
+    pointperm = get_pointperm(bd)                  # nothing in case of NullBlockData
+    sort_points = get_sort_points(bd)::StaticBool  # False in the case of NullBlockData
+
+    if pointperm !== nothing
+        @assert eachindex(pointperm) == eachindex(x⃗s)
+    end
+
+    # TODO: use dynamically sized kernel? (to avoid recompilation, since number of points
+    # may change from one call to another)
     ndrange = size(x⃗s)  # iterate through points
     workgroupsize = default_workgroupsize(backend, ndrange)
     kernel! = spread_from_point_naive_kernel!(backend, workgroupsize, ndrange)
-    kernel!(us_real, xs_comp, vp_all, evaluate, to_indices)
+    kernel!(us_real, xs_comp, vp_all, pointperm, sort_points, evaluate, to_indices)
 
     us_all
 end
