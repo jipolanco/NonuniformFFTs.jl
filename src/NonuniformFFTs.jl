@@ -256,6 +256,7 @@ end
 function _type2_fft!(data::RealNUFFTData)
     (; us, ûs, plan_bw,) = data
     for (u, û) ∈ zip(us, ûs)
+        # TODO: can we avoid big GPU allocation on CUDA.jl? (https://github.com/JuliaGPU/CUDA.jl/issues/2249)
         mul!(u, plan_bw, û)  # perform inverse r2c FFT
     end
     us

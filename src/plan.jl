@@ -1,12 +1,16 @@
 abstract type AbstractNUFFTData{T <: Number, N, Nc} end
 
+# Note: for some reason CUDA.jl inverts the element type associated to r2c and c2r plans,
+# e.g. plan_rfft returns a Plan{Complex{T}} and plan_brfft returns a Plan{T}, which is the
+# opposite of FFTW.jl. The current solution is simply not to restrict the types too much.
+# Computations are still correct when using CUDA, it's just a matter of types.
 struct RealNUFFTData{
         T <: AbstractFloat, N, Nc,
         WaveNumbers <: NTuple{N, AbstractVector{T}},
         FieldsR <: NTuple{Nc, AbstractArray{T, N}},
         FieldsC <: NTuple{Nc, AbstractArray{Complex{T}, N}},
-        PlanFFT_fw <: AbstractFFTs.Plan{T},
-        PlanFFT_bw <: AbstractFFTs.Plan{Complex{T}},
+        PlanFFT_fw <: AbstractFFTs.Plan{<:Union{T, Complex{T}}},  # AbstractFFTs.Plan{T},  <-- this doesn't work on CUDA.jl
+        PlanFFT_bw <: AbstractFFTs.Plan{<:Union{T, Complex{T}}},  # AbstractFFTs.Plan{Complex{T}}, <--|
     } <: AbstractNUFFTData{T, N, Nc}
     ks      :: WaveNumbers  # wavenumbers in *non-oversampled* Fourier grid
     us      :: FieldsR      # values in oversampled grid (real)
