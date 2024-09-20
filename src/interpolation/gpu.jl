@@ -5,12 +5,27 @@ using StaticArrays: MVector
         vp::NTuple{C},
         @Const(points::NTuple{D}),
         @Const(us::NTuple{C}),
+        @Const(pointperm),
+        @Const(sort_points::StaticBool),
         @Const(Δxs::NTuple{D}),           # grid step in each direction (oversampled grid)
         evaluate::NTuple{D, <:Function},  # can't be marked Const for some reason
         to_indices::NTuple{D, <:Function},
     ) where {C, D}
     i = @index(Global, Linear)
-    x⃗ = map(xs -> @inbounds(xs[i]), points)
+
+    j = if pointperm === nothing
+        i
+    else
+        @inbounds pointperm[i]
+    end
+
+    i_x = if sort_points === True()
+        i  # points have already been sorted, so we access them contiguously (should be faster, once the permutation has been done)
+    else
+        j  # don't access points contiguously in memory, but interpolate in a localised region in space (and GPU memory?)
+    end
+
+    x⃗ = map(xs -> @inbounds(xs[i_x]), points)
 
     # Determine grid dimensions.
     # Unlike in spreading, here `us` can be made of arrays of complex numbers, because we
@@ -33,7 +48,7 @@ using StaticArrays: MVector
     v⃗ = interpolate_from_arrays_gpu(us, inds, vals)
 
     for (dst, v) ∈ zip(vp, v⃗)
-        @inbounds dst[i] = v
+        @inbounds dst[j] = v
     end
 
     nothing
@@ -56,11 +71,18 @@ function interpolate!(
     xs_comp = StructArrays.components(x⃗s)
     Δxs = map(Kernels.gridstep, gs)
 
+    pointperm = get_pointperm(bd)                  # nothing in case of NullBlockData
+    sort_points = get_sort_points(bd)::StaticBool  # False in the case of NullBlockData
+
+    if pointperm !== nothing
+        @assert eachindex(pointperm) == eachindex(x⃗s)
+    end
+
     # TODO: use dynamically sized kernel? (to avoid recompilation, since number of points may change from one call to another)
     ndrange = size(x⃗s)  # iterate through points
     workgroupsize = default_workgroupsize(backend, ndrange)
     kernel! = interpolate_to_point_naive_kernel!(backend, workgroupsize, ndrange)
-    kernel!(vp_all, xs_comp, us, Δxs, evaluate, to_indices)
+    kernel!(vp_all, xs_comp, us, pointperm, sort_points, Δxs, evaluate, to_indices)
 
     vp_all
 end

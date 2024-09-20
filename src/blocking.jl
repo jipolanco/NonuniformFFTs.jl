@@ -4,6 +4,10 @@ abstract type AbstractBlockData end
 struct NullBlockData <: AbstractBlockData end
 with_blocking(::NullBlockData) = false
 
+# For now these are only used in the GPU implementation
+get_pointperm(::NullBlockData) = nothing
+get_sort_points(::NullBlockData) = False()
+
 @kernel function copy_points_unblocked_kernel!(@Const(transform::F), points::NTuple, @Const(xp)) where {F}
     I = @index(Global, Linear)
     @inbounds x⃗ = xp[I]
@@ -92,35 +96,24 @@ function BlockDataGPU(backend::KA.Backend, block_dims::Dims{D}, Ñs::Dims{D}, so
     BlockDataGPU(pointperm, nbits, sort_points)
 end
 
+get_pointperm(bd::BlockDataGPU) = bd.pointperm
+get_sort_points(bd::BlockDataGPU) = bd.sort_points
+
 function set_points!(
         backend::GPU, bd::BlockDataGPU, points::StructVector, xp, timer;
         transform::F = identity,
     ) where {F <: Function}
-
-    # Total number of bits required to hold a Hilbert index.
-    # The index type T must be larger than this size.
-    # nbits_index = N * nbits_hilbert
 
     # Recursively iterate over possible values of nbits_hilbert to avoid type instability.
     # We start by nbits = 1, and increase until nbits == bd.nbits_hilbert.
     @assert bd.nbits_hilbert ≤ MAX_BITS_HILBERT_SORT
     _set_points_hilbert!(Val(1), backend, bd, points, xp, timer, transform)
 
-    # if nbits_index ≤ 8 * sizeof(UInt8)
-    #     _set_points!(UInt8, backend, bd, points, xp, timer, transform)
-    # elseif nbits_index ≤ 8 * sizeof(UInt16)
-    #     _set_points!(UInt16, backend, bd, points, xp, timer, transform)
-    # elseif nbits_index ≤ 8 * sizeof(UInt32)
-    #     _set_points!(UInt32, backend, bd, points, xp, timer, transform)
-    # else
-    #     _set_points!(UInt64, backend, bd, points, xp, timer, transform)
-    # end
-
     nothing
 end
 
 @inline function _set_points_hilbert!(::Val{nbits}, backend, bd, points, xp, args...) where {nbits}
-    if nbits > 16  # this is to avoid the compiler from exploding if it thinks the recursion is infinite
+    if nbits > MAX_BITS_HILBERT_SORT  # this is to avoid the compiler from exploding if it thinks the recursion is infinite
         nothing
     elseif nbits == bd.nbits_hilbert
         N = type_length(eltype(xp))  # = number of dimensions
@@ -167,6 +160,7 @@ function _set_points_hilbert!(
         sortperm!(pointperm, inds)
         KA.synchronize(backend)
     end
+
     KA.unsafe_free!(inds)
 
     # `pointperm` now contains the permutation needed to sort points
@@ -175,7 +169,6 @@ function _set_points_hilbert!(
             local kernel! = permute_kernel!(backend, groupsize, ndrange)
             kernel!(points_comp, xp, pointperm, transform)
             KA.synchronize(backend)
-            resize!(pointperm, 0)  # free some memory (we won't need it anymore)
         end
     end
 
