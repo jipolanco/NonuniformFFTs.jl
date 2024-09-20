@@ -95,7 +95,7 @@ function test_nufft_type1_1d(
         Np = 2 * N,
         m = HalfSupport(8),
         σ = 1.25,
-        block_size = NonuniformFFTs.default_block_size(),
+        block_size = NonuniformFFTs.default_block_size(CPU()),
     ) where {T <: Number}
     if T <: Real
         Tr = T
@@ -154,7 +154,7 @@ function test_nufft_type2_1d(
         Np = 2 * N,
         m = HalfSupport(8),
         σ = 1.25,
-        block_size = NonuniformFFTs.default_block_size(),
+        block_size = NonuniformFFTs.default_block_size(CPU()),
     ) where {T <: Number}
     if T <: Real
         Tr = T
