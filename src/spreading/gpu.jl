@@ -150,23 +150,23 @@ function spread_from_points!(
         @assert eachindex(pointperm) == eachindex(x⃗s)
     end
 
-    # TODO: use dynamically sized kernel? (to avoid recompilation, since number of points
-    # may change from one call to another)
+    # We use dynamically sized kernels to avoid recompilation, since number of points may
+    # change from one call to another.
     ndrange = size(x⃗s)  # iterate through points
     workgroupsize = default_workgroupsize(backend, ndrange)
 
     if sort_points === True()
         vp_sorted = map(similar, vp_all)  # allocate temporary arrays for sorted non-uniform data
-        kernel_perm! = spread_permute_kernel!(backend, workgroupsize, ndrange)
-        kernel_perm!(vp_sorted, vp_all, pointperm)
+        kernel_perm! = spread_permute_kernel!(backend)
+        kernel_perm!(vp_sorted, vp_all, pointperm; workgroupsize, ndrange)
         pointperm_ = nothing  # we don't need any further permutations (all accesses to non-uniform data will be contiguous)
     else
         vp_sorted = vp_all
         pointperm_ = pointperm
     end
 
-    kernel! = spread_from_point_naive_kernel!(backend, workgroupsize, ndrange)
-    kernel!(us_real, xs_comp, vp_sorted, pointperm_, evaluate, to_indices)
+    kernel! = spread_from_point_naive_kernel!(backend)
+    kernel!(us_real, xs_comp, vp_sorted, pointperm_, evaluate, to_indices; workgroupsize, ndrange)
 
     if sort_points === True()
         foreach(KA.unsafe_free!, vp_sorted)  # manually deallocate temporary arrays

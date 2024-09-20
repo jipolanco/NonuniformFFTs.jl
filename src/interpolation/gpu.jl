@@ -78,15 +78,16 @@ function interpolate!(
         pointperm_ = pointperm
     end
 
-    # TODO: use dynamically sized kernel? (to avoid recompilation, since number of points may change from one call to another)
+    # We use dynamically sized kernels to avoid recompilation, since number of points may
+    # change from one call to another.
     ndrange = size(x⃗s)  # iterate through points
     workgroupsize = default_workgroupsize(backend, ndrange)
-    kernel! = interpolate_to_point_naive_kernel!(backend, workgroupsize, ndrange)
-    kernel!(vp_sorted, xs_comp, us, pointperm_, Δxs, evaluate, to_indices)
+    kernel! = interpolate_to_point_naive_kernel!(backend)
+    kernel!(vp_sorted, xs_comp, us, pointperm_, Δxs, evaluate, to_indices; workgroupsize, ndrange)
 
     if sort_points === True()
-        kernel_perm! = interp_permute_kernel!(backend, workgroupsize, ndrange)
-        kernel_perm!(vp_all, vp_sorted, pointperm)
+        kernel_perm! = interp_permute_kernel!(backend)
+        kernel_perm!(vp_all, vp_sorted, pointperm; workgroupsize, ndrange)
         foreach(KA.unsafe_free!, vp_sorted)  # manually deallocate temporary arrays
     end
 

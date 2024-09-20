@@ -149,10 +149,10 @@ function _set_points_hilbert!(
     points_comp = StructArrays.components(points)
 
     ndrange = size(points)
-    groupsize = default_workgroupsize(backend, ndrange)
-    kernel! = hilbert_sort_kernel!(backend, groupsize, ndrange)
+    workgroupsize = default_workgroupsize(backend, ndrange)
+    kernel! = hilbert_sort_kernel!(backend)
     @timeit timer "(1) Hilbert encoding" begin
-        kernel!(inds, points_comp, xp, sortalg, nblocks, sort_points, transform)
+        kernel!(inds, points_comp, xp, sortalg, nblocks, sort_points, transform; workgroupsize, ndrange)
         KA.synchronize(backend)
     end
 
@@ -167,8 +167,8 @@ function _set_points_hilbert!(
     # `pointperm` now contains the permutation needed to sort points
     if sort_points === True()
         @timeit timer "(3) Permute points" let
-            local kernel! = permute_kernel!(backend, groupsize, ndrange)
-            kernel!(points_comp, xp, pointperm, transform)
+            local kernel! = permute_kernel!(backend)
+            kernel!(points_comp, xp, pointperm, transform; ndrange, workgroupsize)
             KA.synchronize(backend)
         end
     end
