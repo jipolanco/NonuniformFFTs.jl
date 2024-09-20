@@ -273,7 +273,7 @@ function BlockData(
         @assert N - M > 0
         min(B, N ÷ 2, N - M)
     end
-    dims = block_dims .+ 2M  # include padding for values outside of block (TODO: include padding in original block_dims?)
+    dims = block_dims .+ 2M  # include padding for values outside of block (TODO: include padding in original block_dims? requires minimal block_size in each direction)
     Tr = real(T)
     block_sizes = map(Ñs, block_dims) do N, B
         @inline
@@ -299,9 +299,9 @@ function BlockData(
     )
 end
 
-function set_points!(::CPU, bd::BlockData, points::StructVector, xp, timer; transform::F = identity) where {F <: Function}
+function set_points!(backend::CPU, bd::BlockData, points::StructVector, xp, timer; transform::F = identity) where {F <: Function}
     # This technically never happens, but we might use it as a way to disable blocking.
-    isempty(bd.buffers) && return set_points!(NullBlockData(), points, xp, timer)
+    isempty(bd.buffers) && return set_points!(backend, NullBlockData(), points, xp, timer; transform)
 
     (; indices, cumulative_npoints_per_block, blockidx, pointperm, block_sizes,) = bd
     N = type_length(eltype(xp))  # = number of dimensions
