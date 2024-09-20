@@ -92,11 +92,14 @@ The created plan contains all data needed to perform NUFFTs for non-uniform data
   or when sorting is enabled.
   This can be tuned for maximal performance.
   Using block partitioning is required for running with multiple threads.
-  Blocking can be completely disabled by passing `block_size = nothing` (but this is
-  generally slower, even when running on a single thread).
+  On the GPU, this will perform spatial sorting using a Hilbert curve algorithm, whose
+  minimal scale is proportional to the value of `block_size`.
+  Blocking / spatial sorting can be completely disabled by passing `block_size = nothing` (but this is
+  generally slower).
 
 - `sort_points = False()`: whether to internally permute the order of the non-uniform points.
   This can be enabled by passing `sort_points = True()`.
+  Ignored when `block_size = nothing` (which disables spatial sorting).
   In this case, more time will be spent in [`set_points!`](@ref) and less time on the actual transforms.
   This can improve performance if executing multiple transforms on the same non-uniform points.
   Note that, even when enabled, this does not modify the `points` argument passed to `set_points!`.
