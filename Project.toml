@@ -19,12 +19,19 @@ StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 StructArrays = "09ab397b-f2b6-538f-b94a-2f83cf4a842a"
 TimerOutputs = "a759f4b9-e2f1-59dc-863e-4aeb61b1ea8f"
 
+[weakdeps]
+CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
+
+[extensions]
+NonuniformFFTsCUDAExt = ["CUDA"]
+
 [compat]
 AbstractFFTs = "1.5.0"
 AbstractNFFTs = "0.8.2"
 Atomix = "0.1.0"
 Bessels = "0.2"
 Bumper = "0.6, 0.7"
+CUDA = "5.5"
 FFTW = "1.7"
 GPUArraysCore = "0.1.6"
 KernelAbstractions = "0.9.25"
