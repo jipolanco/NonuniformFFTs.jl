@@ -381,15 +381,6 @@ function set_points!(backend::CPU, bd::BlockData, points::StructVector, xp, time
         end
     end
 
-    # Verification
-    # for i ∈ eachindex(cumulative_npoints_per_block)[begin:end - 1]
-    #     a = cumulative_npoints_per_block[i] + 1
-    #     b = cumulative_npoints_per_block[i + 1]
-    #     for j ∈ a:b
-    #         @assert blockidx[pointperm[j]] == i
-    #     end
-    # end
-
     nothing
 end
 
