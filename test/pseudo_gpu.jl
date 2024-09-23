@@ -53,7 +53,7 @@ function run_plan(p::PlanNUFFT, xp_init::AbstractArray, vp_init::AbstractVector)
 
     set_points!(p, xp)
 
-    save_points_sorted = false # this can be useful for verifying Hilbert sorting graphically
+    save_points_sorted = false # this can be useful for verifying spatial sorting graphically
 
     if backend isa PseudoGPU && save_points_sorted
         inds = NonuniformFFTs.get_pointperm(p.blocks)
@@ -111,7 +111,7 @@ end
     @testset "sort_points = $sort_points" for sort_points ∈ (False(), True())
         compare_with_cpu(Float64, dims; sort_points)
     end
-    @testset "No blocking" begin  # Hilbert sorting disabled
+    @testset "No blocking" begin  # spatial sorting disabled
         compare_with_cpu(ComplexF64, dims; block_size = nothing)
     end
 end

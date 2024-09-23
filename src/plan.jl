@@ -98,8 +98,6 @@ The created plan contains all data needed to perform NUFFTs for non-uniform data
   The current defaults are 4096 (CPU) and 1024 (GPU), but these may change in the future or
   even depend on the actual computing device.
   On the CPU, using block partitioning is required for running with multiple threads.
-  On the GPU, this will perform spatial sorting using a Hilbert curve algorithm, whose
-  minimal scale is proportional to the value of `block_size`.
   Blocking / spatial sorting can be completely disabled by passing `block_size = nothing` (but this is
   generally slower).
 
