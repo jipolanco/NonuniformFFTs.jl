@@ -58,7 +58,6 @@ end
 # Case of 1D kernels on the GPU (typically, kernels which iterate over non-uniform points).
 default_workgroupsize(::GPU, ndrange::Dims{1}) = (512,)
 
-include("sorting.jl")
 include("sorting_hilbert.jl")
 include("blocking.jl")
 include("plan.jl")

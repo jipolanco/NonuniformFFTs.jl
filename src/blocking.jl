@@ -306,12 +306,16 @@ function set_points!(backend::CPU, bd::BlockData, points::StructVector, xp, time
     (; indices, cumulative_npoints_per_block, blockidx, pointperm, block_sizes,) = bd
     N = type_length(eltype(xp))  # = number of dimensions
     @assert N == length(block_sizes)
-    fill!(cumulative_npoints_per_block, 0)
-    to_linear_index = LinearIndices(axes(indices))  # maps Cartesian to linear index of a block
-    Np = length(xp)
-    resize_no_copy!(blockidx, Np)
-    resize_no_copy!(pointperm, Np)
-    resize_no_copy!(points, Np)
+
+    @timeit timer "(0) Init arrays" begin
+        to_linear_index = LinearIndices(axes(indices))  # maps Cartesian to linear index of a block
+        Np = length(xp)
+        resize_no_copy!(blockidx, Np)
+        resize_no_copy!(pointperm, Np)
+        resize_no_copy!(points, Np)
+        fill!(cumulative_npoints_per_block, 0)
+        fill!(blockidx, 0)
+    end
 
     @timeit timer "(1) Assign blocks" @inbounds for (i, x⃗) ∈ pairs(xp)
         # Get index of block where point x⃗ is located.
@@ -322,9 +326,8 @@ function set_points!(backend::CPU, bd::BlockData, points::StructVector, xp, time
         end
         # checkbounds(indices, CartesianIndex(is))
         n = to_linear_index[is...]  # linear index of block
-        cumulative_npoints_per_block[n + 1] += 1
-        pointperm[i] = i
-        blockidx[i] = n
+        index_within_block = (cumulative_npoints_per_block[n + 1] += 1)  # ≥ 1
+        blockidx[i] = index_within_block
     end
 
     # Compute cumulative sum (we don't use cumsum! due to aliasing warning in its docs).
@@ -340,7 +343,18 @@ function set_points!(backend::CPU, bd::BlockData, points::StructVector, xp, time
     map_blocks_to_threads!(bd.blocks_per_thread, cumulative_npoints_per_block)
 
     @timeit timer "(2) Sortperm" begin
-        quicksort_perm!(pointperm, blockidx)
+        # Note: we don't use threading since it seems to be much slower.
+        # This is very likely due to false sharing (https://en.wikipedia.org/wiki/False_sharing),
+        # since all threads modify the same data in "random" order.
+        @inbounds for i ∈ eachindex(xp)
+            # We recompute the block index associated to this point.
+            x⃗ = xp[i]
+            y⃗ = to_unit_cell(transform(NTuple{N}(x⃗)))  # converts `x⃗` to Tuple if it's an SVector
+            is = map(Kernels.point_to_cell, y⃗, block_sizes)
+            n = to_linear_index[is...]  # linear index of block
+            j = cumulative_npoints_per_block[n] + blockidx[i]
+            pointperm[j] = i
+        end
     end
 
     # Write sorted points into `points`.
