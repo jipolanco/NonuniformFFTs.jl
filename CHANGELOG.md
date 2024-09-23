@@ -5,6 +5,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [v0.5.2] - 2024-09-23
+
 ### Changed
 
 - Avoid recompilation of GPU kernels when number of non-uniform points changes.
