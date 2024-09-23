@@ -314,14 +314,6 @@ function set_points!(backend::CPU, bd::BlockData, points::StructVector, xp, time
         resize_no_copy!(pointperm, Np)
         resize_no_copy!(points, Np)
         fill!(cumulative_npoints_per_block, 0)
-        let
-            # The blockidx vector may be large, so we set it to zero in parallel (reusing
-            # kernel defined for grid data).
-            local ndrange = size(blockidx)
-            local groupsize = default_workgroupsize(backend, ndrange)
-            local kernel! = fill_with_zeros_kernel!(backend, groupsize)
-            kernel!((blockidx,); ndrange)
-        end
         KA.synchronize(backend)
     end
 
