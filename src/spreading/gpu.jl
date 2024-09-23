@@ -30,13 +30,11 @@
     gs_eval = map((f, x) -> f(x), evaluate, x⃗)
 
     # Determine indices to write in `u` arrays.
-    inds = map(to_indices, gs_eval, Ns) do f, gdata, N
-        f(gdata.i, N)
+    indvals = map(to_indices, gs_eval, Ns) do f, gdata, N
+        f(gdata.i, N) => gdata.values
     end
 
-    vals = map(g -> g.values, gs_eval)
-
-    spread_onto_arrays_gpu!(us, inds, vals, v⃗)
+    spread_onto_arrays_gpu!(us, indvals, v⃗)
 
     nothing
 end
@@ -45,15 +43,17 @@ end
 # if we find a way of avoiding atomic writes (which seem to be the bottleneck here).
 @inline function spread_onto_arrays_gpu!(
         us::NTuple{C, AbstractArray{T, D}},
-        inds_mapping::NTuple{D, Tuple},
-        vals::NTuple{D, NTuple{M, Tg}},
+        indvals::NTuple{D, <:Pair},
         vs::NTuple{C},
-    ) where {T, C, D, M, Tg <: AbstractFloat}
+    ) where {T, C, D}
     if @generated
         gprod_init = Symbol(:gprod_, D + 1)  # the name of this variable is important!
+        Tr = real(T)
         quote
+            inds_mapping = map(first, indvals)
+            vals = map(last, indvals)
             inds = map(eachindex, inds_mapping)
-            $gprod_init = one($Tg)
+            $gprod_init = one($Tr)
             @nloops(
                 $D, i,
                 d -> inds[d],  # for i_d ∈ inds[d]
@@ -73,6 +73,8 @@ end
             nothing
         end
     else
+        inds_mapping = map(first, indvals)
+        vals = map(last, indvals)
         inds = map(eachindex, inds_mapping)
         inds_first, inds_tail = first(inds), Base.tail(inds)
         vals_first, vals_tail = first(vals), Base.tail(vals)
