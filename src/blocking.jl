@@ -49,6 +49,10 @@ function to_unit_cell(x::Real)
     x
 end
 
+# This is a bit faster on GPUs, probably because it's guaranteed to be branchless.
+@inline to_unit_cell_gpu(x⃗::Tuple) = map(to_unit_cell_gpu, x⃗)
+@inline to_unit_cell_gpu(x::Real) = mod2pi(x)
+
 type_length(::Type{T}) where {T} = length(T)  # usually for SVector
 type_length(::Type{<:NTuple{N}}) where {N} = N
 
@@ -188,7 +192,7 @@ end
     ) where {F}
     I = @index(Global, Linear)
     @inbounds x⃗ = xp[I]
-    y⃗ = to_unit_cell(transform(Tuple(x⃗))) :: NTuple
+    y⃗ = to_unit_cell_gpu(transform(Tuple(x⃗))) :: NTuple
     n = block_index(y⃗, block_sizes, nblocks_per_dir)
 
     # Note: here index_within_block is the value *after* incrementing (≥ 1).
@@ -217,7 +221,7 @@ end
     ) where {F}
     I = @index(Global, Linear)
     @inbounds x⃗ = xp[I]
-    y⃗ = to_unit_cell(transform(Tuple(x⃗))) :: NTuple
+    y⃗ = to_unit_cell_gpu(transform(Tuple(x⃗))) :: NTuple
     n = block_index(y⃗, block_sizes, nblocks_per_dir)
     @inbounds J = cumulative_npoints_per_block[n] + blockidx[I]
     @inbounds pointperm[J] = I
@@ -233,7 +237,7 @@ end
     i = @index(Global, Linear)
     j = @inbounds perm[i]
     x⃗ = @inbounds xp[j]
-    y⃗ = to_unit_cell(transform(Tuple(x⃗))) :: NTuple
+    y⃗ = to_unit_cell_gpu(transform(Tuple(x⃗))) :: NTuple
     for n ∈ eachindex(x⃗)
         @inbounds points[n][i] = y⃗[n]
     end
