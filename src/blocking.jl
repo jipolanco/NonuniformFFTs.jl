@@ -314,7 +314,15 @@ function set_points!(backend::CPU, bd::BlockData, points::StructVector, xp, time
         resize_no_copy!(pointperm, Np)
         resize_no_copy!(points, Np)
         fill!(cumulative_npoints_per_block, 0)
-        fill!(blockidx, 0)
+        let
+            # The blockidx vector may be large, so we set it to zero in parallel (reusing
+            # kernel defined for grid data).
+            local ndrange = size(blockidx)
+            local groupsize = default_workgroupsize(backend, ndrange)
+            local kernel! = fill_with_zeros_kernel!(backend, groupsize)
+            kernel!((blockidx,); ndrange)
+        end
+        KA.synchronize(backend)
     end
 
     @timeit timer "(1) Assign blocks" @inbounds for (i, x⃗) ∈ pairs(xp)
@@ -342,7 +350,7 @@ function set_points!(backend::CPU, bd::BlockData, points::StructVector, xp, time
     # are concentrated, improving load balance.
     map_blocks_to_threads!(bd.blocks_per_thread, cumulative_npoints_per_block)
 
-    @timeit timer "(2) Sortperm" begin
+    @timeit timer "(2) Sort" begin
         # Note: we don't use threading since it seems to be much slower.
         # This is very likely due to false sharing (https://en.wikipedia.org/wiki/False_sharing),
         # since all threads modify the same data in "random" order.
