@@ -27,6 +27,8 @@ Base.@propagate_inbounds Base.setindex!(u::PseudoGPUArray, v, i...) = @inbounds 
 Base.resize!(u::PseudoGPUArray, n) = resize!(u.data, n)
 Base.pointer(u::PseudoGPUArray, i::Integer = 1) = pointer(u.data, i)
 Base.unsafe_convert(::Type{Ptr{T}}, u::PseudoGPUArray{T}) where {T} = pointer(u)
+Base.similar(u::PseudoGPUArray, ::Type{T}, dims::Dims) where {T} =
+    PseudoGPUArray(similar(u.data, T, dims))
 
 struct PseudoGPU <: KA.GPU end
 KA.isgpu(::PseudoGPU) = false  # needed to be considered as a CPU backend by KA
