@@ -82,12 +82,12 @@ function interpolate!(
     # change from one call to another.
     ndrange = size(x⃗s)  # iterate through points
     workgroupsize = default_workgroupsize(backend, ndrange)
-    kernel! = interpolate_to_point_naive_kernel!(backend)
-    kernel!(vp_sorted, xs_comp, us, pointperm_, Δxs, evaluate, to_indices; workgroupsize, ndrange)
+    kernel! = interpolate_to_point_naive_kernel!(backend, workgroupsize)
+    kernel!(vp_sorted, xs_comp, us, pointperm_, Δxs, evaluate, to_indices; ndrange)
 
     if sort_points === True()
-        kernel_perm! = interp_permute_kernel!(backend)
-        kernel_perm!(vp_all, vp_sorted, pointperm; workgroupsize, ndrange)
+        kernel_perm! = interp_permute_kernel!(backend, workgroupsize)
+        kernel_perm!(vp_all, vp_sorted, pointperm; ndrange)
         foreach(KA.unsafe_free!, vp_sorted)  # manually deallocate temporary arrays
     end
 

@@ -157,16 +157,16 @@ function spread_from_points!(
 
     if sort_points === True()
         vp_sorted = map(similar, vp_all)  # allocate temporary arrays for sorted non-uniform data
-        kernel_perm! = spread_permute_kernel!(backend)
-        kernel_perm!(vp_sorted, vp_all, pointperm; workgroupsize, ndrange)
+        kernel_perm! = spread_permute_kernel!(backend, workgroupsize)
+        kernel_perm!(vp_sorted, vp_all, pointperm; ndrange)
         pointperm_ = nothing  # we don't need any further permutations (all accesses to non-uniform data will be contiguous)
     else
         vp_sorted = vp_all
         pointperm_ = pointperm
     end
 
-    kernel! = spread_from_point_naive_kernel!(backend)
-    kernel!(us_real, xs_comp, vp_sorted, pointperm_, evaluate, to_indices; workgroupsize, ndrange)
+    kernel! = spread_from_point_naive_kernel!(backend, workgroupsize)
+    kernel!(us_real, xs_comp, vp_sorted, pointperm_, evaluate, to_indices; ndrange)
 
     if sort_points === True()
         foreach(KA.unsafe_free!, vp_sorted)  # manually deallocate temporary arrays

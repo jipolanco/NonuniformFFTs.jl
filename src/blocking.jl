@@ -150,9 +150,9 @@ function _set_points_hilbert!(
 
     ndrange = size(points)
     workgroupsize = default_workgroupsize(backend, ndrange)
-    kernel! = hilbert_sort_kernel!(backend)
+    kernel! = hilbert_sort_kernel!(backend, workgroupsize)
     @timeit timer "(1) Hilbert encoding" begin
-        kernel!(inds, points_comp, xp, sortalg, nblocks, sort_points, transform; workgroupsize, ndrange)
+        kernel!(inds, points_comp, xp, sortalg, nblocks, sort_points, transform; ndrange)
         KA.synchronize(backend)
     end
 
@@ -167,8 +167,8 @@ function _set_points_hilbert!(
     # `pointperm` now contains the permutation needed to sort points
     if sort_points === True()
         @timeit timer "(3) Permute points" let
-            local kernel! = permute_kernel!(backend)
-            kernel!(points_comp, xp, pointperm, transform; ndrange, workgroupsize)
+            local kernel! = permute_kernel!(backend, workgroupsize)
+            kernel!(points_comp, xp, pointperm, transform; ndrange)
             KA.synchronize(backend)
         end
     end
