@@ -56,30 +56,41 @@ type_length(::Type{<:NTuple{N}}) where {N} = N
 
 # GPU implementation
 struct BlockDataGPU{
-        N,
-        BlocksPerDir <: NTuple{N, <:Integer},
-        IndexVector <: AbstractVector{<:Integer},
+        N, I <: Integer, T <: AbstractFloat,
+        IndexVector <: AbstractVector{I},
         SortPoints <: StaticBool,
     } <: AbstractBlockData
-    nblocks_per_dir  :: BlocksPerDir      # number of blocks in each direction
+    nblocks_per_dir  :: NTuple{N, I}  # number of blocks in each direction
+    block_sizes      :: NTuple{N, T}  # size of each block (in units of length)
     cumulative_npoints_per_block :: IndexVector    # cumulative sum of number of points in each block (length = num_blocks + 1, first value is 0)
     blockidx      :: IndexVector  # linear index of block associated to each point (length = Np)
     pointperm     :: IndexVector
     sort_points   :: SortPoints
-    function BlockDataGPU(nblocks_per_dir::NTuple{N}, npoints_per_block::V, sort::S) where {N, V, S}
-        B = typeof(nblocks_per_dir)
+    function BlockDataGPU(
+            nblocks_per_dir::NTuple{N, I},
+            block_sizes::NTuple{N, T},
+            npoints_per_block::V, sort::S,
+        ) where {N, I, T, V, S}
         blockidx = similar(npoints_per_block, 0)
         pointperm = similar(npoints_per_block, 0)
-        new{N, B, V, S}(nblocks_per_dir, npoints_per_block, blockidx, pointperm, sort)
+        new{N, I, T, V, S}(
+            nblocks_per_dir, block_sizes, npoints_per_block, blockidx, pointperm, sort,
+        )
     end
 end
 
 with_blocking(::BlockDataGPU) = true
 
-function BlockDataGPU(backend::KA.Backend, block_dims::Dims{D}, Ñs::Dims{D}, sort_points) where {D}
+function BlockDataGPU(
+        ::Type{Z},
+        backend::KA.Backend, block_dims::Dims{D}, Ñs::Dims{D}, sort_points,
+    ) where {Z <: Number, D}
+    T = real(Z)  # in case Z is complex
     nblocks_per_dir = map(cld, Ñs, block_dims)  # basically equal to ceil(Ñ / block_dim) --> effective block size is ≤ block_dims
+    L = T(2) * π
+    block_sizes = map(nblocks -> L / nblocks, nblocks_per_dir)
     cumulative_npoints_per_block = KA.allocate(backend, Int, prod(nblocks_per_dir) + 1)
-    BlockDataGPU(nblocks_per_dir, cumulative_npoints_per_block, sort_points)
+    BlockDataGPU(nblocks_per_dir, block_sizes, cumulative_npoints_per_block, sort_points)
 end
 
 get_pointperm(bd::BlockDataGPU) = bd.pointperm
@@ -89,7 +100,10 @@ function set_points!(
         backend::GPU, bd::BlockDataGPU, points::StructVector, xp, timer;
         transform::F = identity,
     ) where {F <: Function}
-    (; cumulative_npoints_per_block, nblocks_per_dir, blockidx, pointperm, sort_points,) = bd
+    (;
+        cumulative_npoints_per_block, nblocks_per_dir, block_sizes,
+        blockidx, pointperm, sort_points,
+    ) = bd
 
     npoints_max = typemax(eltype(bd.pointperm))
     length(points) ≤ npoints_max || error(lazy"number of points exceeds maximum allowed: $npoints_max")
@@ -114,7 +128,11 @@ function set_points!(
     workgroupsize = default_workgroupsize(backend, ndrange)
     @timeit timer "(1) Assign blocks" let
         local kernel! = assign_blocks_kernel!(backend, workgroupsize)
-        kernel!(blockidx, cumulative_npoints_per_block, points_comp, xp, nblocks_per_dir, sort_points, transform; ndrange)
+        kernel!(
+            blockidx, cumulative_npoints_per_block, points_comp, xp,
+            block_sizes, nblocks_per_dir, sort_points, transform;
+            ndrange,
+        )
         KA.synchronize(backend)
     end
 
@@ -129,7 +147,11 @@ function set_points!(
     # Compute permutation needed to sort points according to their block.
     @timeit timer "(3) Sort" let
         local kernel! = sortperm_kernel!(backend, workgroupsize)
-        kernel!(pointperm, cumulative_npoints_per_block, blockidx, xp, nblocks_per_dir, transform; ndrange)
+        kernel!(
+            pointperm, cumulative_npoints_per_block, blockidx, xp,
+            block_sizes, nblocks_per_dir, transform;
+            ndrange,
+        )
         KA.synchronize(backend)
     end
 
@@ -147,15 +169,10 @@ function set_points!(
 end
 
 # Get index of block where x⃗ is located (assumed to be in [0, 2π)).
-@inline function block_index(x⃗::NTuple{N}, nblocks_per_dir::NTuple{N}) where {N}
-    T = eltype(x⃗)
-    @assert T <: AbstractFloat
-    L = T(2) * π
-    is = map(x⃗, nblocks_per_dir) do x, nblocks
-        @inline
-        block_size = L / nblocks  # TODO: precompute?
-        Kernels.point_to_cell(x, block_size)
-    end
+@inline function block_index(
+        x⃗::NTuple{N,T}, block_sizes::NTuple{N,T}, nblocks_per_dir::NTuple{N},
+    ) where {N, T <: AbstractFloat}
+    is = map(Kernels.point_to_cell, x⃗, block_sizes)
     @inbounds LinearIndices(nblocks_per_dir)[is...]
 end
 
@@ -164,6 +181,7 @@ end
         cumulative_npoints_per_block::AbstractVector{<:Integer},
         points::NTuple,
         @Const(xp),
+        @Const(block_sizes::NTuple),
         @Const(nblocks_per_dir::NTuple),
         @Const(sort_points),
         @Const(transform::F),
@@ -171,7 +189,7 @@ end
     I = @index(Global, Linear)
     @inbounds x⃗ = xp[I]
     y⃗ = to_unit_cell(transform(Tuple(x⃗))) :: NTuple
-    n = block_index(y⃗, nblocks_per_dir)
+    n = block_index(y⃗, block_sizes, nblocks_per_dir)
 
     # Note: here index_within_block is the value *after* incrementing (≥ 1).
     S = eltype(cumulative_npoints_per_block)
@@ -193,13 +211,14 @@ end
         @Const(cumulative_npoints_per_block),
         @Const(blockidx),
         @Const(xp),
+        @Const(block_sizes),
         @Const(nblocks_per_dir),
         @Const(transform::F),
     ) where {F}
     I = @index(Global, Linear)
     @inbounds x⃗ = xp[I]
     y⃗ = to_unit_cell(transform(Tuple(x⃗))) :: NTuple
-    n = block_index(y⃗, nblocks_per_dir)
+    n = block_index(y⃗, block_sizes, nblocks_per_dir)
     @inbounds J = cumulative_npoints_per_block[n] + blockidx[I]
     @inbounds pointperm[J] = I
     nothing

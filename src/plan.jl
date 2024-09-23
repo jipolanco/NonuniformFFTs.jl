@@ -317,7 +317,7 @@ function _PlanNUFFT(
     else
         block_dims = get_block_dims(Ñs, block_size)
         if backend isa GPU
-            blocks = BlockDataGPU(backend, block_dims, Ñs, sort_points)
+            blocks = BlockDataGPU(T, backend, block_dims, Ñs, sort_points)
         else
             blocks = BlockData(T, block_dims, Ñs, h, num_transforms, sort_points)
             FFTW.set_num_threads(Threads.nthreads())
