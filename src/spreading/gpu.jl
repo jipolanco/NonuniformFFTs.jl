@@ -115,6 +115,17 @@ end
     nothing
 end
 
+# This function may dispatch to backend-specific kernel implementations (for instance
+# a CUDA.jl kernel in a package extension).
+function exec_spreading_kernel!(backend, us_real::NTuple, points::NTuple, args...)
+    ndrange = size(points[1])
+    groupsize = default_workgroupsize(backend, ndrange)
+    # We use dynamically sized kernels to avoid recompilation, since number of points may
+    # change from one call to another.
+    kernel! = spread_from_point_naive_kernel!(backend, groupsize)
+    kernel!(us_real, points, args...; ndrange)
+end
+
 # GPU implementation.
 # We assume all arrays are already on the GPU.
 function spread_from_points!(
@@ -167,8 +178,7 @@ function spread_from_points!(
         pointperm_ = pointperm
     end
 
-    kernel! = spread_from_point_naive_kernel!(backend, workgroupsize)
-    kernel!(us_real, xs_comp, vp_sorted, pointperm_, evaluate, to_indices; ndrange)
+    exec_spreading_kernel!(backend, us_real, xs_comp, vp_sorted, pointperm_, evaluate, to_indices)
 
     if sort_points === True()
         foreach(KA.unsafe_free!, vp_sorted)  # manually deallocate temporary arrays

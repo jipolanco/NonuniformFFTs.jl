@@ -43,6 +43,17 @@ using StaticArrays: MVector
     nothing
 end
 
+# This function may dispatch to backend-specific kernel implementations (for instance
+# a CUDA.jl kernel in a package extension).
+function exec_interpolation_kernel!(backend, vp::NTuple, points::NTuple, args...)
+    ndrange = size(points[1])
+    groupsize = default_workgroupsize(backend, ndrange)
+    # We use dynamically sized kernels to avoid recompilation, since number of points may
+    # change from one call to another.
+    kernel! = interpolate_to_point_naive_kernel!(backend, groupsize)
+    kernel!(vp, points, args...; ndrange)
+end
+
 function interpolate!(
         backend::GPU,
         bd::Union{BlockDataGPU, NullBlockData},
@@ -75,12 +86,7 @@ function interpolate!(
         pointperm_ = pointperm
     end
 
-    # We use dynamically sized kernels to avoid recompilation, since number of points may
-    # change from one call to another.
-    ndrange = size(x⃗s)  # iterate through points
-    workgroupsize = default_workgroupsize(backend, ndrange)
-    kernel! = interpolate_to_point_naive_kernel!(backend, workgroupsize)
-    kernel!(vp_sorted, xs_comp, us, pointperm_, Δxs, evaluate, to_indices; ndrange)
+    exec_interpolation_kernel!(backend, vp_sorted, xs_comp, us, pointperm_, Δxs, evaluate, to_indices)
 
     if sort_points === True()
         kernel_perm! = interp_permute_kernel!(backend, workgroupsize)
