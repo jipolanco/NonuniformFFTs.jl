@@ -258,14 +258,6 @@ Return the number of datasets which are simultaneously transformed by a plan.
 """
 ntransforms(::PlanNUFFT{T, N, Nc}) where {T, N, Nc} = Nc
 
-default_block_size(::Dims, ::CPU) = 4096  # in number of linear elements
-default_block_size(::Dims, ::GPU) = 1024  # except in 2D and 3D (see below)
-
-# In GPU 2D and 3D, use same values as in Shih et al. 2021 (in 3D this seems to work quite well on an A100).
-# TODO: adapt this based on size of shared memory and on element type T (and padding 2M)?
-default_block_size(::Dims{2}, ::GPU) = (32, 32)
-default_block_size(::Dims{3}, ::GPU) = (16, 16, 2)
-
 function get_block_dims(Ñs::Dims, bsize::Int)
     d = length(Ñs)
     bdims = @. false * Ñs + 1  # size along each direction (initially 1 in each direction)

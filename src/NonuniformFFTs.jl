@@ -46,6 +46,14 @@ export
 
 default_kernel() = BackwardsKaiserBesselKernel()
 
+default_block_size(::Dims, ::CPU) = 4096  # in number of linear elements
+default_block_size(::Dims, ::GPU) = 1024  # except in 2D and 3D (see below)
+
+# In GPU 2D and 3D, use same values as in Shih et al. 2021 (in 3D this seems to work quite well on an A100).
+# TODO: adapt this based on size of shared memory and on element type T (and padding 2M)?
+default_block_size(::Dims{2}, ::GPU) = (32, 32)
+default_block_size(::Dims{3}, ::GPU) = (16, 16, 2)
+
 # This is used at several places instead of getindex (inside of a `map`) to make sure that
 # the @inbounds is applied.
 inbounds_getindex(v, i) = @inbounds v[i]
@@ -56,7 +64,7 @@ function default_workgroupsize(backend, ndrange::Dims)
 end
 
 # Case of 1D kernels on the GPU (typically, kernels which iterate over non-uniform points).
-default_workgroupsize(::GPU, ndrange::Dims{1}) = (512,)
+default_workgroupsize(::GPU, ndrange::Dims{1}) = (1024,)
 
 include("blocking.jl")
 include("plan.jl")
