@@ -49,52 +49,52 @@ function to_unit_cell(x::Real)
     x
 end
 
+# This is a bit faster on GPUs, probably because it's guaranteed to be branchless.
+@inline to_unit_cell_gpu(x⃗::Tuple) = map(to_unit_cell_gpu, x⃗)
+@inline to_unit_cell_gpu(x::Real) = mod2pi(x)
+
 type_length(::Type{T}) where {T} = length(T)  # usually for SVector
 type_length(::Type{<:NTuple{N}}) where {N} = N
 
 # ================================================================================ #
 
-# Maximum number of bits allowed for Hilbert sort.
-# Hilbert sorting divides the domain in a grid of size N^d, where `d` is the dimension and
-# N = 2^b. Here `b` is the number of bits used in the algorithm.
-# This means that `b = 16` corresponds to a grid of dimensions 65536 *in each direction*,
-# which is far larger than anything we will ever need in practice.
-# (Also note that the Hilbert "grid" is generally coarser than the actual NUFFT grid where
-# values are spread and interpolated.)
-const MAX_BITS_HILBERT_SORT = 16
-
 # GPU implementation
 struct BlockDataGPU{
-        PermVector <: AbstractVector{<:Integer},
+        N, I <: Integer, T <: AbstractFloat,
+        IndexVector <: AbstractVector{I},
         SortPoints <: StaticBool,
     } <: AbstractBlockData
-    pointperm     :: PermVector
-    nbits_hilbert :: Int  # number of bits required in Hilbert sorting
+    nblocks_per_dir  :: NTuple{N, I}  # number of blocks in each direction
+    block_sizes      :: NTuple{N, T}  # size of each block (in units of length)
+    cumulative_npoints_per_block :: IndexVector    # cumulative sum of number of points in each block (length = num_blocks + 1, first value is 0)
+    blockidx      :: IndexVector  # linear index of block associated to each point (length = Np)
+    pointperm     :: IndexVector
     sort_points   :: SortPoints
-
-    BlockDataGPU(pointperm::P, nbits, sort::S) where {P, S} =
-        new{P, S}(pointperm, nbits, sort)
+    function BlockDataGPU(
+            nblocks_per_dir::NTuple{N, I},
+            block_sizes::NTuple{N, T},
+            npoints_per_block::V, sort::S,
+        ) where {N, I, T, V, S}
+        blockidx = similar(npoints_per_block, 0)
+        pointperm = similar(npoints_per_block, 0)
+        new{N, I, T, V, S}(
+            nblocks_per_dir, block_sizes, npoints_per_block, blockidx, pointperm, sort,
+        )
+    end
 end
 
 with_blocking(::BlockDataGPU) = true
 
-# In the case of Hilbert sorting, what we call "block" corresponds to the size of the
-# minimal box in the Hilbert curve algorithm.
-function BlockDataGPU(backend::KA.Backend, block_dims::Dims{D}, Ñs::Dims{D}, sort_points) where {D}
-    # We use a Hilbert sorting algorithm which requires the same number of blocks in each
-    # direction. In the best case, blocks will have the size required by `block_dims`. If
-    # that's not possible, we will prefer to use a smaller block size (so more blocks).
-    # This makes sense if the input block size was tuned as proportional to some memory
-    # limit (e.g. shared memory size on GPUs).
-    nblocks_per_dir_wanted = map(Ñs, block_dims) do N, B
-        cld(N, B)  # ≥ 1
-    end
-    nblocks = max(nblocks_per_dir_wanted...)  # this makes the actual block size ≤ the wanted block size
-    nbits = exponent(nblocks - 1) + 1
-    @assert UInt(2)^(nbits - 1) < nblocks ≤ UInt(2)^nbits  # verify that we got the right value of nbits
-    nbits = min(nbits, MAX_BITS_HILBERT_SORT)  # just in case; in practice nbits < MAX_BITS_HILBERT_SORT all the time
-    pointperm = KA.allocate(backend, Int, 0)   # stores permutation indices
-    BlockDataGPU(pointperm, nbits, sort_points)
+function BlockDataGPU(
+        ::Type{Z},
+        backend::KA.Backend, block_dims::Dims{D}, Ñs::Dims{D}, sort_points,
+    ) where {Z <: Number, D}
+    T = real(Z)  # in case Z is complex
+    nblocks_per_dir = map(cld, Ñs, block_dims)  # basically equal to ceil(Ñ / block_dim) --> effective block size is ≤ block_dims
+    L = T(2) * π
+    block_sizes = map(nblocks -> L / nblocks, nblocks_per_dir)
+    cumulative_npoints_per_block = KA.allocate(backend, Int, prod(nblocks_per_dir) + 1)
+    BlockDataGPU(nblocks_per_dir, block_sizes, cumulative_npoints_per_block, sort_points)
 end
 
 get_pointperm(bd::BlockDataGPU) = bd.pointperm
@@ -104,44 +104,24 @@ function set_points!(
         backend::GPU, bd::BlockDataGPU, points::StructVector, xp, timer;
         transform::F = identity,
     ) where {F <: Function}
+    (;
+        cumulative_npoints_per_block, nblocks_per_dir, block_sizes,
+        blockidx, pointperm, sort_points,
+    ) = bd
 
-    # Recursively iterate over possible values of nbits_hilbert to avoid type instability.
-    # We start by nbits = 1, and increase until nbits == bd.nbits_hilbert.
-    @assert bd.nbits_hilbert ≤ MAX_BITS_HILBERT_SORT
-    _set_points_hilbert!(Val(1), backend, bd, points, xp, timer, transform)
+    npoints_max = typemax(eltype(bd.pointperm))
+    length(points) ≤ npoints_max || error(lazy"number of points exceeds maximum allowed: $npoints_max")
 
-    nothing
-end
-
-@inline function _set_points_hilbert!(::Val{nbits}, backend, bd, points, xp, args...) where {nbits}
-    if nbits > MAX_BITS_HILBERT_SORT  # this is to avoid the compiler from exploding if it thinks the recursion is infinite
-        nothing
-    elseif nbits == bd.nbits_hilbert
-        N = type_length(eltype(xp))  # = number of dimensions
-        alg = GlobalGrayStatic(nbits, N)  # should be inferred, since nbits is statically known
-        _set_points_hilbert!(alg, backend, bd, points, xp, args...)  # call method defined further below
-    else
-        _set_points_hilbert!(Val(nbits + 1), backend, bd, points, xp, args...)  # keep iterating
-    end
-end
-
-function _set_points_hilbert!(
-        sortalg::HilbertSortingAlgorithm, backend, bd::BlockDataGPU,
-        points::StructVector, xp, timer, transform::F,
-    ) where {F}
-    (; pointperm, sort_points,) = bd
-
-    B = nbits(sortalg)  # static value
-    nblocks = 1 << B    # same number of blocks in all directions (= 2^B)
-
+    @assert length(cumulative_npoints_per_block) == prod(nblocks_per_dir) + 1
     Np = length(xp)
-    resize_no_copy!(pointperm, Np)
-    resize_no_copy!(points, Np)
-    @assert eachindex(points) == eachindex(xp)
 
-    # Allocate temporary array for holding Hilbert indices (manually deallocated later)
-    T = eltype(sortalg)
-    inds = KA.zeros(backend, T, Np)
+    @timeit timer "(0) Init arrays" begin
+        resize_no_copy!(blockidx, Np)
+        resize_no_copy!(pointperm, Np)
+        resize_no_copy!(points, Np)
+        fill!(cumulative_npoints_per_block, 0)
+        KA.synchronize(backend)
+    end
 
     # We avoid passing a StructVector to the kernel, so we pass `points` as a tuple of
     # vectors. The kernel might fail if `xp` is also a StructVector, which is not imposed
@@ -150,23 +130,39 @@ function _set_points_hilbert!(
 
     ndrange = size(points)
     workgroupsize = default_workgroupsize(backend, ndrange)
-    kernel! = hilbert_sort_kernel!(backend, workgroupsize)
-    @timeit timer "(1) Hilbert encoding" begin
-        kernel!(inds, points_comp, xp, sortalg, nblocks, sort_points, transform; ndrange)
+    @timeit timer "(1) Assign blocks" let
+        local kernel! = assign_blocks_kernel!(backend, workgroupsize)
+        kernel!(
+            blockidx, cumulative_npoints_per_block, points_comp, xp,
+            block_sizes, nblocks_per_dir, sort_points, transform;
+            ndrange,
+        )
         KA.synchronize(backend)
     end
 
-    # Compute permutation needed to sort Hilbert indices.
-    @timeit timer "(2) Sortperm" begin
-        sortperm!(pointperm, inds)
+    @timeit timer "(2) Cumulative sum" begin
+        # Note: the Julia docs state that this can fail if the accumulation is done in
+        # place. With CUDA, this doesn't seem to be a problem, but we could allocate a
+        # separate array if it becomes an issue.
+        cumsum!(cumulative_npoints_per_block, cumulative_npoints_per_block)
         KA.synchronize(backend)
     end
 
-    KA.unsafe_free!(inds)
+    # Compute permutation needed to sort points according to their block.
+    @timeit timer "(3) Sort" let
+        local kernel! = sortperm_kernel!(backend, workgroupsize)
+        kernel!(
+            pointperm, cumulative_npoints_per_block, blockidx, xp,
+            block_sizes, nblocks_per_dir, transform;
+            ndrange,
+        )
+        KA.synchronize(backend)
+    end
 
     # `pointperm` now contains the permutation needed to sort points
     if sort_points === True()
-        @timeit timer "(3) Permute points" let
+        # TODO: combine this with Sort step?
+        @timeit timer "(4) Permute points" let
             local kernel! = permute_kernel!(backend, workgroupsize)
             kernel!(points_comp, xp, pointperm, transform; ndrange)
             KA.synchronize(backend)
@@ -176,33 +172,33 @@ function _set_points_hilbert!(
     nothing
 end
 
-# This kernel may do multiple things at once:
-# - Compute Hilbert index associated to a point
-# - Copy point from `xp` to `points`, after transformations and folding, if sort_points === False().
-@kernel function hilbert_sort_kernel!(
-        inds::AbstractVector{<:Unsigned},
+# Get index of block where x⃗ is located (assumed to be in [0, 2π)).
+@inline function block_index(
+        x⃗::NTuple{N,T}, block_sizes::NTuple{N,T}, nblocks_per_dir::NTuple{N},
+    ) where {N, T <: AbstractFloat}
+    is = map(Kernels.point_to_cell, x⃗, block_sizes)
+    @inbounds LinearIndices(nblocks_per_dir)[is...]
+end
+
+@kernel function assign_blocks_kernel!(
+        blockidx::AbstractVector{<:Integer},
+        cumulative_npoints_per_block::AbstractVector{<:Integer},
         points::NTuple,
         @Const(xp),
-        @Const(sortalg::HilbertSortingAlgorithm),
-        @Const(nblocks::Integer),  # TODO: can we pass this as a compile-time constant? (Val)
+        @Const(block_sizes::NTuple),
+        @Const(nblocks_per_dir::NTuple),
         @Const(sort_points),
         @Const(transform::F),
     ) where {F}
     I = @index(Global, Linear)
     @inbounds x⃗ = xp[I]
-    y⃗ = to_unit_cell(transform(Tuple(x⃗))) :: NTuple
-    T = eltype(y⃗)
-    @assert T <: AbstractFloat
+    y⃗ = to_unit_cell_gpu(transform(Tuple(x⃗))) :: NTuple
+    n = block_index(y⃗, block_sizes, nblocks_per_dir)
 
-    L = T(2) * π
-    block_size = L / nblocks
-
-    is = map(y⃗) do y
-        i = Kernels.point_to_cell(y, block_size)
-        i - one(i)  # Hilbert sorting requires zero-based indices
-    end
-
-    @inbounds inds[I] = encode_hilbert_zero(sortalg, is)  # compute Hilbert index for sorting
+    # Note: here index_within_block is the value *after* incrementing (≥ 1).
+    S = eltype(cumulative_npoints_per_block)
+    index_within_block = @inbounds (Atomix.@atomic cumulative_npoints_per_block[n + 1] += one(S))::S
+    @inbounds blockidx[I] = index_within_block
 
     # If points need to be sorted, then we fill `points` some time later (in permute_kernel!).
     if sort_points === False()
@@ -211,6 +207,24 @@ end
         end
     end
 
+    nothing
+end
+
+@kernel function sortperm_kernel!(
+        pointperm::AbstractVector,
+        @Const(cumulative_npoints_per_block),
+        @Const(blockidx),
+        @Const(xp),
+        @Const(block_sizes),
+        @Const(nblocks_per_dir),
+        @Const(transform::F),
+    ) where {F}
+    I = @index(Global, Linear)
+    @inbounds x⃗ = xp[I]
+    y⃗ = to_unit_cell_gpu(transform(Tuple(x⃗))) :: NTuple
+    n = block_index(y⃗, block_sizes, nblocks_per_dir)
+    @inbounds J = cumulative_npoints_per_block[n] + blockidx[I]
+    @inbounds pointperm[J] = I
     nothing
 end
 
@@ -223,7 +237,7 @@ end
     i = @index(Global, Linear)
     j = @inbounds perm[i]
     x⃗ = @inbounds xp[j]
-    y⃗ = to_unit_cell(transform(Tuple(x⃗))) :: NTuple  # note: we perform the transform + folding twice per point...
+    y⃗ = to_unit_cell_gpu(transform(Tuple(x⃗))) :: NTuple
     for n ∈ eachindex(x⃗)
         @inbounds points[n][i] = y⃗[n]
     end
@@ -254,7 +268,7 @@ struct BlockData{
     buffers :: Buffers            # length = nthreads
     blocks_per_thread :: Vector{Int}  # maps a set of blocks i_start:i_end to a thread (length = nthreads + 1)
     indices :: Indices    # index associated to each block (length = num_blocks)
-    cumulative_npoints_per_block :: Vector{Int}    # cumulative sum of number of points in each block (length = 1 + num_blocks, initial value is 0)
+    cumulative_npoints_per_block :: Vector{Int}    # cumulative sum of number of points in each block (length = 1 + num_blocks, first value is 0)
     blockidx  :: Vector{Int}  # linear index of block associated to each point (length = Np)
     pointperm :: Vector{Int}  # index permutation for sorting points according to their block (length = Np)
     sort_points :: SortPoints
@@ -306,12 +320,16 @@ function set_points!(backend::CPU, bd::BlockData, points::StructVector, xp, time
     (; indices, cumulative_npoints_per_block, blockidx, pointperm, block_sizes,) = bd
     N = type_length(eltype(xp))  # = number of dimensions
     @assert N == length(block_sizes)
-    fill!(cumulative_npoints_per_block, 0)
-    to_linear_index = LinearIndices(axes(indices))  # maps Cartesian to linear index of a block
-    Np = length(xp)
-    resize_no_copy!(blockidx, Np)
-    resize_no_copy!(pointperm, Np)
-    resize_no_copy!(points, Np)
+
+    @timeit timer "(0) Init arrays" begin
+        to_linear_index = LinearIndices(axes(indices))  # maps Cartesian to linear index of a block
+        Np = length(xp)
+        resize_no_copy!(blockidx, Np)
+        resize_no_copy!(pointperm, Np)
+        resize_no_copy!(points, Np)
+        fill!(cumulative_npoints_per_block, 0)
+        KA.synchronize(backend)
+    end
 
     @timeit timer "(1) Assign blocks" @inbounds for (i, x⃗) ∈ pairs(xp)
         # Get index of block where point x⃗ is located.
@@ -322,9 +340,8 @@ function set_points!(backend::CPU, bd::BlockData, points::StructVector, xp, time
         end
         # checkbounds(indices, CartesianIndex(is))
         n = to_linear_index[is...]  # linear index of block
-        cumulative_npoints_per_block[n + 1] += 1
-        pointperm[i] = i
-        blockidx[i] = n
+        index_within_block = (cumulative_npoints_per_block[n + 1] += 1)  # ≥ 1
+        blockidx[i] = index_within_block
     end
 
     # Compute cumulative sum (we don't use cumsum! due to aliasing warning in its docs).
@@ -339,8 +356,19 @@ function set_points!(backend::CPU, bd::BlockData, points::StructVector, xp, time
     # are concentrated, improving load balance.
     map_blocks_to_threads!(bd.blocks_per_thread, cumulative_npoints_per_block)
 
-    @timeit timer "(2) Sortperm" begin
-        quicksort_perm!(pointperm, blockidx)
+    @timeit timer "(2) Sort" begin
+        # Note: we don't use threading since it seems to be much slower.
+        # This is very likely due to false sharing (https://en.wikipedia.org/wiki/False_sharing),
+        # since all threads modify the same data in "random" order.
+        @inbounds for i ∈ eachindex(xp)
+            # We recompute the block index associated to this point.
+            x⃗ = xp[i]
+            y⃗ = to_unit_cell(transform(NTuple{N}(x⃗)))  # converts `x⃗` to Tuple if it's an SVector
+            is = map(Kernels.point_to_cell, y⃗, block_sizes)
+            n = to_linear_index[is...]  # linear index of block
+            j = cumulative_npoints_per_block[n] + blockidx[i]
+            pointperm[j] = i
+        end
     end
 
     # Write sorted points into `points`.
@@ -350,23 +378,15 @@ function set_points!(backend::CPU, bd::BlockData, points::StructVector, xp, time
     # since all threads modify the same data in "random" order.
     if bd.sort_points === True()
         @timeit timer "(3) Permute points" begin
-            @inbounds for i ∈ eachindex(pointperm)
-                j = pointperm[i]
-                x⃗ = xp[j]
+            # TODO: combine this with Sort step?
+            @inbounds for j ∈ eachindex(pointperm)
+                i = pointperm[j]
+                x⃗ = xp[i]
                 y⃗ = to_unit_cell(transform(NTuple{N}(x⃗)))  # converts `x⃗` to Tuple if it's an SVector
-                points[i] = y⃗
+                points[j] = y⃗
             end
         end
     end
-
-    # Verification
-    # for i ∈ eachindex(cumulative_npoints_per_block)[begin:end - 1]
-    #     a = cumulative_npoints_per_block[i] + 1
-    #     b = cumulative_npoints_per_block[i + 1]
-    #     for j ∈ a:b
-    #         @assert blockidx[pointperm[j]] == i
-    #     end
-    # end
 
     nothing
 end

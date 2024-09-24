@@ -5,6 +5,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Changed
+
+- Faster spatial sorting of non-uniform points (CPU and GPU).
+
+- Tune GPU parameters: kernel workgroupsize; block size for spatial sorting.
+
 ## [v0.5.2] - 2024-09-23
 
 ### Changed

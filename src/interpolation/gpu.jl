@@ -29,15 +29,12 @@ using StaticArrays: MVector
     gs_eval = map((f, x) -> f(x), evaluate, x⃗)
 
     # Determine indices to load from `u` arrays.
-    inds = map(to_indices, gs_eval, Ns) do f, gdata, N
-        f(gdata.i, N)
+    indvals = map(to_indices, gs_eval, Ns, Δxs) do f, gdata, N, Δx
+        vals = gdata.values .* Δx
+        f(gdata.i, N) => vals
     end
 
-    vals = map(gs_eval, Δxs) do geval, Δx
-        geval.values .* Δx
-    end
-
-    v⃗ = interpolate_from_arrays_gpu(us, inds, vals)
+    v⃗ = interpolate_from_arrays_gpu(us, indvals)
 
     for (dst, v) ∈ zip(vp, v⃗)
         @inbounds dst[j] = v
@@ -96,15 +93,17 @@ end
 
 @inline function interpolate_from_arrays_gpu(
         us::NTuple{C, AbstractArray{T, D}},
-        inds_mapping::NTuple{D, Tuple},
-        vals::NTuple{D, NTuple{M, Tg}},
-    ) where {T, C, D, M, Tg <: AbstractFloat}
+        indvals::NTuple{D, <:Pair},
+    ) where {T, C, D}
     if @generated
         gprod_init = Symbol(:gprod_, D + 1)  # the name of this variable is important!
+        Tr = real(T)
         quote
+            inds_mapping = map(first, indvals)
+            vals = map(last, indvals)
             inds = map(eachindex, vals)
             vs = zero(MVector{$C, $T})
-            $gprod_init = one($Tg)
+            $gprod_init = one($Tr)
             @nloops(
                 $D, i,
                 d -> inds[d],  # for i_d ∈ inds[d]
@@ -126,6 +125,8 @@ end
         # Note: the trick of splitting the first dimension from the other ones really helps with
         # performance on the GPU.
         vs = zero(MVector{C, T})
+        inds_mapping = map(first, indvals)
+        vals = map(last, indvals)
         inds = map(eachindex, inds_mapping)
         inds_first, inds_tail = first(inds), Base.tail(inds)
         vals_first, vals_tail = first(vals), Base.tail(vals)

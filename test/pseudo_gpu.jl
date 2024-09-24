@@ -27,6 +27,8 @@ Base.@propagate_inbounds Base.setindex!(u::PseudoGPUArray, v, i...) = @inbounds 
 Base.resize!(u::PseudoGPUArray, n) = resize!(u.data, n)
 Base.pointer(u::PseudoGPUArray, i::Integer = 1) = pointer(u.data, i)
 Base.unsafe_convert(::Type{Ptr{T}}, u::PseudoGPUArray{T}) where {T} = pointer(u)
+Base.similar(u::PseudoGPUArray, ::Type{T}, dims::Dims) where {T} =
+    PseudoGPUArray(similar(u.data, T, dims))
 
 struct PseudoGPU <: KA.GPU end
 KA.isgpu(::PseudoGPU) = false  # needed to be considered as a CPU backend by KA
@@ -53,7 +55,7 @@ function run_plan(p::PlanNUFFT, xp_init::AbstractArray, vp_init::AbstractVector)
 
     set_points!(p, xp)
 
-    save_points_sorted = false # this can be useful for verifying Hilbert sorting graphically
+    save_points_sorted = false # this can be useful for verifying spatial sorting graphically
 
     if backend isa PseudoGPU && save_points_sorted
         inds = NonuniformFFTs.get_pointperm(p.blocks)
@@ -111,7 +113,7 @@ end
     @testset "sort_points = $sort_points" for sort_points ∈ (False(), True())
         compare_with_cpu(Float64, dims; sort_points)
     end
-    @testset "No blocking" begin  # Hilbert sorting disabled
+    @testset "No blocking" begin  # spatial sorting disabled
         compare_with_cpu(ComplexF64, dims; block_size = nothing)
     end
 end

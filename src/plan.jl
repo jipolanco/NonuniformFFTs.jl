@@ -92,14 +92,16 @@ The created plan contains all data needed to perform NUFFTs for non-uniform data
 
 ## Performance parameters
 
-- `block_size::Int`: the linear block size (in number of elements) when using block partitioning
-  or when sorting is enabled.
-  This can be tuned for maximal performance.
-  The current defaults are 4096 (CPU) and 1024 (GPU), but these may change in the future or
-  even depend on the actual computing device.
+- `block_size`: the block size (in number of elements) when using block partitioning or when
+  sorting is enabled.
+  This enables spatial sorting of points, even when `sort_points = False()` (which actually
+  permutes point data for possibly faster memory accesses).
+  The block size can be tuned for maximal performance.
+  It can either be passed as an `Int` (linear block size) or as a tuple `(B₁, …, Bₙ)` to
+  specify the block size in each Cartesian direction.
+  The current default is 4096 on the CPU and around 1024 on the GPU (but depends on the number of dimensions).
+  These may change in the future or even depend on the actual computing device.
   On the CPU, using block partitioning is required for running with multiple threads.
-  On the GPU, this will perform spatial sorting using a Hilbert curve algorithm, whose
-  minimal scale is proportional to the value of `block_size`.
   Blocking / spatial sorting can be completely disabled by passing `block_size = nothing` (but this is
   generally slower).
 
@@ -256,11 +258,6 @@ Return the number of datasets which are simultaneously transformed by a plan.
 """
 ntransforms(::PlanNUFFT{T, N, Nc}) where {T, N, Nc} = Nc
 
-default_block_size(::CPU) = 4096  # in number of linear elements
-
-# TODO: adapt this based on size of shared memory and on element type T (and padding 2M)?
-default_block_size(::GPU) = 1024  # a bit faster than 4096 on A100 (with 256³ oversampled grid)
-
 function get_block_dims(Ñs::Dims, bsize::Int)
     d = length(Ñs)
     bdims = @. false * Ñs + 1  # size along each direction (initially 1 in each direction)
@@ -275,6 +272,8 @@ function get_block_dims(Ñs::Dims, bsize::Int)
     bdims
 end
 
+get_block_dims(::Dims{N}, bdims::NTuple{N}) where {N} = bdims
+
 # This constructor is generally not called directly.
 function _PlanNUFFT(
         ::Type{T}, kernel::AbstractKernel, h::HalfSupport, σ_wanted, Ns::Dims{D},
@@ -284,7 +283,7 @@ function _PlanNUFFT(
         fftshift = false,
         sort_points::StaticBool = False(),
         backend::KA.Backend = CPU(),
-        block_size::Union{Integer, Nothing} = default_block_size(backend),
+        block_size::Union{Integer, Dims{D}, Nothing} = default_block_size(Ns, backend),
     ) where {T <: Number, D}
     ks = init_wavenumbers(T, Ns)
     # Determine dimensions of oversampled grid.
@@ -319,7 +318,7 @@ function _PlanNUFFT(
     else
         block_dims = get_block_dims(Ñs, block_size)
         if backend isa GPU
-            blocks = BlockDataGPU(backend, block_dims, Ñs, sort_points)
+            blocks = BlockDataGPU(T, backend, block_dims, Ñs, sort_points)
         else
             blocks = BlockData(T, block_dims, Ñs, h, num_transforms, sort_points)
             FFTW.set_num_threads(Threads.nthreads())

@@ -91,7 +91,7 @@ Base.@constprop :aggressive function PlanNUFFT(
     m, σ, reltol = AbstractNFFTs.accuracyParams(; kwargs...)
     backend = KA.get_backend(xp)  # e.g. use GPU backend if xp is a GPU array
     sort_points = sortNodes ? True() : False()  # this is type-unstable (unless constant propagation happens)
-    block_size = blocking ? default_block_size(backend) : nothing  # also type-unstable
+    block_size = blocking ? default_block_size(Ns, backend) : nothing  # also type-unstable
     kernel = window isa AbstractKernel ? window : convert_window_function(window)
     p = PlanNUFFT(Complex{Tr}, Ns, HalfSupport(m); backend, σ = Tr(σ), sort_points, fftshift, block_size, kernel, fftw_flags = fftflags)
     AbstractNFFTs.nodes!(p, xp)
