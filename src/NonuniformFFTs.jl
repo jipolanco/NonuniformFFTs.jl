@@ -130,8 +130,9 @@ See also [`exec_type2!`](@ref).
 function exec_type1! end
 
 function exec_type1!(ûs_k::NTuple{C, AbstractArray{<:Complex}}, p::PlanNUFFT, vp::NTuple{C}) where {C}
-    (; backend, points, kernels, data, blocks, index_map, timer,) = p
+    (; backend, points, kernels, data, blocks, index_map,) = p
     (; us,) = data
+    timer = get_timer_nowarn(p)
 
     @timeit timer "Execute type 1" begin
         check_nufft_uniform_data(p, ûs_k)
@@ -208,8 +209,9 @@ See also [`exec_type1!`](@ref).
 function exec_type2! end
 
 function exec_type2!(vp::NTuple{C, AbstractVector}, p::PlanNUFFT, ûs_k::NTuple{C, AbstractArray{<:Complex}}) where {C}
-    (; backend, points, kernels, data, blocks, index_map, timer,) = p
+    (; backend, points, kernels, data, blocks, index_map,) = p
     (; us,) = data
+    timer = get_timer_nowarn(p)
 
     @timeit timer "Execute type 2" begin
         check_nufft_uniform_data(p, ûs_k)
