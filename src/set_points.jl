@@ -29,10 +29,10 @@ end
 # Here the element type of `xp` can be either an NTuple{N, <:Real}, an SVector{N, <:Real},
 # or anything else which has length `N`.
 function set_points!(p::PlanNUFFT, xp::AbstractVector; kwargs...)
-    (; points, timer,) = p
+    (; points, timer, synchronise,) = p
     N = ndims(p)
     type_length(eltype(xp)) == N || throw(DimensionMismatch(lazy"expected $N-dimensional points"))
-    @timeit timer "Set points" set_points!(p.backend, p.blocks, points, xp, timer; kwargs...)
+    @timeit timer "Set points" set_points_impl!(p.backend, p.blocks, points, xp, timer; synchronise, kwargs...)
     p
 end
 

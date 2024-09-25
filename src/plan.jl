@@ -131,6 +131,10 @@ The created plan contains all data needed to perform NUFFTs for non-uniform data
   By default the plan creates its own timer.
   One can visualise the time spent on different parts of the NUFFT computation using `p.timer`.
 
+- `synchronise = false`: if `true`, add synchronisation barrier between calls to GPU kernels.
+  Enabling this is needed for accurate timings in `p.timer` when computing on a GPU, but may
+  result in reduced performance.
+
 # FFT size and performance
 
 For performance reasons, when doing FFTs one usually wants the size of the input along each
@@ -225,6 +229,7 @@ struct PlanNUFFT{
     fftshift  :: Bool
     index_map :: IndexMap
     timer   :: Timer
+    synchronise :: Bool
 end
 
 function Base.show(io::IO, p::PlanNUFFT{T, N, Nc}) where {T, N, Nc}
@@ -274,6 +279,9 @@ end
 
 get_block_dims(::Dims{N}, bdims::NTuple{N}) where {N} = bdims
 
+maybe_synchronise(backend::KA.Backend, synchronise::Bool) = synchronise && KA.synchronize(backend)  # this doesn't do anything on the CPU
+maybe_synchronise(p::PlanNUFFT) = maybe_synchronise(p.backend, p.synchronise)
+
 # This constructor is generally not called directly.
 function _PlanNUFFT(
         ::Type{T}, kernel::AbstractKernel, h::HalfSupport, σ_wanted, Ns::Dims{D},
@@ -284,6 +292,7 @@ function _PlanNUFFT(
         sort_points::StaticBool = False(),
         backend::KA.Backend = CPU(),
         block_size::Union{Integer, Dims{D}, Nothing} = default_block_size(Ns, backend),
+        synchronise::Bool = false,
     ) where {T <: Number, D}
     ks = init_wavenumbers(T, Ns)
     # Determine dimensions of oversampled grid.
@@ -331,7 +340,7 @@ function _PlanNUFFT(
         indmap = KA.allocate(backend, eltype(inds), length(k))
         non_oversampled_indices!(indmap, k, inds; fftshift)
     end
-    PlanNUFFT(kernel_data, backend, σ, points, nufft_data, blocks, fftshift, index_map, timer)
+    PlanNUFFT(kernel_data, backend, σ, points, nufft_data, blocks, fftshift, index_map, timer, synchronise)
 end
 
 function check_nufft_size(Ñ, ::HalfSupport{M}) where M
