@@ -245,12 +245,13 @@ function Base.show(io::IO, p::PlanNUFFT{T, N, Nc}) where {T, N, Nc}
     nothing
 end
 
+# Show warning if timer is retrieved in cases where timings may be incorrect.
 function get_timer(p::PlanNUFFT)
     (; backend, synchronise,) = p
     if backend isa GPU && !synchronise
         @warn "synchronisation is disabled on GPU: timings will be incorrect"
-        getfield(p, :timer)
     end
+    getfield(p, :timer)
 end
 
 @inline function Base.getproperty(p::PlanNUFFT, name::Symbol)
