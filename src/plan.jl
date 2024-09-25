@@ -245,6 +245,22 @@ function Base.show(io::IO, p::PlanNUFFT{T, N, Nc}) where {T, N, Nc}
     nothing
 end
 
+function get_timer(p::PlanNUFFT)
+    (; backend, synchronise,) = p
+    if backend isa GPU && !synchronise
+        @warn "synchronisation is disabled on GPU: timings will be incorrect"
+        getfield(p, :timer)
+    end
+end
+
+@inline function Base.getproperty(p::PlanNUFFT, name::Symbol)
+    if name === :timer
+        get_timer(p)
+    else
+        getfield(p, name)
+    end
+end
+
 """
     size(p::PlanNUFFT) -> (N₁, N₂, ...)
 
