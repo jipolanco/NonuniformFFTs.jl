@@ -83,6 +83,7 @@ Base.@constprop :aggressive function PlanNUFFT(
         fftflags = FFTW.ESTIMATE, blocking = true, sortNodes = false,
         window = default_kernel(),
         fftshift = true,  # for compatibility with NFFT.jl
+        synchronise = false,
         kwargs...,
     ) where {Tr <: AbstractFloat}
     # Note: the NFFT.jl package uses an odd window size, w = 2m + 1.
@@ -93,7 +94,11 @@ Base.@constprop :aggressive function PlanNUFFT(
     sort_points = sortNodes ? True() : False()  # this is type-unstable (unless constant propagation happens)
     block_size = blocking ? default_block_size(Ns, backend) : nothing  # also type-unstable
     kernel = window isa AbstractKernel ? window : convert_window_function(window)
-    p = PlanNUFFT(Complex{Tr}, Ns, HalfSupport(m); backend, σ = Tr(σ), sort_points, fftshift, block_size, kernel, fftw_flags = fftflags)
+    p = PlanNUFFT(
+        Complex{Tr}, Ns, HalfSupport(m);
+        backend, σ = Tr(σ), sort_points, fftshift, block_size,
+        kernel, fftw_flags = fftflags, synchronise,
+    )
     AbstractNFFTs.nodes!(p, xp)
     p
 end

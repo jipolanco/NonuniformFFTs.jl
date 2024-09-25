@@ -130,8 +130,9 @@ See also [`exec_type2!`](@ref).
 function exec_type1! end
 
 function exec_type1!(ûs_k::NTuple{C, AbstractArray{<:Complex}}, p::PlanNUFFT, vp::NTuple{C}) where {C}
-    (; backend, points, kernels, data, blocks, index_map, timer,) = p
+    (; backend, points, kernels, data, blocks, index_map,) = p
     (; us,) = data
+    timer = get_timer_nowarn(p)
 
     @timeit timer "Execute type 1" begin
         check_nufft_uniform_data(p, ûs_k)
@@ -142,17 +143,17 @@ function exec_type1!(ûs_k::NTuple{C, AbstractArray{<:Complex}}, p::PlanNUFFT, 
             local workgroupsize = default_workgroupsize(backend, ndrange)
             local kernel! = fill_with_zeros_kernel!(backend, workgroupsize, ndrange)
             kernel!(us)
-            KA.synchronize(backend)
+            maybe_synchronise(p)
         end
 
         @timeit timer "(1) Spreading" begin
             spread_from_points!(backend, blocks, kernels, us, points, vp)
-            KA.synchronize(backend)
+            maybe_synchronise(p)
         end
 
         @timeit timer "(2) Forward FFT" begin
             ûs = _type1_fft!(data)
-            KA.synchronize(backend)
+            maybe_synchronise(p)
         end
 
         @timeit timer "(3) Deconvolution" begin
@@ -160,7 +161,7 @@ function exec_type1!(ûs_k::NTuple{C, AbstractArray{<:Complex}}, p::PlanNUFFT, 
             normfactor::T = prod(N -> 2π / N, size(first(us)))  # FFT normalisation factor
             ϕ̂s = map(fourier_coefficients, kernels)
             copy_deconvolve_to_non_oversampled!(backend, ûs_k, ûs, index_map, ϕ̂s, normfactor)  # truncate to original grid + normalise
-            KA.synchronize(backend)
+            maybe_synchronise(p)
         end
     end
 
@@ -208,8 +209,9 @@ See also [`exec_type1!`](@ref).
 function exec_type2! end
 
 function exec_type2!(vp::NTuple{C, AbstractVector}, p::PlanNUFFT, ûs_k::NTuple{C, AbstractArray{<:Complex}}) where {C}
-    (; backend, points, kernels, data, blocks, index_map, timer,) = p
+    (; backend, points, kernels, data, blocks, index_map,) = p
     (; us,) = data
+    timer = get_timer_nowarn(p)
 
     @timeit timer "Execute type 2" begin
         check_nufft_uniform_data(p, ûs_k)
@@ -230,23 +232,23 @@ function exec_type2!(vp::NTuple{C, AbstractVector}, p::PlanNUFFT, ûs_k::NTuple
             local workgroupsize = default_workgroupsize(backend, ndrange)
             local kernel! = fill_with_zeros_kernel!(backend, workgroupsize, ndrange)
             kernel!(ûs)
-            KA.synchronize(backend)
+            maybe_synchronise(p)
         end
 
         @timeit timer "(1) Deconvolution" begin
             ϕ̂s = map(fourier_coefficients, kernels)
             copy_deconvolve_to_oversampled!(backend, ûs, ûs_k, index_map, ϕ̂s)
-            KA.synchronize(backend)
+            maybe_synchronise(p)
         end
 
         @timeit timer "(2) Backward FFT" begin
             _type2_fft!(data)
-            KA.synchronize(backend)
+            maybe_synchronise(p)
         end
 
         @timeit timer "(3) Interpolation" begin
             interpolate!(backend, blocks, kernels, vp, us, points)
-            KA.synchronize(backend)
+            maybe_synchronise(p)
         end
     end
 

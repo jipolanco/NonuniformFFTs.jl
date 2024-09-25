@@ -19,9 +19,12 @@ end
 
 # Here the element type of `xp` can be either an NTuple{N, <:Real}, an SVector{N, <:Real},
 # or anything else which has length `N`.
-function set_points!(backend, ::NullBlockData, points::StructVector, xp, timer; transform::F = identity) where {F <: Function}
+function set_points_impl!(
+        backend, ::NullBlockData, points::StructVector, xp, timer;
+        synchronise, transform::F = identity
+    ) where {F <: Function}
     length(points) == length(xp) || resize_no_copy!(points, length(xp))
-    KA.synchronize(backend)
+    maybe_synchronise(backend, synchronise)
     Base.require_one_based_indexing(points)
     @timeit timer "(1) Copy + fold" begin
         # NOTE: we explicitly iterate through StructVector components because CUDA.jl
@@ -30,7 +33,7 @@ function set_points!(backend, ::NullBlockData, points::StructVector, xp, timer; 
         points_comp = StructArrays.components(points)
         kernel! = copy_points_unblocked_kernel!(backend)
         kernel!(transform, points_comp, xp; ndrange = size(xp))
-        KA.synchronize(backend)  # mostly to get accurate timings
+        maybe_synchronise(backend, synchronise)
     end
     nothing
 end
@@ -100,9 +103,9 @@ end
 get_pointperm(bd::BlockDataGPU) = bd.pointperm
 get_sort_points(bd::BlockDataGPU) = bd.sort_points
 
-function set_points!(
+function set_points_impl!(
         backend::GPU, bd::BlockDataGPU, points::StructVector, xp, timer;
-        transform::F = identity,
+        transform::F = identity, synchronise,
     ) where {F <: Function}
     (;
         cumulative_npoints_per_block, nblocks_per_dir, block_sizes,
@@ -120,7 +123,7 @@ function set_points!(
         resize_no_copy!(pointperm, Np)
         resize_no_copy!(points, Np)
         fill!(cumulative_npoints_per_block, 0)
-        KA.synchronize(backend)
+        maybe_synchronise(backend, synchronise)
     end
 
     # We avoid passing a StructVector to the kernel, so we pass `points` as a tuple of
@@ -137,7 +140,7 @@ function set_points!(
             block_sizes, nblocks_per_dir, sort_points, transform;
             ndrange,
         )
-        KA.synchronize(backend)
+        maybe_synchronise(backend, synchronise)
     end
 
     @timeit timer "(2) Cumulative sum" begin
@@ -145,7 +148,7 @@ function set_points!(
         # place. With CUDA, this doesn't seem to be a problem, but we could allocate a
         # separate array if it becomes an issue.
         cumsum!(cumulative_npoints_per_block, cumulative_npoints_per_block)
-        KA.synchronize(backend)
+        maybe_synchronise(backend, synchronise)
     end
 
     # Compute permutation needed to sort points according to their block.
@@ -156,7 +159,7 @@ function set_points!(
             block_sizes, nblocks_per_dir, transform;
             ndrange,
         )
-        KA.synchronize(backend)
+        maybe_synchronise(backend, synchronise)
     end
 
     # `pointperm` now contains the permutation needed to sort points
@@ -165,7 +168,7 @@ function set_points!(
         @timeit timer "(4) Permute points" let
             local kernel! = permute_kernel!(backend, workgroupsize)
             kernel!(points_comp, xp, pointperm, transform; ndrange)
-            KA.synchronize(backend)
+            maybe_synchronise(backend, synchronise)
         end
     end
 
@@ -313,9 +316,13 @@ function BlockData(
     )
 end
 
-function set_points!(backend::CPU, bd::BlockData, points::StructVector, xp, timer; transform::F = identity) where {F <: Function}
+function set_points_impl!(
+        backend::CPU, bd::BlockData, points::StructVector, xp, timer;
+        transform::F = identity,
+        synchronise,
+    ) where {F <: Function}
     # This technically never happens, but we might use it as a way to disable blocking.
-    isempty(bd.buffers) && return set_points!(backend, NullBlockData(), points, xp, timer; transform)
+    isempty(bd.buffers) && return set_points_impl!(backend, NullBlockData(), points, xp, timer; transform, synchronise)
 
     (; indices, cumulative_npoints_per_block, blockidx, pointperm, block_sizes,) = bd
     N = type_length(eltype(xp))  # = number of dimensions
@@ -328,7 +335,6 @@ function set_points!(backend::CPU, bd::BlockData, points::StructVector, xp, time
         resize_no_copy!(pointperm, Np)
         resize_no_copy!(points, Np)
         fill!(cumulative_npoints_per_block, 0)
-        KA.synchronize(backend)
     end
 
     @timeit timer "(1) Assign blocks" @inbounds for (i, x⃗) ∈ pairs(xp)

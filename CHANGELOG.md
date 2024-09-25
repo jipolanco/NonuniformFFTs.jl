@@ -5,6 +5,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Changed
+
+- Removed explicit GPU synchronisation barriers (using `KA.synchronize`) by default.
+  This can now be re-enabled by passing `synchronise = true` as a plan argument.
+  Enabling synchronisation is useful for getting accurate timings (in `p.timer`) but
+  may result in decreased performance.
+
 ## [v0.5.3] - 2024-09-24
 
 ### Changed
