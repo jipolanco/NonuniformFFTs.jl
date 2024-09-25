@@ -2,6 +2,7 @@ using Test
 using NonuniformFFTs
 using NonuniformFFTs: Kernels
 using FFTW: fftfreq, rfftfreq
+using TimerOutputs: TimerOutput
 
 function type1_exact!(us, ks, xp, vp)
     fill!(us, 0)
@@ -26,6 +27,7 @@ end
         # NOTE: these parameters allow to reproduce issue when a point is very close to 2π.
         N = 32
         plan = PlanNUFFT(T, N; m = HalfSupport(8), σ = 1.5, block_size = 16)
+        @test @inferred((p -> p.timer)(plan)) isa TimerOutput
         set_points!(plan, xp)
 
         us = Array{T}(undef, N)
