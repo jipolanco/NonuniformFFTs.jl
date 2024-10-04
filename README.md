@@ -142,7 +142,7 @@ The only differences are:
 - we copy input arrays to the GPU before calling any NUFFT-related functions (`set_points!`, `exec_type1!`, `exec_type2!`)
 
 The example is for an Nvidia GPU (using [CUDA.jl](https://github.com/JuliaGPU/CUDA.jl)), but should also work with e.g. [AMDGPU.jl](https://github.com/JuliaGPU/AMDGPU.jl)
-by simply choosing `backend = ROCBackend()` (this hasn't been tested yet).
+by simply choosing `backend = ROCBackend()`.
 
 ```julia
 using NonuniformFFTs

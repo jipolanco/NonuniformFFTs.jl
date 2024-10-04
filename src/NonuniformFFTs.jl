@@ -54,7 +54,7 @@ default_block_size(::Dims{2}, ::GPU) = (32, 32)
 default_block_size(::Dims{3}, ::GPU) = (16, 16, 4)  # tuned on A100 with 256³ non-oversampled grid, σ = 2 and m = HalfSupport(4)
 
 function default_workgroupsize(backend, ndrange::Dims)
-    # This currently assumes 1024 available threads, which might fail in some GPUs (AMD?).
+    # This currently assumes 1024 available threads, which might fail in some GPUs.
     KA.default_cpu_workgroupsize(ndrange)
 end
 
