@@ -29,15 +29,19 @@ using StaticArrays: MVector
     gs_eval = map((f, x) -> f(x), evaluate, x⃗)
 
     # Determine indices to load from `u` arrays.
-    indvals = map(to_indices, gs_eval, Ns, Δxs) do f, gdata, N, Δx
-        vals = gdata.values .* Δx
-        f(gdata.i, N) => vals
+    indvals = ntuple(Val(D)) do n
+        @inbounds begin
+            gdata = gs_eval[n]
+            vals = gdata.values .* Δxs[n]
+            f = to_indices[n]
+            f(gdata.i, Ns[n]) => vals
+        end
     end
 
     v⃗ = interpolate_from_arrays_gpu(us, indvals)
 
-    for (dst, v) ∈ zip(vp, v⃗)
-        @inbounds dst[j] = v
+    for n ∈ eachindex(vp, v⃗)
+        @inbounds vp[n][j] = v⃗[n]
     end
 
     nothing

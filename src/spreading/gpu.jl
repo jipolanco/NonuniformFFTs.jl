@@ -19,25 +19,34 @@
     v⃗ = map(v -> @inbounds(v[j]), vp)
 
     # Determine grid dimensions.
+    # Note that, to avoid problems with @atomic, we currently work with real-data arrays
+    # even when the output is complex. So, if `Z <: Complex`, the first dimension has twice
+    # the actual dataset dimensions.
     Z = eltype(v⃗)
-    Ns = size(first(us))
-    if Z <: Complex
-        @assert eltype(first(us)) <: Real      # output is a real array (but actually describes complex data)
-        Ns = Base.setindex(Ns, Ns[1] >> 1, 1)  # actual number of complex elements in first dimension
-    end
+    Ns_real = size(first(us))  # dimensions of raw input data
+    @assert eltype(first(us)) <: Real # output is a real array (but may actually describe complex data)
+    Ns = spread_actual_dims(Z, Ns_real)  # divides the Ns_real[1] by 2 if Z <: Complex
 
     # Evaluate 1D kernels.
     gs_eval = map((f, x) -> f(x), evaluate, x⃗)
 
     # Determine indices to write in `u` arrays.
-    indvals = map(to_indices, gs_eval, Ns) do f, gdata, N
-        f(gdata.i, N) => gdata.values
+    indvals = ntuple(Val(D)) do n
+        @inbounds begin
+            gdata = gs_eval[n]
+            vals = gdata.values
+            f = to_indices[n]
+            f(gdata.i, Ns[n]) => vals
+        end
     end
 
     spread_onto_arrays_gpu!(us, indvals, v⃗)
 
     nothing
 end
+
+@inline spread_actual_dims(::Type{<:Real}, Ns) = Ns
+@inline spread_actual_dims(::Type{<:Complex}, Ns) = Base.setindex(Ns, Ns[1] >> 1, 1)  # actual number of complex elements in first dimension
 
 # Currently the @generated function doesn't seem to speed-up things, but that might change
 # if we find a way of avoiding atomic writes (which seem to be the bottleneck here).
