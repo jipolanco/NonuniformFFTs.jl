@@ -350,8 +350,8 @@ end
     js = map(inbounds_getindex, index_map, is)  # input index
     ϕs_local = map(inbounds_getindex, ϕ̂s, is)   # convolution coefficients (one for each Cartesian direction)
     β = normfactor / prod(ϕs_local)
-    for (w, u) ∈ zip(ŵs_all, ûs_all)
-        @inbounds w[is...] = β * u[js...]
+    for n ∈ eachindex(ŵs_all, ûs_all)
+        @inbounds ŵs_all[n][is...] = β * ûs_all[n][js...]
     end
     nothing
 end
@@ -406,8 +406,8 @@ end
     js = map(inbounds_getindex, index_map, is)  # output index (on oversampled grid)
     ϕs_local = map(inbounds_getindex, ϕ̂s, is)   # convolution coefficients (one for each Cartesian direction)
     β = 1 / prod(ϕs_local)                      # deconvolution factor
-    for (ŵs, ûs) ∈ zip(ŵs_all, ûs_all)
-        @inbounds ûs[js...] = β * ŵs[is...]
+    for n ∈ eachindex(ŵs_all, ûs_all)
+        @inbounds ûs_all[n][js...] = β * ŵs_all[n][is...]
     end
     nothing
 end
