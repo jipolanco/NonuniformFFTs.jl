@@ -54,7 +54,7 @@ default_block_size(::Dims{2}, ::GPU) = (32, 32)
 default_block_size(::Dims{3}, ::GPU) = (16, 16, 4)  # tuned on A100 with 256³ non-oversampled grid, σ = 2 and m = HalfSupport(4)
 
 function default_workgroupsize(backend, ndrange::Dims)
-    # This currently assumes 1024 available threads, which might fail in some GPUs (AMD?).
+    # This currently assumes 1024 available threads, which might fail in some GPUs.
     KA.default_cpu_workgroupsize(ndrange)
 end
 
@@ -350,8 +350,8 @@ end
     js = map(inbounds_getindex, index_map, is)  # input index
     ϕs_local = map(inbounds_getindex, ϕ̂s, is)   # convolution coefficients (one for each Cartesian direction)
     β = normfactor / prod(ϕs_local)
-    for (w, u) ∈ zip(ŵs_all, ûs_all)
-        @inbounds w[is...] = β * u[js...]
+    for n ∈ eachindex(ŵs_all, ûs_all)
+        @inbounds ŵs_all[n][is...] = β * ûs_all[n][js...]
     end
     nothing
 end
@@ -406,8 +406,8 @@ end
     js = map(inbounds_getindex, index_map, is)  # output index (on oversampled grid)
     ϕs_local = map(inbounds_getindex, ϕ̂s, is)   # convolution coefficients (one for each Cartesian direction)
     β = 1 / prod(ϕs_local)                      # deconvolution factor
-    for (ŵs, ûs) ∈ zip(ŵs_all, ûs_all)
-        @inbounds ûs[js...] = β * ŵs[is...]
+    for n ∈ eachindex(ŵs_all, ûs_all)
+        @inbounds ûs_all[n][js...] = β * ŵs_all[n][is...]
     end
     nothing
 end

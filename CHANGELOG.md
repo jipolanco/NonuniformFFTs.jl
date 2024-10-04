@@ -5,6 +5,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Fixed
+
+- Transforms now work on AMD GPUs.
+  This only required some minor modifications to some KA kernels.
+
 ## [v0.5.4] - 2024-09-25
 
 ### Changed
