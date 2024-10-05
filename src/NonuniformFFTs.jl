@@ -432,6 +432,7 @@ end
     # Ts = [Float32, Float64, ComplexF32, ComplexF64]
     Ts = (Float64,)
     σ = 1.25
+    fftw_flags = FFTW.ESTIMATE
     for kernel ∈ kernels, m ∈ ms, T ∈ Ts, ndims ∈ ndims_all
         dims = ntuple(_ -> 13, ndims)  # floor(σN) = 16
         Np = 16  # number of non-uniform points
@@ -446,7 +447,7 @@ end
             qs = ntuple(_ -> randn(T, Np), ntransforms)
             uhat = ntuple(_ -> Array{C}(undef, Ns), ntransforms)
             @compile_workload begin
-                plan = PlanNUFFT(T, dims; ntransforms, m, σ, kernel)
+                plan = PlanNUFFT(T, dims; ntransforms, fftw_flags, m, σ, kernel)
                 set_points!(plan, xs)
                 exec_type1!(uhat, plan, qs)
                 exec_type2!(qs, plan, uhat)
