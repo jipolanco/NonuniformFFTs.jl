@@ -88,11 +88,6 @@ end
     kernel_indices(i, HalfSupport(M), args...)
 end
 
-# Returns a function which is callable from GPU kernels.
-function kernel_indices_func(::AbstractKernelData{K, M}) where {K, M}
-    @inline (i, args...) -> kernel_indices(i, HalfSupport(M), args...)
-end
-
 # Takes into account periodic wrapping.
 # This is equivalent to calling mod1(j, N) for each j, but much much faster.
 # We assume the central index `i` is in 1:N and that M < N / 2.

@@ -3,12 +3,11 @@ using StaticArrays: MVector
 # Interpolate onto a single point
 @kernel function interpolate_to_point_naive_kernel!(
         vp::NTuple{C},
+        @Const(gs::NTuple{D}),
         @Const(points::NTuple{D}),
         @Const(us::NTuple{C}),
         @Const(pointperm),
         @Const(Δxs::NTuple{D}),           # grid step in each direction (oversampled grid)
-        evaluate::NTuple{D, <:Function},  # can't be marked Const for some reason
-        to_indices::NTuple{D, <:Function},
     ) where {C, D}
     i = @index(Global, Linear)
 
@@ -26,15 +25,15 @@ using StaticArrays: MVector
     Ns = size(first(us))  # grid dimensions
 
     # Evaluate 1D kernels.
-    gs_eval = map((f, x) -> f(x), evaluate, x⃗)
+    gs_eval = map(Kernels.evaluate_kernel, gs, x⃗)
 
     # Determine indices to load from `u` arrays.
     indvals = ntuple(Val(D)) do n
         @inbounds begin
             gdata = gs_eval[n]
             vals = gdata.values .* Δxs[n]
-            f = to_indices[n]
-            f(gdata.i, Ns[n]) => vals
+            inds = Kernels.kernel_indices(gdata.i, gs[n], Ns[n])
+            inds => vals
         end
     end
 
@@ -59,8 +58,6 @@ function interpolate!(
     Base.require_one_based_indexing(x⃗s)  # this is to make sure that all indices match
     foreach(Base.require_one_based_indexing, vp_all)
 
-    evaluate = map(Kernels.evaluate_kernel_func, gs)   # kernel evaluation functions
-    to_indices = map(Kernels.kernel_indices_func, gs)  # functions returning spreading indices
     xs_comp = StructArrays.components(x⃗s)
     Δxs = map(Kernels.gridstep, gs)
 
@@ -84,7 +81,7 @@ function interpolate!(
     ndrange = size(x⃗s)  # iterate through points
     workgroupsize = default_workgroupsize(backend, ndrange)
     kernel! = interpolate_to_point_naive_kernel!(backend, workgroupsize)
-    kernel!(vp_sorted, xs_comp, us, pointperm_, Δxs, evaluate, to_indices; ndrange)
+    kernel!(vp_sorted, gs, xs_comp, us, pointperm_, Δxs; ndrange)
 
     if sort_points === True()
         kernel_perm! = interp_permute_kernel!(backend, workgroupsize)
