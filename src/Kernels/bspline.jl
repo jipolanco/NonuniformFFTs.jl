@@ -58,8 +58,8 @@ struct BSplineKernelData{
 
     function BSplineKernelData{M}(backend::KA.Backend, Δx::Real) where {M}
         Δt = Δx
-        σ = sqrt(M / 6) * Δt
         T = eltype(Δt)
+        σ = sqrt(T(M) / 6) * Δt
         gk = KA.allocate(backend, T, 0)
         BSplineKernelData{M}(σ, Δt, gk)
     end
