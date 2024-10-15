@@ -95,11 +95,9 @@ function evaluate_kernel_func(g::BSplineKernelData{M}) where {M}
     end
 end
 
-# This should work on CPU and GPU.
-function evaluate_fourier!(g::BSplineKernelData{M}, gk::AbstractVector, ks::AbstractVector) where {M}
+function evaluate_fourier_func(g::BSplineKernelData{M}) where {M}
     (; Δt,) = g
-    @assert eachindex(gk) == eachindex(ks)
-    map!(gk, ks) do k
+    function (k)
         kh = k * Δt / 2
         s = sin(kh) / kh
         n = 2M

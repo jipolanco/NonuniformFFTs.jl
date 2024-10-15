@@ -64,7 +64,8 @@ function init_fourier_coefficients!(g::AbstractKernelData, ks::AbstractVector)
     Nk == length(gk) && return gk  # assume coefficients were already computed
     resize!(gk, Nk)
     @assert eachindex(gk) == eachindex(ks)
-    evaluate_fourier!(g, gk, ks)
+    f = evaluate_fourier_func(g)
+    map!(f, gk, ks)
     gk
 end
 
