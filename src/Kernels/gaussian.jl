@@ -66,6 +66,10 @@ struct GaussianKernelData{
     cs :: NTuple{M, T}  # precomputed exponentials
     gk :: FourierCoefs  # values in uniform Fourier grid
 
+    function GaussianKernelData{M}(Δx::T, σ::T, τ::T, cs::NTuple{M, T}, gk) where {M, T <: AbstractFloat}
+        new{M, T, typeof(gk)}(Δx, σ, τ, cs, gk)
+    end
+
     function GaussianKernelData{M}(backend::KA.Backend, Δx::T, α::T) where {M, T <: AbstractFloat}
         σ = α * Δx
         τ = 2 * σ^2
@@ -74,8 +78,16 @@ struct GaussianKernelData{
             exp(-x^2 / τ)
         end
         gk = KA.allocate(backend, T, 0)
-        new{M, T, typeof(gk)}(Δx, σ, τ, cs, gk)
+        GaussianKernelData{M}(Δx, σ, τ, cs, gk)
     end
+end
+
+function Adapt.adapt_structure(to, g::GaussianKernelData{M}) where {M}
+    GaussianKernelData{M}(
+        g.Δx, g.σ, g.τ,
+        adapt(to, g.cs),
+        adapt(to, g.gk),
+    )
 end
 
 GaussianKernelData(::HalfSupport{M}, args...) where {M} = GaussianKernelData{M}(args...)

@@ -78,6 +78,10 @@ struct BackwardsKaiserBesselKernelData{
     cs :: ApproxCoefs  # coefficients of polynomial approximation
     gk :: FourierCoefs
 
+    function BackwardsKaiserBesselKernelData{M}(Δx::T, σ::T, w::T, β::T, cs, gk) where {M, T <: AbstractFloat}
+        new{M, T, typeof(cs), typeof(gk)}(Δx, σ, w, β, cs, gk)
+    end
+
     function BackwardsKaiserBesselKernelData{M}(backend::KA.Backend, Δx::T, β::T) where {M, T <: AbstractFloat}
         w = M * Δx
         σ = sqrt(backwards_kb_equivalent_variance(β)) * w
@@ -87,8 +91,16 @@ struct BackwardsKaiserBesselKernelData{
             s = sqrt(1 - x^2)
             sinh(β * s) / (s * oftype(x, π))
         end
-        new{M, T, typeof(cs), typeof(gk)}(Δx, σ, w, β, cs, gk)
+        BackwardsKaiserBesselKernelData{M}(Δx, σ, w, β, cs, gk)
     end
+end
+
+function Adapt.adapt_structure(to, g::BackwardsKaiserBesselKernelData{M}) where {M}
+    BackwardsKaiserBesselKernelData{M}(
+        g.Δx, g.σ, g.w, g.β,
+        adapt(to, g.cs),
+        adapt(to, g.gk),
+    )
 end
 
 BackwardsKaiserBesselKernelData(::HalfSupport{M}, args...) where {M} =

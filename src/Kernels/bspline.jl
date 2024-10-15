@@ -51,13 +51,25 @@ struct BSplineKernelData{
     σ  :: T
     Δt :: T          # knot separation
     gk :: FourierCoefs  # values in uniform Fourier grid
+
+    function BSplineKernelData{M}(σ::T, Δt::T, gk) where {M, T <: AbstractFloat}
+        new{M, T, typeof(gk)}(σ, Δt, gk)
+    end
+
     function BSplineKernelData{M}(backend::KA.Backend, Δx::Real) where {M}
         Δt = Δx
         σ = sqrt(M / 6) * Δt
         T = eltype(Δt)
         gk = KA.allocate(backend, T, 0)
-        new{M, T, typeof(gk)}(T(σ), Δt, gk)
+        BSplineKernelData{M}(σ, Δt, gk)
     end
+end
+
+function Adapt.adapt_structure(to, g::BSplineKernelData{M}) where {M}
+    BSplineKernelData{M}(
+        g.σ, g.Δt,
+        adapt(to, g.gk),
+    )
 end
 
 gridstep(g::BSplineKernelData) = g.Δt  # assume Δx = Δt
