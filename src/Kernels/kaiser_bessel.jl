@@ -107,6 +107,10 @@ struct KaiserBesselKernelData{
     cs :: ApproxCoefs  # coefficients of polynomial approximation
     gk :: FourierCoefs
 
+    function KaiserBesselKernelData{M}(Δx::T, σ::T, w::T, β::T, β²::T, cs, gk) where {M, T <: AbstractFloat}
+        new{M, T, typeof(cs), typeof(gk)}(Δx, σ, w, β, β², cs, gk)
+    end
+
     function KaiserBesselKernelData{M}(backend::KA.Backend, Δx::T, β::T) where {M, T <: AbstractFloat}
         w = M * Δx
         σ = sqrt(kb_equivalent_variance(β)) * w
@@ -116,8 +120,16 @@ struct KaiserBesselKernelData{
         cs = solve_piecewise_polynomial_coefficients(T, Val(M), Val(Npoly)) do x
             besseli0(β * sqrt(1 - x^2))
         end
-        new{M, T, typeof(cs), typeof(gk)}(Δx, σ, w, β, β², cs, gk)
+        KaiserBesselKernelData{M}(Δx, σ, w, β, β², cs, gk)
     end
+end
+
+function Adapt.adapt_structure(to, g::KaiserBesselKernelData{M}) where {M}
+    KaiserBesselKernelData{M}(
+        g.Δx, g.σ, g.w, g.β, g.β²,
+        adapt(to, g.cs),
+        adapt(to, g.gk),
+    )
 end
 
 KaiserBesselKernelData(::HalfSupport{M}, args...) where {M} =
