@@ -1,11 +1,10 @@
 # Spread from a single point
 @kernel function spread_from_point_naive_kernel!(
         us::NTuple{C},
+        @Const(gs::NTuple{D}),
         @Const(points::NTuple{D}),
         @Const(vp::NTuple{C}),
         @Const(pointperm),
-        evaluate::NTuple{D, <:Function},  # can't be marked Const for some reason
-        to_indices::NTuple{D, <:Function},
     ) where {C, D}
     i = @index(Global, Linear)
 
@@ -28,15 +27,15 @@
     Ns = spread_actual_dims(Z, Ns_real)  # divides the Ns_real[1] by 2 if Z <: Complex
 
     # Evaluate 1D kernels.
-    gs_eval = map((f, x) -> f(x), evaluate, x⃗)
+    gs_eval = map(Kernels.evaluate_kernel, gs, x⃗)
 
     # Determine indices to write in `u` arrays.
     indvals = ntuple(Val(D)) do n
         @inbounds begin
             gdata = gs_eval[n]
             vals = gdata.values
-            f = to_indices[n]
-            f(gdata.i, Ns[n]) => vals
+            inds = Kernels.kernel_indices(gdata.i, gs[n], Ns[n])
+            inds => vals
         end
     end
 
@@ -138,8 +137,6 @@ function spread_from_points!(
     Base.require_one_based_indexing(x⃗s)  # this is to make sure that all indices match
     foreach(Base.require_one_based_indexing, vp_all)
 
-    evaluate = map(Kernels.evaluate_kernel_func, gs)   # kernel evaluation functions
-    to_indices = map(Kernels.kernel_indices_func, gs)  # functions returning spreading indices
     xs_comp = StructArrays.components(x⃗s)
 
     # Reinterpret `us_all` as real arrays, in case they are complex.
@@ -177,7 +174,7 @@ function spread_from_points!(
     end
 
     kernel! = spread_from_point_naive_kernel!(backend, workgroupsize)
-    kernel!(us_real, xs_comp, vp_sorted, pointperm_, evaluate, to_indices; ndrange)
+    kernel!(us_real, gs, xs_comp, vp_sorted, pointperm_; ndrange)
 
     if sort_points === True()
         foreach(KA.unsafe_free!, vp_sorted)  # manually deallocate temporary arrays
