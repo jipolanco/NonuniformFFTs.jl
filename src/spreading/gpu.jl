@@ -62,7 +62,7 @@ end
             inds_start = map(first, indvals)  # start of active region in output array
             vals = map(last, indvals)    # evaluated kernel values in each direction
             inds = map(eachindex, vals)  # = (1:L, 1:L, ...) where L = 2M is the kernel width
-            $gprod_init = one($Tr)       # product of kernel values
+            $gprod_init = one($Tr)       # product of kernel values (initially 1)
             @nloops(
                 $D, i,
                 d -> inds[d],  # for i_d ∈ 1:L
