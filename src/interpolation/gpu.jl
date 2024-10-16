@@ -17,8 +17,6 @@ using StaticArrays: MVector
         @inbounds pointperm[i]
     end
 
-    x⃗ = map(xs -> @inbounds(xs[j]), points)
-
     # Determine grid dimensions.
     # Unlike in spreading, here `us` can be made of arrays of complex numbers, because we
     # don't perform atomic operations. This is why the code is simpler here.
@@ -26,13 +24,16 @@ using StaticArrays: MVector
 
     indvals = ntuple(Val(D)) do n
         @inline
-        g = gs[n]
-        gdata = Kernels.evaluate_kernel(g, x⃗[n])
-        vals = gdata.values    # kernel values
-        M = Kernels.half_support(gs[n])
-        i₀ = gdata.i - M  # active region is (i₀ + 1):(i₀ + 2M) (up to periodic wrapping)
-        i₀ = ifelse(i₀ < 0, i₀ + Ns[n], i₀)  # make sure i₀ ≥ 0
-        i₀ => vals
+        @inbounds begin
+            g = gs[n]
+            x = points[n][j]
+            gdata = Kernels.evaluate_kernel(g, x)
+            vals = gdata.values    # kernel values
+            M = Kernels.half_support(gs[n])
+            i₀ = gdata.i - M  # active region is (i₀ + 1):(i₀ + 2M) (up to periodic wrapping)
+            i₀ = ifelse(i₀ < 0, i₀ + Ns[n], i₀)  # make sure i₀ ≥ 0
+            i₀ => vals
+        end
     end
 
     v⃗ = interpolate_from_arrays_gpu(us, indvals, Ns, Δxs)
