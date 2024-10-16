@@ -24,22 +24,18 @@ using StaticArrays: MVector
     # don't perform atomic operations. This is why the code is simpler here.
     Ns = size(first(us))  # grid dimensions
 
-    # Evaluate 1D kernels.
-    gs_eval = map(Kernels.evaluate_kernel, gs, x⃗)
-
-    # Determine indices to load from `u` arrays.
     indvals = ntuple(Val(D)) do n
-        @inbounds begin
-            gdata = gs_eval[n]
-            vals = gdata.values .* Δxs[n]
-            M = Kernels.half_support(gs[n])
-            i₀ = gdata.i - M  # active region is (i₀ + 1):(i₀ + 2M) (up to periodic wrapping)
-            i₀ = ifelse(i₀ < 0, i₀ + Ns[n], i₀)  # make sure i₀ ≥ 0
-            i₀ => vals
-        end
+        @inline
+        g = gs[n]
+        gdata = Kernels.evaluate_kernel(g, x⃗[n])
+        vals = gdata.values    # kernel values
+        M = Kernels.half_support(gs[n])
+        i₀ = gdata.i - M  # active region is (i₀ + 1):(i₀ + 2M) (up to periodic wrapping)
+        i₀ = ifelse(i₀ < 0, i₀ + Ns[n], i₀)  # make sure i₀ ≥ 0
+        i₀ => vals
     end
 
-    v⃗ = interpolate_from_arrays_gpu(us, indvals, Ns)
+    v⃗ = interpolate_from_arrays_gpu(us, indvals, Ns, Δxs)
 
     for n ∈ eachindex(vp, v⃗)
         @inbounds vp[n][j] = v⃗[n]
@@ -98,16 +94,17 @@ end
         us::NTuple{C, AbstractArray{T, D}},
         indvals::NTuple{D, <:Pair},
         Ns::Dims{D},
-    ) where {T, C, D}
+        Δxs::NTuple{D, Tr},
+    ) where {T, Tr, C, D}
     if @generated
         gprod_init = Symbol(:gprod_, D + 1)  # the name of this variable is important!
-        Tr = real(T)
         quote
+            @assert Tr === real(T)
             inds_start = map(first, indvals)  # start of active region in input array
             vals = map(last, indvals)    # evaluated kernel values in each direction
             inds = map(eachindex, vals)  # = (1:L, 1:L, ...) where L = 2M is the kernel width
             vs = zero(MVector{$C, $T})   # interpolated value (output)
-            $gprod_init = one($Tr)       # product of kernel values (initially 1)
+            $gprod_init = prod(Δxs)  # product of kernel values (initially Δx[1] * Δx[2] * ...)
             @nloops(
                 $D, i,
                 d -> inds[d],  # for i_d ∈ 1:L
@@ -130,6 +127,7 @@ end
         # Fallback implementation in case the @generated version above doesn't work.
         # Note: the trick of splitting the first dimension from the other ones really helps with
         # performance on the GPU.
+        @assert Tr === real(T)
         vs = zero(MVector{C, T})
         inds_start = map(first, indvals)
         vals = map(last, indvals)
@@ -138,10 +136,11 @@ end
         vals_first, vals_tail = first(vals), Base.tail(vals)
         istart_first, istart_tail = first(inds_start), Base.tail(inds_start)
         N, Ns_tail = first(Ns), Base.tail(Ns)
+        gprod_base = prod(Δxs)  # this factor is needed in interpolation only
         @inbounds for I_tail ∈ CartesianIndices(inds_tail)
             is_tail = Tuple(I_tail)
             gs_tail = map(inbounds_getindex, vals_tail, is_tail)
-            gprod_tail = prod(gs_tail)
+            gprod_tail = gprod_base * prod(gs_tail)
             js_tail = map(istart_tail, is_tail, Ns_tail) do j₀, i, Nloc
                 # Determine input index in the current dimension.
                 @inline
