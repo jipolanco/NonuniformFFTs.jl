@@ -14,25 +14,21 @@
         @inbounds pointperm[i]
     end
 
-    x⃗ = map(xs -> @inbounds(xs[j]), points)
-    v⃗ = map(v -> @inbounds(v[j]), vp)
-
     # Determine grid dimensions.
     # Note that, to avoid problems with @atomic, we currently work with real-data arrays
     # even when the output is complex. So, if `Z <: Complex`, the first dimension has twice
     # the actual dataset dimensions.
-    Z = eltype(v⃗)
+    Z = eltype(vp[1])
     Ns_real = size(first(us))  # dimensions of raw input data
     @assert eltype(first(us)) <: Real # output is a real array (but may actually describe complex data)
     Ns = spread_actual_dims(Z, Ns_real)  # divides the Ns_real[1] by 2 if Z <: Complex
 
-    # Evaluate 1D kernels.
-    gs_eval = map(Kernels.evaluate_kernel, gs, x⃗)
-
-    # Determine indices to write in `u` arrays.
     indvals = ntuple(Val(D)) do n
+        @inline
         @inbounds begin
-            gdata = gs_eval[n]
+            g = gs[n]
+            x = points[n][j]
+            gdata = Kernels.evaluate_kernel(g, x)
             vals = gdata.values
             M = Kernels.half_support(gs[n])
             i₀ = gdata.i - M  # active region is (i₀ + 1):(i₀ + 2M) (up to periodic wrapping)
@@ -41,6 +37,7 @@
         end
     end
 
+    v⃗ = map(v -> @inbounds(v[j]), vp)
     spread_onto_arrays_gpu!(us, indvals, v⃗, Ns)
 
     nothing
