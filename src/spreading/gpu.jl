@@ -14,32 +14,31 @@
         @inbounds pointperm[i]
     end
 
-    x⃗ = map(xs -> @inbounds(xs[j]), points)
-    v⃗ = map(v -> @inbounds(v[j]), vp)
-
     # Determine grid dimensions.
     # Note that, to avoid problems with @atomic, we currently work with real-data arrays
     # even when the output is complex. So, if `Z <: Complex`, the first dimension has twice
     # the actual dataset dimensions.
-    Z = eltype(v⃗)
+    Z = eltype(vp[1])
     Ns_real = size(first(us))  # dimensions of raw input data
     @assert eltype(first(us)) <: Real # output is a real array (but may actually describe complex data)
     Ns = spread_actual_dims(Z, Ns_real)  # divides the Ns_real[1] by 2 if Z <: Complex
 
-    # Evaluate 1D kernels.
-    gs_eval = map(Kernels.evaluate_kernel, gs, x⃗)
-
-    # Determine indices to write in `u` arrays.
     indvals = ntuple(Val(D)) do n
+        @inline
         @inbounds begin
-            gdata = gs_eval[n]
+            g = gs[n]
+            x = points[n][j]
+            gdata = Kernels.evaluate_kernel(g, x)
             vals = gdata.values
-            inds = Kernels.kernel_indices(gdata.i, gs[n], Ns[n])
-            inds => vals
+            M = Kernels.half_support(gs[n])
+            i₀ = gdata.i - M  # active region is (i₀ + 1):(i₀ + 2M) (up to periodic wrapping)
+            i₀ = ifelse(i₀ < 0, i₀ + Ns[n], i₀)  # make sure i₀ ≥ 0
+            i₀ => vals
         end
     end
 
-    spread_onto_arrays_gpu!(us, indvals, v⃗)
+    v⃗ = map(v -> @inbounds(v[j]), vp)
+    spread_onto_arrays_gpu!(us, indvals, v⃗, Ns)
 
     nothing
 end
@@ -47,27 +46,27 @@ end
 @inline spread_actual_dims(::Type{<:Real}, Ns) = Ns
 @inline spread_actual_dims(::Type{<:Complex}, Ns) = Base.setindex(Ns, Ns[1] >> 1, 1)  # actual number of complex elements in first dimension
 
-# Currently the @generated function doesn't seem to speed-up things, but that might change
-# if we find a way of avoiding atomic writes (which seem to be the bottleneck here).
 @inline function spread_onto_arrays_gpu!(
         us::NTuple{C, AbstractArray{T, D}},
         indvals::NTuple{D, <:Pair},
         vs::NTuple{C},
+        Ns::Dims{D},
     ) where {T, C, D}
     if @generated
         gprod_init = Symbol(:gprod_, D + 1)  # the name of this variable is important!
         Tr = real(T)
         quote
-            inds_mapping = map(first, indvals)
-            vals = map(last, indvals)
-            inds = map(eachindex, inds_mapping)
-            $gprod_init = one($Tr)
+            inds_start = map(first, indvals)  # start of active region in output array
+            vals = map(last, indvals)    # evaluated kernel values in each direction
+            inds = map(eachindex, vals)  # = (1:L, 1:L, ...) where L = 2M is the kernel width
+            $gprod_init = one($Tr)       # product of kernel values (initially 1)
             @nloops(
                 $D, i,
-                d -> inds[d],  # for i_d ∈ inds[d]
+                d -> inds[d],  # for i_d ∈ 1:L
                 d -> begin
                     @inbounds gprod_d = gprod_{d + 1} * vals[d][i_d]  # add factor for dimension d
-                    @inbounds j_d = inds_mapping[d][i_d]
+                    @inbounds j_d = inds_start[d] + i_d
+                    @inbounds j_d = ifelse(j_d > Ns[d], j_d - Ns[d], j_d)  # periodic wrapping
                 end,
                 begin
                     # gprod_1 contains the product vals[1][i_1] * vals[2][i_2] * ...
@@ -81,24 +80,33 @@ end
             nothing
         end
     else
-        inds_mapping = map(first, indvals)
+        # Fallback implementation in case the @generated version above doesn't work.
+        # Actually seems to have the same performance as the @generated version.
+        inds_start = map(first, indvals)
         vals = map(last, indvals)
-        inds = map(eachindex, inds_mapping)
+        inds = map(eachindex, vals)
         inds_first, inds_tail = first(inds), Base.tail(inds)
         vals_first, vals_tail = first(vals), Base.tail(vals)
-        imap_first, imap_tail = first(inds_mapping), Base.tail(inds_mapping)
-        @inbounds for J_tail ∈ CartesianIndices(inds_tail)
-            js_tail = Tuple(J_tail)
-            is_tail = map(inbounds_getindex, imap_tail, js_tail)
-            gs_tail = map(inbounds_getindex, vals_tail, js_tail)
+        istart_first, istart_tail = first(inds_start), Base.tail(inds_start)
+        N, Ns_tail = first(Ns), Base.tail(Ns)
+        @inbounds for I_tail ∈ CartesianIndices(inds_tail)
+            is_tail = Tuple(I_tail)
+            gs_tail = map(inbounds_getindex, vals_tail, is_tail)
             gprod_tail = prod(gs_tail)
-            for j ∈ inds_first
-                i = imap_first[j]
-                is = (i, is_tail...)
-                gprod = gprod_tail * vals_first[j]
+            js_tail = map(istart_tail, is_tail, Ns_tail) do j₀, i, Nloc
+                # Determine output index in the current dimension.
+                @inline
+                j = j₀ + i
+                ifelse(j > Nloc, j - Nloc, j)  # periodic wrapping
+            end
+            for i ∈ inds_first
+                j = istart_first + i
+                j = ifelse(j > N, j - N, j)  # periodic wrapping
+                js = (j, js_tail...)
+                gprod = gprod_tail * vals_first[i]
                 for (u, v) ∈ zip(us, vs)
                     w = v * gprod
-                    _atomic_add!(u, w, is)
+                    _atomic_add!(u, w, js)
                 end
             end
         end
