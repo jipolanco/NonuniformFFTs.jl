@@ -5,6 +5,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [v0.5.6](https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.5.6) - 2024-10-17
+
+### Changed
+
+- Minor optimisations and refactoring to GPU kernels.
+  Spreading and interpolation operations are slightly faster than before.
+
 ## [v0.5.5](https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.5.5) - 2024-10-04
 
 ### Fixed
