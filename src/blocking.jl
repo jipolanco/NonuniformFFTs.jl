@@ -7,6 +7,7 @@ with_blocking(::NullBlockData) = false
 # For now these are only used in the GPU implementation
 get_pointperm(::NullBlockData) = nothing
 get_sort_points(::NullBlockData) = False()
+gpu_method(::NullBlockData) = :global_memory
 
 @kernel function copy_points_unblocked_kernel!(@Const(transform::F), points::NTuple, @Const(xp)) where {F}
     I = @index(Global, Linear)
@@ -61,43 +62,79 @@ type_length(::Type{<:NTuple{N}}) where {N} = N
 
 # ================================================================================ #
 
+# Determine block size if using the shared-memory implementation.
+# We try to make sure that the total block size (including 2M ghost cells in each direction)
+# is not larger than the available shared memory. In CUDA the limit is usually 48 KiB.
+# Note that the result is a compile-time constant (on Julia 1.11.1 at least).
+@inline function block_dims_gpu_shmem(::Type{Z}, ::Dims{D}, ::HalfSupport{M}) where {Z <: Number, D, M}
+    max_shmem_size = 48 << 10  # 48 KiB -- TODO: make this depend on the actual GPU?
+    max_block_length = max_shmem_size ÷ sizeof(Z)  # maximum number of elements in a block
+    m = floor(Int, max_block_length^(1/D))  # block size in each direction (including ghost cells / padding)
+    n = m - 2M  # exclude ghost cells
+    if n ≤ 0
+        throw(ArgumentError(
+            lazy"""
+            GPU shared memory size is too small for the chosen problem:
+              - element type: $Z
+              - half-support: $M
+              - number of dimensions: $D
+            If possible, reduce some of these parameters, or else switch to gpu_method = :global_memory."""
+        ))
+        # TODO: warning if n is too small? (likely slower than global_memory method)
+        # What is small? n < M?
+    end
+    ntuple(_ -> n, Val(D))  # = (n, n, ...)
+end
+
 # GPU implementation
 struct BlockDataGPU{
         N, I <: Integer, T <: AbstractFloat,
         IndexVector <: AbstractVector{I},
         SortPoints <: StaticBool,
     } <: AbstractBlockData
+    method :: Symbol  # method used for spreading and interpolation; options: (1) :global_memory (2) :shared_memory
     nblocks_per_dir  :: NTuple{N, I}  # number of blocks in each direction
+    block_dims       :: NTuple{N, I}  # maximum dimensions of a block (excluding ghost cells)
     block_sizes      :: NTuple{N, T}  # size of each block (in units of length)
     cumulative_npoints_per_block :: IndexVector    # cumulative sum of number of points in each block (length = num_blocks + 1, first value is 0)
     blockidx      :: IndexVector  # linear index of block associated to each point (length = Np)
     pointperm     :: IndexVector
     sort_points   :: SortPoints
     function BlockDataGPU(
+            method::Symbol,
             nblocks_per_dir::NTuple{N, I},
+            block_dims::NTuple{N, I},
             block_sizes::NTuple{N, T},
             npoints_per_block::V, sort::S,
         ) where {N, I, T, V, S}
+        method ∈ (:global_memory, :shared_memory) || throw(ArgumentError("expected gpu_method ∈ (:global_memory, :shared_memory)"))
         blockidx = similar(npoints_per_block, 0)
         pointperm = similar(npoints_per_block, 0)
         new{N, I, T, V, S}(
-            nblocks_per_dir, block_sizes, npoints_per_block, blockidx, pointperm, sort,
+            method, nblocks_per_dir, block_dims, block_sizes, npoints_per_block, blockidx, pointperm, sort,
         )
     end
 end
 
+gpu_method(bd::BlockDataGPU) = bd.method
 with_blocking(::BlockDataGPU) = true
 
 function BlockDataGPU(
         ::Type{Z},
-        backend::KA.Backend, block_dims::Dims{D}, Ñs::Dims{D}, sort_points,
-    ) where {Z <: Number, D}
+        backend::KA.Backend, block_dims::Dims{D}, Ñs::Dims{D}, h::HalfSupport{M},
+        sort_points::StaticBool;
+        method::Symbol,
+    ) where {Z <: Number, D, M}
     T = real(Z)  # in case Z is complex
+    if method === :shared_memory
+        # Override input block size. We try to maximise the use of shared memory.
+        block_dims = block_dims_gpu_shmem(Z, Ñs, h)
+    end
     nblocks_per_dir = map(cld, Ñs, block_dims)  # basically equal to ceil(Ñ / block_dim) --> effective block size is ≤ block_dims
     L = T(2) * π
     block_sizes = map(nblocks -> L / nblocks, nblocks_per_dir)
     cumulative_npoints_per_block = KA.allocate(backend, Int, prod(nblocks_per_dir) + 1)
-    BlockDataGPU(nblocks_per_dir, block_sizes, cumulative_npoints_per_block, sort_points)
+    BlockDataGPU(method, nblocks_per_dir, block_dims, block_sizes, cumulative_npoints_per_block, sort_points)
 end
 
 get_pointperm(bd::BlockDataGPU) = bd.pointperm

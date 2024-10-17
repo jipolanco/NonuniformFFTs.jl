@@ -45,14 +45,38 @@ using StaticArrays: MVector
     nothing
 end
 
+@kernel function interpolate_to_points_shmem_kernel!(
+        vp::NTuple{C},
+        @Const(gs::NTuple{D}),
+        @Const(points::NTuple{D}),
+        @Const(us::NTuple{C}),
+        @Const(pointperm),
+        @Const(Δxs::NTuple{D}),           # grid step in each direction (oversampled grid)
+        ::Val{block_dims},
+    ) where {C, D, block_dims}
+    is_kernel = @index(Global, NTuple)::NTuple{D}
+    threads = @groupsize()::NTuple{D}
+    is = is_kernel ./ threads  # this is the actual block index
+
+    # TODO: support C > 1 (do one component at a time, to use less memory?)
+    T = eltype(us[1])
+    M = Kernels.half_support(gs[1])  # assume they're all equal
+    block_dims_padded = block_dims .+ 2M
+    u_local = @localmem(T, block_dims_padded)
+
+    # Copy data to local memory
+
+    nothing
+end
+
 function interpolate!(
         backend::GPU,
         bd::Union{BlockDataGPU, NullBlockData},
-        gs,
+        gs::NTuple{D},
         vp_all::NTuple{C, AbstractVector},
         us::NTuple{C, AbstractArray},
         x⃗s::AbstractVector,
-    ) where {C}
+    ) where {C, D}
     # Note: the dimensions of arrays have already been checked via check_nufft_nonuniform_data.
     Base.require_one_based_indexing(x⃗s)  # this is to make sure that all indices match
     foreach(Base.require_one_based_indexing, vp_all)
@@ -75,17 +99,39 @@ function interpolate!(
         pointperm_ = pointperm
     end
 
-    # We use dynamically sized kernels to avoid recompilation, since number of points may
-    # change from one call to another.
-    ndrange = size(x⃗s)  # iterate through points
-    workgroupsize = default_workgroupsize(backend, ndrange)
-    kernel! = interpolate_to_point_naive_kernel!(backend, workgroupsize)
-    kernel!(vp_sorted, gs, xs_comp, us, pointperm_, Δxs; ndrange)
+    method = gpu_method(bd)
+
+    if method === :global_memory
+        # We use dynamically sized kernels to avoid recompilation, since number of points may
+        # change from one call to another.
+        let ndrange = size(x⃗s)  # iterate through points
+            groupsize = default_workgroupsize(backend, ndrange)
+            kernel! = interpolate_to_point_naive_kernel!(backend, groupsize)
+            kernel!(vp_sorted, gs, xs_comp, us, pointperm_, Δxs; ndrange)
+        end
+    elseif method === :shared_memory
+        @assert bd isa BlockDataGPU
+        Z = eltype(us[1])
+        M = Kernels.half_support(gs[1])
+        @assert all(g -> Kernels.half_support(g) === M, gs)  # check that they're all equal
+        block_dims_val = block_dims_gpu_shmem(Z, size(us[1]), HalfSupport(M))  # this is usually a compile-time constant...
+        block_dims = Val(block_dims_val)  # ...which means this doesn't require a dynamic dispatch
+        @assert block_dims_val === bd.block_dims
+        let ngroups = bd.nblocks_per_dir  # this is the required number of workgroups (number of blocks in CUDA)
+            groupsize = 64  # TODO: this should roughly be the number of non-uniform points per block (or less)
+            groupsize_dims = ntuple(d -> d == 1 ? groupsize : 1, D)  # "augment" first dimension
+            ndrange = groupsize_dims .* ngroups
+            kernel! = interpolate_to_points_shmem_kernel!(backend, groupsize_dims, ndrange)
+            kernel!(vp_sorted, gs, xs_comp, us, pointperm_, Δxs, block_dims)
+        end
+    end
 
     if sort_points === True()
-        kernel_perm! = interp_permute_kernel!(backend, workgroupsize)
-        kernel_perm!(vp_all, vp_sorted, pointperm; ndrange)
-        foreach(KA.unsafe_free!, vp_sorted)  # manually deallocate temporary arrays
+        let groupsize = default_workgroupsize(backend, ndrange)
+            kernel_perm! = interp_permute_kernel!(backend, groupsize)
+            kernel_perm!(vp_all, vp_sorted, pointperm; ndrange)
+            foreach(KA.unsafe_free!, vp_sorted)  # manually deallocate temporary arrays
+        end
     end
 
     vp_all
