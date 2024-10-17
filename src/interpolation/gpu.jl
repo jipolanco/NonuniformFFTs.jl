@@ -1,5 +1,23 @@
 using StaticArrays: MVector
 
+# TODO: use this also in spreading, and move to separate file
+@inline function get_inds_vals_gpu(gs::NTuple{D}, points::NTuple{D}, Ns::NTuple{D}, j::Integer) where {D}
+    ntuple(Val(D)) do n
+        @inline
+        get_inds_vals_gpu(gs[n], points[n], Ns[n], j)
+    end
+end
+
+@inline function get_inds_vals_gpu(g::AbstractKernelData, points::AbstractVector, N::Integer, j::Integer)
+    x = @inbounds points[j]
+    gdata = Kernels.evaluate_kernel(g, x)
+    vals = gdata.values    # kernel values
+    M = Kernels.half_support(g)
+    i₀ = gdata.i - M  # active region is (i₀ + 1):(i₀ + 2M) (up to periodic wrapping)
+    i₀ = ifelse(i₀ < 0, i₀ + N, i₀)  # make sure i₀ ≥ 0
+    i₀ => vals
+end
+
 # Interpolate onto a single point
 @kernel function interpolate_to_point_naive_kernel!(
         vp::NTuple{C},
@@ -22,19 +40,7 @@ using StaticArrays: MVector
     # don't perform atomic operations. This is why the code is simpler here.
     Ns = size(first(us))  # grid dimensions
 
-    indvals = ntuple(Val(D)) do n
-        @inline
-        @inbounds begin
-            g = gs[n]
-            x = points[n][j]
-            gdata = Kernels.evaluate_kernel(g, x)
-            vals = gdata.values    # kernel values
-            M = Kernels.half_support(gs[n])
-            i₀ = gdata.i - M  # active region is (i₀ + 1):(i₀ + 2M) (up to periodic wrapping)
-            i₀ = ifelse(i₀ < 0, i₀ + Ns[n], i₀)  # make sure i₀ ≥ 0
-            i₀ => vals
-        end
-    end
+    indvals = get_inds_vals_gpu(gs, points, Ns, j)
 
     v⃗ = interpolate_from_arrays_gpu(us, indvals, Ns, Δxs)
 
@@ -55,17 +61,54 @@ end
         ::Val{block_dims},
     ) where {C, D, block_dims}
     is_kernel = @index(Global, NTuple)::NTuple{D}
-    threads = @groupsize()::NTuple{D}
-    is = is_kernel ./ threads  # this is the actual block index
+    groupsize = @groupsize()::NTuple{D}  # generally equal to (nthreads, 1, 1, ...)
+    threadidx = @index(Local, Linear)
+    block_index = is_kernel ./ groupsize
+    nthreads = prod(groupsize)
 
     # TODO: support C > 1 (do one component at a time, to use less memory?)
     T = eltype(us[1])
     M = Kernels.half_support(gs[1])  # assume they're all equal
     block_dims_padded = block_dims .+ 2M
-    u_local = @localmem(T, block_dims_padded)
+    u_local = @localmem(T, block_dims_padded)  # allocate shared memory
 
-    # Copy data to local memory
+    # Copy grid data from global to shared memory
+    gridvalues_to_local_memory!(u_local, us[1], Val(M), block_index, block_dims, threadidx, nthreads)
 
+    @synchronize  # make sure all threads have the same shared data
+
+    nothing
+end
+
+@inline function gridvalues_to_local_memory!(
+        u_local::AbstractArray{T, D},
+        u_global::AbstractArray{T, D},
+        ::Val{M},
+        block_index::NTuple{D}, block_dims::NTuple{D},
+        threadidx::Integer,
+        nthreads::Integer,
+    ) where {T, D, M}
+    Ns = size(u_global)
+    # inds = ntuple(Val(D)) do n
+    #     @inline
+    #     a = (block_index[n] - 1) * block_dims[n] + 1  # start of current block in global grid (excluding ghost cells)
+    #     b = block_index[n] * block_dims[n]            # end of current block
+    #     (a - M):(b + M)  # range including ghost cells
+    # end
+    # TODO: split work across threads
+    # Assume D = 3 for now
+    if threadidx == 1
+        # for is in iter
+        for i_3 in axes(u_local, 3), i_2 in axes(u_local, 2), i_1 in axes(u_local, 1)
+            # For some reason, type assertions are needed for things to work on AMDGPU
+            j_1 = mod1(block_index[1] - 1 * block_dims[1] + i_1 - M, Ns[1])::Int
+            j_2 = mod1(block_index[2] - 1 * block_dims[2] + i_2 - M, Ns[2])::Int
+            j_3 = mod1(block_index[3] - 1 * block_dims[3] + i_3 - M, Ns[3])::Int
+            is = (i_1, i_2, i_3)::Dims{D}
+            js = (j_1, j_2, j_3)::Dims{D}
+            u_local[is...] = u_global[js...]
+        end
+    end
     nothing
 end
 
