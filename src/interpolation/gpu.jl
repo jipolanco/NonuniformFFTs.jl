@@ -68,7 +68,6 @@ end
     block_index = @index(Group, NTuple)  # workgroup index (= block index)
     block_n = @index(Group, Linear)      # linear index of block
 
-    # TODO: support C > 1 (do one component at a time, to use less memory?)
     T = eltype(us[1])
     M = Kernels.half_support(gs[1])  # assume they're all equal
     block_dims_padded = @. block_dims + 2M - 1
@@ -77,7 +76,7 @@ end
     # This block will take care of non-uniform points (a + 1):b
     @inbounds a = cumulative_npoints_per_block[block_n]
     @inbounds b = cumulative_npoints_per_block[block_n + 1]
-    ΔV = prod(Δxs)
+    prefactor = prod(Δxs)  # interpolations need to be multiplied by the volume of a grid cell
 
     # Shift from indices in global array to indices in local array
     idx_shift = @. (block_index - 1) * block_dims + 1
@@ -97,6 +96,7 @@ end
                 @inbounds pointperm[i]
             end
 
+            # TODO: can we do this just once for all components? (if C > 1)
             indvals = ntuple(Val(D)) do n
                 @inline
                 x = @inbounds points[n][j]
@@ -109,28 +109,7 @@ end
                 i₀ => vals
             end
 
-            inds_start = map(first, indvals)
-            vals = map(last, indvals)    # evaluated kernel values in each direction
-            inds = map(eachindex, vals)  # = (1:L, 1:L, ...) where L = 2M is the kernel width
-
-            gprod_4 = ΔV
-            v = zero(T)
-
-            @inbounds for i_3 in inds[3]
-                gprod_3 = gprod_4 * vals[3][i_3]
-                j_3 = inds_start[3] + i_3
-                for i_2 in inds[2]
-                    gprod_2 = gprod_3 * vals[2][i_2]
-                    j_2 = inds_start[2] + i_2
-                    for i_1 in inds[1]
-                        gprod_1 = gprod_2 * vals[1][i_1]
-                        j_1 = inds_start[1] + i_1
-                        js = (j_1, j_2, j_3)
-                        v += gprod_1 * u_local[js...]
-                    end
-                end
-            end
-
+            v = interpolate_from_arrays_shmem(u_local, indvals, prefactor)
             @inbounds vp[c][j] = v
         end
     end
@@ -138,9 +117,8 @@ end
     nothing
 end
 
-# TODO
-# - generalise to all D
-# - how to optimise the memory access patterns?
+# Copy values from global to shared memory.
+# - can we optimise memory access patterns?
 @inline function gridvalues_to_local_memory!(
         u_local::AbstractArray{T, D},
         u_global::AbstractArray{T, D},
@@ -149,32 +127,95 @@ end
         threadidxs::Dims{D},
         groupsize::Dims{D},
     ) where {T, D, M}
-    Ns = size(u_global)
-    @assert D == 3
-    inds_1 = axes(u_local, 1)[threadidxs[1]:groupsize[1]:end]
-    inds_2 = axes(u_local, 2)[threadidxs[2]:groupsize[2]:end]
-    inds_3 = axes(u_local, 3)[threadidxs[3]:groupsize[3]:end]
-    offsets = ntuple(Val(D)) do n
-        @inline
-        off = (block_index[n] - 1) * block_dims[n] - (M - 1)
-        ifelse(off < 0, off + Ns[n], off)  # make sure the offset is non-negative (to avoid some wrapping below)
-    end
-    @inbounds for i_3 in inds_3
-        j_3 = offsets[3] + i_3
-        j_3 = ifelse(j_3 > Ns[3], j_3 - Ns[3], j_3)
-        for i_2 in inds_2
-            j_2 = offsets[2] + i_2
-            j_2 = ifelse(j_2 > Ns[2], j_2 - Ns[2], j_2)
-            for i_1 in inds_1
-                j_1 = offsets[1] + i_1
-                j_1 = ifelse(j_1 > Ns[1], j_1 - Ns[1], j_1)
-                is = (i_1, i_2, i_3)
-                js = (j_1, j_2, j_3)
-                u_local[is...] = u_global[js...]  # TODO: use linear index instead of is?
-            end
+    if @generated
+        quote
+            Ns = size(u_global)
+            inds = @ntuple($D, n -> axes(u_local, n)[threadidxs[n]:groupsize[n]:end])
+            offsets = @ntuple(
+                $D,
+                n -> let
+                    off = (block_index[n] - 1) * block_dims[n] - ($M - 1)
+                    ifelse(off < 0, off + Ns[n], off)  # make sure the offset is non-negative (to avoid some wrapping below)
+                end
+            )
+            @nloops(
+                $D, i,
+                d -> inds[d],
+                d -> begin
+                    j_d = offsets[d] + i_d
+                    j_d = ifelse(j_d > Ns[d], j_d - Ns[d], j_d)
+                end,
+                begin
+                    is = @ntuple($D, i)
+                    js = @ntuple($D, j)
+                    @inbounds u_local[is...] = u_global[js...]
+                end,
+            )
+            nothing
         end
+    else
+        Ns = size(u_global)
+        inds = ntuple(Val(D)) do n
+            axes(u_local, n)[threadidxs[n]:groupsize[n]:end]  # this determines the parallelisation pattern
+        end
+        offsets = ntuple(Val(D)) do n
+            @inline
+            off = (block_index[n] - 1) * block_dims[n] - (M - 1)
+            ifelse(off < 0, off + Ns[n], off)  # make sure the offset is non-negative (to avoid some wrapping below)
+        end
+        @inbounds for is ∈ Iterators.product(inds...)
+            js = ntuple(Val(D)) do n
+                @inline
+                j = offsets[n] + is[n]
+                ifelse(j > Ns[n], j - Ns[n], j)
+            end
+            u_local[is...] = u_global[js...]
+        end
+        nothing
     end
-    nothing
+end
+
+# Interpolate a single "component" (one transform at a time).
+# Here vp is a vector instead of a tuple of vectors.
+@inline function interpolate_from_arrays_shmem(
+        u_local::AbstractArray{T, D},
+        indvals::NTuple{D},
+        prefactor,
+    ) where {T, D}
+    if @generated
+        gprod_init = Symbol(:gprod_, D + 1)  # the name of this variable is important!
+        quote
+            $gprod_init = prefactor
+            v = zero(T)
+            inds_start = map(first, indvals)
+            vals = map(last, indvals)    # evaluated kernel values in each direction
+            inds = map(eachindex, vals)  # = (1:L, 1:L, ...) where L = 2M is the kernel width
+            @nloops(
+                $D, i,
+                d -> inds[d],
+                d -> begin
+                    @inbounds gprod_d = gprod_{d + 1} * vals[d][i_d]
+                    @inbounds j_d = inds_start[d] + i_d
+                end,
+                begin
+                    js = @ntuple($D, j)
+                    @inbounds v += gprod_1 * u_local[js...]
+                end,
+            )
+            v
+        end
+    else
+        v = zero(T)
+        inds_start = map(first, indvals)
+        vals = map(last, indvals)    # evaluated kernel values in each direction
+        inds = map(eachindex, vals)  # = (1:L, 1:L, ...) where L = 2M is the kernel width
+        @inbounds for I ∈ CartesianIndices(inds)
+            gprod = prefactor * prod(ntuple(d -> @inbounds(vals[d][I[d]]), Val(D)))
+            js = inds_start .+ Tuple(I)
+            v += gprod * u_local[js...]
+        end
+        v
+    end
 end
 
 function interpolate!(
