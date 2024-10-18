@@ -53,33 +53,28 @@ end
 end
 
 @kernel function interpolate_to_points_shmem_kernel!(
-        vp::NTuple{C},
-        @Const(gs::NTuple{D}),
+        vp::NTuple{C, AbstractVector{Z}},
+        @Const(gs::NTuple{D, AbstractKernelData{<:Any, M}}),
         @Const(points::NTuple{D}),
-        @Const(us::NTuple{C}),
+        @Const(us::NTuple{C, AbstractArray{Z}}),
         @Const(pointperm),
         @Const(cumulative_npoints_per_block::AbstractVector),
         @Const(prefactor::Real),    # = volume of a grid cell = prod(Δxs)
         ::Val{block_dims},
-    ) where {C, D, block_dims}
-    groupsize = @groupsize()::Dims{D}
-    nthreads = prod(groupsize)
+        ::Val{shmem_size},  # this is a bit redundant, but seems to be required for CPU backends (used in tests)
+    ) where {C, D, Z <: Number, M, block_dims, shmem_size}
+
+    @uniform begin
+        groupsize = @groupsize()::Dims{D}
+        nthreads = prod(groupsize)
+    end
+
     threadidxs = @index(Local, NTuple)   # in (1:nthreads_x, 1:nthreads_y, ...)
     threadidx = @index(Local, Linear)    # in 1:nthreads
     block_index = @index(Group, NTuple)  # workgroup index (= block index)
     block_n = @index(Group, Linear)      # linear index of block
 
-    T = eltype(us[1])
-    M = Kernels.half_support(gs[1])  # assume they're all equal
-    block_dims_padded = @. block_dims + 2M - 1
-    u_local = @localmem(T, block_dims_padded)  # allocate shared memory
-
-    # This block will take care of non-uniform points (a + 1):b
-    @inbounds a = cumulative_npoints_per_block[block_n]
-    @inbounds b = cumulative_npoints_per_block[block_n + 1]
-
-    # Shift from indices in global array to indices in local array
-    idx_shift = @. (block_index - 1) * block_dims + 1
+    u_local = @localmem(Z, shmem_size)  # allocate shared memory
 
     # Interpolate components one by one (to avoid using too much memory)
     for c ∈ 1:C
@@ -87,6 +82,10 @@ end
         gridvalues_to_local_memory!(u_local, us[c], Val(M), block_index, block_dims, threadidxs, groupsize)
 
         @synchronize  # make sure all threads have the same shared data
+
+        # This block will take care of non-uniform points (a + 1):b
+        @inbounds a = cumulative_npoints_per_block[block_n]
+        @inbounds b = cumulative_npoints_per_block[block_n + 1]
 
         for i in (a + threadidx):nthreads:b
             # Interpolate at point j
@@ -102,8 +101,8 @@ end
                 x = @inbounds points[n][j]
                 gdata = Kernels.evaluate_kernel(gs[n], x)
                 local vals = gdata.values    # kernel values
-                local M = Kernels.half_support(gs[n])
-                local i₀ = gdata.i - idx_shift[n]
+                local ishift = (block_index[n] - 1) * block_dims[n] + 1
+                local i₀ = gdata.i - ishift
                 # @assert i₀ ≥ 0
                 # @assert i₀ + 2M ≤ block_dims_padded[n]
                 i₀ => vals
@@ -268,11 +267,15 @@ function interpolate!(
         @assert block_dims_val === bd.block_dims
         let ngroups = bd.nblocks_per_dir  # this is the required number of workgroups (number of blocks in CUDA)
             block_dims_padded = @. block_dims_val + 2M - 1  # dimensions of shared memory array
+            shmem_size = block_dims_padded
             groupsize = groupsize_shmem(ngroups, block_dims_padded, length(x⃗s))
-            # @show ngroups block_dims block_dims_padded
             ndrange = groupsize .* ngroups
             kernel! = interpolate_to_points_shmem_kernel!(backend, groupsize, ndrange)
-            kernel!(vp_sorted, gs, xs_comp, us, pointperm_, bd.cumulative_npoints_per_block, prefactor, block_dims)
+            kernel!(
+                vp_sorted, gs, xs_comp, us, pointperm_, bd.cumulative_npoints_per_block,
+                prefactor, block_dims,
+                Val(shmem_size),
+            )
         end
     end
 

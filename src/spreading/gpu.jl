@@ -191,10 +191,15 @@ function spread_from_points!(
         @assert block_dims_val === bd.block_dims
         let ngroups = bd.nblocks_per_dir  # this is the required number of workgroups (number of blocks in CUDA)
             block_dims_padded = @. block_dims_val + 2M - 1  # dimensions of shared memory array
+            shmem_size = spread_real_dims(Z, block_dims_padded)
             groupsize = groupsize_shmem(ngroups, block_dims_padded, length(x⃗s))
             ndrange = groupsize .* ngroups
             kernel! = spread_from_points_shmem_kernel!(backend, groupsize, ndrange)
-            kernel!(us_real, gs, xs_comp, vp_sorted, pointperm_, bd.cumulative_npoints_per_block, block_dims)
+            kernel!(
+                us_real, gs, xs_comp, vp_sorted, pointperm_,
+                bd.cumulative_npoints_per_block, block_dims,
+                Val(shmem_size),
+            )
         end
     end
 
@@ -218,42 +223,35 @@ end
 ## Shared-memory implementation
 
 @kernel function spread_from_points_shmem_kernel!(
-        us::NTuple{C},
-        @Const(gs::NTuple{D}),
+        us::NTuple{C, AbstractArray{T}},
+        @Const(gs::NTuple{D, AbstractKernelData{<:Any, M}}),
         @Const(points::NTuple{D}),
-        @Const(vp::NTuple{C}),
+        @Const(vp::NTuple{C, AbstractVector{Z}}),
         @Const(pointperm),
         @Const(cumulative_npoints_per_block::AbstractVector),
         ::Val{block_dims},
-    ) where {C, D, block_dims}
-    groupsize = @groupsize()::Dims{D}
-    nthreads = prod(groupsize)
+        ::Val{shmem_size},  # this is a bit redundant, but seems to be required for CPU backends (used in tests)
+    ) where {C, D, T <: AbstractFloat, Z <: Number, M, block_dims, shmem_size}
+
+    @uniform begin
+        groupsize = @groupsize()::Dims{D}
+        nthreads = prod(groupsize)
+
+        # Determine grid dimensions.
+        # Note that, to avoid problems with @atomic, we currently work with real-data arrays
+        # even when the output is complex. So, if `Z <: Complex`, the first dimension has twice
+        # the actual dataset dimensions.
+        @assert T === real(Z) # output is a real array (but may actually describe complex data)
+        Ns_real = size(first(us))  # dimensions of raw input data
+        Ns = spread_actual_dims(Z, Ns_real)  # divides the Ns_real[1] by 2 if Z <: Complex
+    end
+
+    block_n = @index(Group, Linear)      # linear index of block
+    block_index = @index(Group, NTuple)  # workgroup index (= block index)
     threadidxs = @index(Local, NTuple)   # in (1:nthreads_x, 1:nthreads_y, ...)
     threadidx = @index(Local, Linear)    # in 1:nthreads
-    block_index = @index(Group, NTuple)  # workgroup index (= block index)
-    block_n = @index(Group, Linear)      # linear index of block
 
-    # Determine grid dimensions.
-    # Note that, to avoid problems with @atomic, we currently work with real-data arrays
-    # even when the output is complex. So, if `Z <: Complex`, the first dimension has twice
-    # the actual dataset dimensions.
-    Z = eltype(vp[1])
-    T = eltype(us[1])  # may be Z or real(Z)
-    @assert T === real(Z) # output is a real array (but may actually describe complex data)
-    Ns_real = size(first(us))  # dimensions of raw input data
-    Ns = spread_actual_dims(Z, Ns_real)  # divides the Ns_real[1] by 2 if Z <: Complex
-
-    M = Kernels.half_support(gs[1])  # assume they're all equal
-    block_dims_padded = @. block_dims + 2M - 1
-    Ns_local = spread_real_dims(Z, block_dims_padded)  # multiplies first dimension by 2 if Z <: Complex (note that T <: Real)
-    u_local = @localmem(T, Ns_local)  # allocate shared memory
-
-    # This block will take care of non-uniform points (a + 1):b
-    @inbounds a = cumulative_npoints_per_block[block_n]
-    @inbounds b = cumulative_npoints_per_block[block_n + 1]
-
-    # Shift from indices in global array to indices in local array
-    idx_shift = @. (block_index - 1) * block_dims + 1
+    u_local = @localmem(T, shmem_size)  # allocate shared memory
 
     # Interpolate components one by one (to avoid using too much memory)
     for c ∈ 1:C
@@ -263,6 +261,10 @@ end
         end
 
         @synchronize  # make sure shared memory is fully set to zero
+
+        # This block will take care of non-uniform points (a + 1):b
+        @inbounds a = cumulative_npoints_per_block[block_n]
+        @inbounds b = cumulative_npoints_per_block[block_n + 1]
 
         for i in (a + threadidx):nthreads:b
             # Spread from point j
@@ -278,8 +280,8 @@ end
                 x = @inbounds points[n][j]
                 gdata = Kernels.evaluate_kernel(gs[n], x)
                 local vals = gdata.values    # kernel values
-                local M = Kernels.half_support(gs[n])
-                local i₀ = gdata.i - idx_shift[n]
+                local ishift = (block_index[n] - 1) * block_dims[n] + 1
+                local i₀ = gdata.i - ishift
                 # @assert i₀ ≥ 0
                 # @assert i₀ + 2M ≤ block_dims_padded[n]
                 i₀ => vals
@@ -291,7 +293,10 @@ end
 
         @synchronize  # make sure we have finished writing to shared memory
 
-        add_from_local_to_global_memory!(Z, us[c], u_local, Ns, Val(M), block_index, block_dims, threadidxs, groupsize)
+        add_from_local_to_global_memory!(
+            Z, us[c], u_local, Ns, Val(M), block_index,
+            block_dims, threadidxs, groupsize,
+        )
 
         if c < C
             @synchronize  # wait before jumping to next component
