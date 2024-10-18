@@ -79,7 +79,6 @@ end
     # This block will take care of non-uniform points (a + 1):b
     @inbounds a = cumulative_npoints_per_block[block_n]
     @inbounds b = cumulative_npoints_per_block[block_n + 1]
-    Ns = size(us[1])  # grid dimensions
     ΔV = prod(Δxs)
 
     # Shift from indices in global array to indices in local array
@@ -137,7 +136,8 @@ end
 
 # TODO
 # - generalise to all D
-# - optimise
+# - parallelise over multiple directions?
+# - choose an optimal memory access pattern
 @inline function gridvalues_to_local_memory!(
         u_local::AbstractArray{T, D},
         u_global::AbstractArray{T, D},
@@ -148,15 +148,21 @@ end
     ) where {T, D, M}
     Ns = size(u_global)
     @assert D == 3
+    inds_1 = axes(u_local, 1)
+    inds_2 = axes(u_local, 2)
     inds_3 = axes(u_local, 3)[threadidx:nthreads:end]  # parallelise over outermost dimension (some threads might not work here)
-    @inbounds for i_3 in inds_3, i_2 in axes(u_local, 2), i_1 in axes(u_local, 1)
-        # For some reason, type assertions are needed for things to work on AMDGPU
-        j_1 = mod1((block_index[1] - 1) * block_dims[1] - (M - 1) + i_1, Ns[1])
-        j_2 = mod1((block_index[2] - 1) * block_dims[2] - (M - 1) + i_2, Ns[2])
-        j_3 = mod1((block_index[3] - 1) * block_dims[3] - (M - 1) + i_3, Ns[3])
-        is = (i_1, i_2, i_3)
-        js = (j_1, j_2, j_3)
-        u_local[is...] = u_global[js...]  # TODO: use linear index instead of is?
+    offsets = @. (block_index - 1) * block_dims - (M - 1)
+    @inbounds for i_3 in inds_3
+        j_3 = mod1(offsets[3] + i_3, Ns[3])
+        for i_2 in inds_2
+            j_2 = mod1(offsets[2] + i_2, Ns[2])
+            for i_1 in inds_1
+                j_1 = mod1(offsets[1] + i_1, Ns[1])
+                is = (i_1, i_2, i_3)
+                js = (j_1, j_2, j_3)
+                u_local[is...] = u_global[js...]  # TODO: use linear index instead of is?
+            end
+        end
     end
     nothing
 end
@@ -210,7 +216,7 @@ function interpolate!(
         block_dims = Val(block_dims_val)  # ...which means this doesn't require a dynamic dispatch
         @assert block_dims_val === bd.block_dims
         let ngroups = bd.nblocks_per_dir  # this is the required number of workgroups (number of blocks in CUDA)
-            groupsize = 64  # TODO: this should roughly be the number of non-uniform points per block (or less)
+            groupsize = 64  # TODO: how to choose this? roughly equal to the number of non-uniform points per block (or less)?
             groupsize_dims = ntuple(d -> d == 1 ? groupsize : 1, D)  # "augment" first dimension
             ndrange = groupsize_dims .* ngroups
             kernel! = interpolate_to_points_shmem_kernel!(backend, groupsize_dims, ndrange)
