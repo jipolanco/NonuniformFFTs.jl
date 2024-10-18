@@ -140,8 +140,7 @@ end
 
 # TODO
 # - generalise to all D
-# - parallelise over multiple directions?
-# - is it possible to optimise the memory access patterns?
+# - how to optimise the memory access patterns?
 @inline function gridvalues_to_local_memory!(
         u_local::AbstractArray{T, D},
         u_global::AbstractArray{T, D},
@@ -155,18 +154,19 @@ end
     inds_1 = axes(u_local, 1)[threadidxs[1]:groupsize[1]:end]
     inds_2 = axes(u_local, 2)[threadidxs[2]:groupsize[2]:end]
     inds_3 = axes(u_local, 3)[threadidxs[3]:groupsize[3]:end]
-    offsets = @. (block_index - 1) * block_dims - (M - 1)
+    offsets = ntuple(Val(D)) do n
+        @inline
+        off = (block_index[n] - 1) * block_dims[n] - (M - 1)
+        ifelse(off < 0, off + Ns[n], off)  # make sure the offset is non-negative (to avoid some wrapping below)
+    end
     @inbounds for i_3 in inds_3
         j_3 = offsets[3] + i_3
-        j_3 = ifelse(j_3 ≤ 0, j_3 + Ns[3], j_3)
         j_3 = ifelse(j_3 > Ns[3], j_3 - Ns[3], j_3)
         for i_2 in inds_2
             j_2 = offsets[2] + i_2
-            j_2 = ifelse(j_2 ≤ 0, j_2 + Ns[2], j_2)
             j_2 = ifelse(j_2 > Ns[2], j_2 - Ns[2], j_2)
             for i_1 in inds_1
                 j_1 = offsets[1] + i_1
-                j_1 = ifelse(j_1 ≤ 0, j_1 + Ns[1], j_1)
                 j_1 = ifelse(j_1 > Ns[1], j_1 - Ns[1], j_1)
                 is = (i_1, i_2, i_3)
                 js = (j_1, j_2, j_3)
@@ -226,7 +226,9 @@ function interpolate!(
         block_dims = Val(block_dims_val)  # ...which means this doesn't require a dynamic dispatch
         @assert block_dims_val === bd.block_dims
         let ngroups = bd.nblocks_per_dir  # this is the required number of workgroups (number of blocks in CUDA)
-            groupsize = groupsize_shmem(ngroups, length(x⃗s))
+            block_dims_padded = @. block_dims_val + 2M - 1  # dimensions of shared memory array
+            groupsize = groupsize_shmem(ngroups, block_dims_padded, length(x⃗s))
+            # @show ngroups block_dims block_dims_padded
             ndrange = groupsize .* ngroups
             kernel! = interpolate_to_points_shmem_kernel!(backend, groupsize, ndrange)
             kernel!(vp_sorted, gs, xs_comp, us, pointperm_, bd.cumulative_npoints_per_block, Δxs, block_dims)
@@ -246,22 +248,33 @@ end
 
 # Determine groupsize (number of threads per direction) in :shared_memory method.
 # Here Np is the number of non-uniform points.
-function groupsize_shmem(ngroups::NTuple{D}, Np) where {D}
-    points_per_group = Np / prod(ngroups)  # average number of points per block
+# The distribution of threads across directions mainly (only?) affects the copies between
+# shared and global memories, so it can have an important influence of performance due to
+# memory accesses.
+function groupsize_shmem(ngroups::NTuple{D}, shmem_size::NTuple{D}, Np) where {D}
+    # (1) Determine the total number of threads.
     groupsize = 64  # minimum group size should be equal to the warp size (usually 32 on CUDA and 64 on AMDGPU)
     # Increase groupsize if number of points is much larger (at least 4×) than the groupsize.
-    # (Not sure this is a good idea if the point distribution is very inhomogeneous...)
-    # TODO: maybe leave it at 64?
-    while groupsize < 1024 && 4 * groupsize ≤ points_per_group
-        groupsize *= 2
-    end
+    # Not sure this is a good idea if the point distribution is very inhomogeneous...
+    # TODO see if this improves performance in highly dense cases
+    # points_per_group = Np / prod(ngroups)  # average number of points per block
+    # while groupsize < 1024 && 4 * groupsize ≤ points_per_group
+    #     groupsize *= 2
+    # end
+    # (2) Determine number of threads in each direction.
+    # This mainly affects the performance of global -> shared memory copies.
+    # It seems like it's better to parallelise the outer dimensions first.
     gsizes = ntuple(_ -> 1, Val(D))
     p = 1  # product of sizes
-    i = 1
+    i = D  # parallelise outer dimensions first
     while p < groupsize
-        gsizes = Base.setindex(gsizes, gsizes[i] * 2, i)
-        p *= 2
-        i = mod1(i + 1, D)
+        if gsizes[i] < shmem_size[i] || i == 1
+            gsizes = Base.setindex(gsizes, gsizes[i] * 2, i)
+            p *= 2
+        else
+            @assert i > 1
+            i -= 1
+        end
     end
     @assert p == groupsize == prod(gsizes)
     gsizes
