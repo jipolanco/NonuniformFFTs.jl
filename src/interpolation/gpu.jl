@@ -1,6 +1,6 @@
 using StaticArrays: MVector
 
-# TODO: use this also in spreading, and move to separate file
+# Note: this is also used in spreading
 @inline function get_inds_vals_gpu(gs::NTuple{D}, points::NTuple{D}, Ns::NTuple{D}, j::Integer) where {D}
     ntuple(Val(D)) do n
         @inline
@@ -8,6 +8,7 @@ using StaticArrays: MVector
     end
 end
 
+# Note: this is also used in spreading
 @inline function get_inds_vals_gpu(g::AbstractKernelData, points::AbstractVector, N::Integer, j::Integer)
     x = @inbounds points[j]
     gdata = Kernels.evaluate_kernel(g, x)

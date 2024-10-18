@@ -23,19 +23,7 @@
     @assert eltype(first(us)) <: Real # output is a real array (but may actually describe complex data)
     Ns = spread_actual_dims(Z, Ns_real)  # divides the Ns_real[1] by 2 if Z <: Complex
 
-    indvals = ntuple(Val(D)) do n
-        @inline
-        @inbounds begin
-            g = gs[n]
-            x = points[n][j]
-            gdata = Kernels.evaluate_kernel(g, x)
-            vals = gdata.values
-            M = Kernels.half_support(gs[n])
-            i₀ = gdata.i - M  # active region is (i₀ + 1):(i₀ + 2M) (up to periodic wrapping)
-            i₀ = ifelse(i₀ < 0, i₀ + Ns[n], i₀)  # make sure i₀ ≥ 0
-            i₀ => vals
-        end
-    end
+    indvals = get_inds_vals_gpu(gs, points, Ns, j)
 
     v⃗ = map(v -> @inbounds(v[j]), vp)
     spread_onto_arrays_gpu!(us, indvals, v⃗, Ns)
