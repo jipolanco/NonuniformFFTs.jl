@@ -61,8 +61,9 @@ end
         @Const(Δxs::NTuple{D}),           # grid step in each direction (oversampled grid)
         ::Val{block_dims},
     ) where {C, D, block_dims}
-    groupsize = @groupsize()::Dims{D}  # generally equal to (nthreads, 1, 1, ...)
+    groupsize = @groupsize()::Dims{D}
     nthreads = prod(groupsize)
+    threadidxs = @index(Local, NTuple)   # in (1:nthreads_x, 1:nthreads_y, ...)
     threadidx = @index(Local, Linear)    # in 1:nthreads
     block_index = @index(Group, NTuple)  # workgroup index (= block index)
     block_n = @index(Group, Linear)      # linear index of block
@@ -73,9 +74,6 @@ end
     block_dims_padded = @. block_dims + 2M - 1
     u_local = @localmem(T, block_dims_padded)  # allocate shared memory
 
-    # Copy grid data from global to shared memory
-    gridvalues_to_local_memory!(u_local, us[1], Val(M), block_index, block_dims, threadidx, nthreads)
-
     # This block will take care of non-uniform points (a + 1):b
     @inbounds a = cumulative_npoints_per_block[block_n]
     @inbounds b = cumulative_npoints_per_block[block_n + 1]
@@ -84,51 +82,57 @@ end
     # Shift from indices in global array to indices in local array
     idx_shift = @. (block_index - 1) * block_dims + 1
 
-    @synchronize  # make sure all threads have the same shared data
+    # Interpolate components one by one (to avoid using too much memory)
+    for c ∈ 1:C
+        # Copy grid data from global to shared memory
+        gridvalues_to_local_memory!(u_local, us[c], Val(M), block_index, block_dims, threadidxs, groupsize)
 
-    for i in (a + threadidx):nthreads:b
-        # Interpolate at point j
-        j = if pointperm === nothing
-            i
-        else
-            @inbounds pointperm[i]
-        end
+        @synchronize  # make sure all threads have the same shared data
 
-        indvals = ntuple(Val(D)) do n
-            @inline
-            x = @inbounds points[n][j]
-            gdata = Kernels.evaluate_kernel(gs[n], x)
-            local vals = gdata.values    # kernel values
-            local M = Kernels.half_support(gs[n])
-            local i₀ = gdata.i - idx_shift[n]
-            @assert i₀ ≥ 0
-            @assert i₀ + 2M ≤ block_dims_padded[n]
-            i₀ => vals
-        end
+        for i in (a + threadidx):nthreads:b
+            # Interpolate at point j
+            j = if pointperm === nothing
+                i
+            else
+                @inbounds pointperm[i]
+            end
 
-        inds_start = map(first, indvals)
-        vals = map(last, indvals)    # evaluated kernel values in each direction
-        inds = map(eachindex, vals)  # = (1:L, 1:L, ...) where L = 2M is the kernel width
+            indvals = ntuple(Val(D)) do n
+                @inline
+                x = @inbounds points[n][j]
+                gdata = Kernels.evaluate_kernel(gs[n], x)
+                local vals = gdata.values    # kernel values
+                local M = Kernels.half_support(gs[n])
+                local i₀ = gdata.i - idx_shift[n]
+                @assert i₀ ≥ 0
+                @assert i₀ + 2M ≤ block_dims_padded[n]
+                i₀ => vals
+            end
 
-        gprod_4 = ΔV
-        v = zero(T)
+            inds_start = map(first, indvals)
+            vals = map(last, indvals)    # evaluated kernel values in each direction
+            inds = map(eachindex, vals)  # = (1:L, 1:L, ...) where L = 2M is the kernel width
 
-        @inbounds for i_3 in inds[3]
-            gprod_3 = gprod_4 * vals[3][i_3]
-            j_3 = inds_start[3] + i_3
-            for i_2 in inds[2]
-                gprod_2 = gprod_3 * vals[2][i_2]
-                j_2 = inds_start[2] + i_2
-                for i_1 in inds[1]
-                    gprod_1 = gprod_2 * vals[1][i_1]
-                    j_1 = inds_start[1] + i_1
-                    js = (j_1, j_2, j_3)
-                    v += gprod_1 * u_local[js...]
+            gprod_4 = ΔV
+            v = zero(T)
+
+            @inbounds for i_3 in inds[3]
+                gprod_3 = gprod_4 * vals[3][i_3]
+                j_3 = inds_start[3] + i_3
+                for i_2 in inds[2]
+                    gprod_2 = gprod_3 * vals[2][i_2]
+                    j_2 = inds_start[2] + i_2
+                    for i_1 in inds[1]
+                        gprod_1 = gprod_2 * vals[1][i_1]
+                        j_1 = inds_start[1] + i_1
+                        js = (j_1, j_2, j_3)
+                        v += gprod_1 * u_local[js...]
+                    end
                 end
             end
-        end
 
-        @inbounds vp[1][j] = v
+            @inbounds vp[c][j] = v
+        end
     end
 
     nothing
@@ -137,27 +141,33 @@ end
 # TODO
 # - generalise to all D
 # - parallelise over multiple directions?
-# - choose an optimal memory access pattern
+# - is it possible to optimise the memory access patterns?
 @inline function gridvalues_to_local_memory!(
         u_local::AbstractArray{T, D},
         u_global::AbstractArray{T, D},
         ::Val{M},
         block_index::Dims{D}, block_dims::Dims{D},
-        threadidx::Integer,
-        nthreads::Integer,
+        threadidxs::Dims{D},
+        groupsize::Dims{D},
     ) where {T, D, M}
     Ns = size(u_global)
     @assert D == 3
-    inds_1 = axes(u_local, 1)
-    inds_2 = axes(u_local, 2)
-    inds_3 = axes(u_local, 3)[threadidx:nthreads:end]  # parallelise over outermost dimension (some threads might not work here)
+    inds_1 = axes(u_local, 1)[threadidxs[1]:groupsize[1]:end]
+    inds_2 = axes(u_local, 2)[threadidxs[2]:groupsize[2]:end]
+    inds_3 = axes(u_local, 3)[threadidxs[3]:groupsize[3]:end]
     offsets = @. (block_index - 1) * block_dims - (M - 1)
     @inbounds for i_3 in inds_3
-        j_3 = mod1(offsets[3] + i_3, Ns[3])
+        j_3 = offsets[3] + i_3
+        j_3 = ifelse(j_3 ≤ 0, j_3 + Ns[3], j_3)
+        j_3 = ifelse(j_3 > Ns[3], j_3 - Ns[3], j_3)
         for i_2 in inds_2
-            j_2 = mod1(offsets[2] + i_2, Ns[2])
+            j_2 = offsets[2] + i_2
+            j_2 = ifelse(j_2 ≤ 0, j_2 + Ns[2], j_2)
+            j_2 = ifelse(j_2 > Ns[2], j_2 - Ns[2], j_2)
             for i_1 in inds_1
-                j_1 = mod1(offsets[1] + i_1, Ns[1])
+                j_1 = offsets[1] + i_1
+                j_1 = ifelse(j_1 ≤ 0, j_1 + Ns[1], j_1)
+                j_1 = ifelse(j_1 > Ns[1], j_1 - Ns[1], j_1)
                 is = (i_1, i_2, i_3)
                 js = (j_1, j_2, j_3)
                 u_local[is...] = u_global[js...]  # TODO: use linear index instead of is?
@@ -216,10 +226,9 @@ function interpolate!(
         block_dims = Val(block_dims_val)  # ...which means this doesn't require a dynamic dispatch
         @assert block_dims_val === bd.block_dims
         let ngroups = bd.nblocks_per_dir  # this is the required number of workgroups (number of blocks in CUDA)
-            groupsize = 64  # TODO: how to choose this? roughly equal to the number of non-uniform points per block (or less)?
-            groupsize_dims = ntuple(d -> d == 1 ? groupsize : 1, D)  # "augment" first dimension
-            ndrange = groupsize_dims .* ngroups
-            kernel! = interpolate_to_points_shmem_kernel!(backend, groupsize_dims, ndrange)
+            groupsize = groupsize_shmem(ngroups, length(x⃗s))
+            ndrange = groupsize .* ngroups
+            kernel! = interpolate_to_points_shmem_kernel!(backend, groupsize, ndrange)
             kernel!(vp_sorted, gs, xs_comp, us, pointperm_, bd.cumulative_npoints_per_block, Δxs, block_dims)
         end
     end
@@ -233,6 +242,29 @@ function interpolate!(
     end
 
     vp_all
+end
+
+# Determine groupsize (number of threads per direction) in :shared_memory method.
+# Here Np is the number of non-uniform points.
+function groupsize_shmem(ngroups::NTuple{D}, Np) where {D}
+    points_per_group = Np / prod(ngroups)  # average number of points per block
+    groupsize = 64  # minimum group size should be equal to the warp size (usually 32 on CUDA and 64 on AMDGPU)
+    # Increase groupsize if number of points is much larger (at least 4×) than the groupsize.
+    # (Not sure this is a good idea if the point distribution is very inhomogeneous...)
+    # TODO: maybe leave it at 64?
+    while groupsize < 1024 && 4 * groupsize ≤ points_per_group
+        groupsize *= 2
+    end
+    gsizes = ntuple(_ -> 1, Val(D))
+    p = 1  # product of sizes
+    i = 1
+    while p < groupsize
+        gsizes = Base.setindex(gsizes, gsizes[i] * 2, i)
+        p *= 2
+        i = mod1(i + 1, D)
+    end
+    @assert p == groupsize == prod(gsizes)
+    gsizes
 end
 
 @inline function interpolate_from_arrays_gpu(
