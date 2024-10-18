@@ -57,57 +57,106 @@ end
         @Const(points::NTuple{D}),
         @Const(us::NTuple{C}),
         @Const(pointperm),
+        @Const(cumulative_npoints_per_block::AbstractVector),
         @Const(Δxs::NTuple{D}),           # grid step in each direction (oversampled grid)
         ::Val{block_dims},
     ) where {C, D, block_dims}
-    is_kernel = @index(Global, NTuple)::NTuple{D}
-    groupsize = @groupsize()::NTuple{D}  # generally equal to (nthreads, 1, 1, ...)
-    threadidx = @index(Local, Linear)
-    block_index = is_kernel ./ groupsize
+    groupsize = @groupsize()::Dims{D}  # generally equal to (nthreads, 1, 1, ...)
     nthreads = prod(groupsize)
+    threadidx = @index(Local, Linear)    # in 1:nthreads
+    block_index = @index(Group, NTuple)  # workgroup index (= block index)
+    block_n = @index(Group, Linear)      # linear index of block
 
     # TODO: support C > 1 (do one component at a time, to use less memory?)
     T = eltype(us[1])
     M = Kernels.half_support(gs[1])  # assume they're all equal
-    block_dims_padded = block_dims .+ 2M
+    block_dims_padded = @. block_dims + 2M - 1
     u_local = @localmem(T, block_dims_padded)  # allocate shared memory
 
     # Copy grid data from global to shared memory
     gridvalues_to_local_memory!(u_local, us[1], Val(M), block_index, block_dims, threadidx, nthreads)
 
+    # This block will take care of non-uniform points (a + 1):b
+    @inbounds a = cumulative_npoints_per_block[block_n]
+    @inbounds b = cumulative_npoints_per_block[block_n + 1]
+    Ns = size(us[1])  # grid dimensions
+    ΔV = prod(Δxs)
+
+    # Shift from indices in global array to indices in local array
+    idx_shift = @. (block_index - 1) * block_dims + 1
+
     @synchronize  # make sure all threads have the same shared data
+
+    for i in (a + threadidx):nthreads:b
+        # Interpolate at point j
+        j = if pointperm === nothing
+            i
+        else
+            @inbounds pointperm[i]
+        end
+
+        indvals = ntuple(Val(D)) do n
+            @inline
+            x = @inbounds points[n][j]
+            gdata = Kernels.evaluate_kernel(gs[n], x)
+            local vals = gdata.values    # kernel values
+            local M = Kernels.half_support(gs[n])
+            local i₀ = gdata.i - idx_shift[n]
+            @assert i₀ ≥ 0
+            @assert i₀ + 2M ≤ block_dims_padded[n]
+            i₀ => vals
+        end
+
+        inds_start = map(first, indvals)
+        vals = map(last, indvals)    # evaluated kernel values in each direction
+        inds = map(eachindex, vals)  # = (1:L, 1:L, ...) where L = 2M is the kernel width
+
+        gprod_4 = ΔV
+        v = zero(T)
+
+        @inbounds for i_3 in inds[3]
+            gprod_3 = gprod_4 * vals[3][i_3]
+            j_3 = inds_start[3] + i_3
+            for i_2 in inds[2]
+                gprod_2 = gprod_3 * vals[2][i_2]
+                j_2 = inds_start[2] + i_2
+                for i_1 in inds[1]
+                    gprod_1 = gprod_2 * vals[1][i_1]
+                    j_1 = inds_start[1] + i_1
+                    js = (j_1, j_2, j_3)
+                    v += gprod_1 * u_local[js...]
+                end
+            end
+        end
+
+        @inbounds vp[1][j] = v
+    end
 
     nothing
 end
 
+# TODO
+# - generalise to all D
+# - optimise
 @inline function gridvalues_to_local_memory!(
         u_local::AbstractArray{T, D},
         u_global::AbstractArray{T, D},
         ::Val{M},
-        block_index::NTuple{D}, block_dims::NTuple{D},
+        block_index::Dims{D}, block_dims::Dims{D},
         threadidx::Integer,
         nthreads::Integer,
     ) where {T, D, M}
     Ns = size(u_global)
-    # inds = ntuple(Val(D)) do n
-    #     @inline
-    #     a = (block_index[n] - 1) * block_dims[n] + 1  # start of current block in global grid (excluding ghost cells)
-    #     b = block_index[n] * block_dims[n]            # end of current block
-    #     (a - M):(b + M)  # range including ghost cells
-    # end
-    # TODO: split work across threads
-    # Assume D = 3 for now
-    if threadidx == 1
-        # for is in iter
-        for i_3 in axes(u_local, 3), i_2 in axes(u_local, 2), i_1 in axes(u_local, 1)
-            # For some reason, type assertions are needed for things to work on AMDGPU
-            j_1 = mod1(block_index[1] - 1 * block_dims[1] + i_1 - M, Ns[1])::Int
-            j_2 = mod1(block_index[2] - 1 * block_dims[2] + i_2 - M, Ns[2])::Int
-            j_3 = mod1(block_index[3] - 1 * block_dims[3] + i_3 - M, Ns[3])::Int
-            is = (i_1, i_2, i_3)::Dims{D}
-            js = (j_1, j_2, j_3)::Dims{D}
-            u_local[is...] = u_global[js...]
-        end
+    @assert D == 3
+    inds_3 = axes(u_local, 3)[threadidx:nthreads:end]  # parallelise over outermost dimension (some threads might not work here)
+    @inbounds for i_3 in inds_3, i_2 in axes(u_local, 2), i_1 in axes(u_local, 1)
+        # For some reason, type assertions are needed for things to work on AMDGPU
+        j_1 = mod1((block_index[1] - 1) * block_dims[1] - (M - 1) + i_1, Ns[1])
+        j_2 = mod1((block_index[2] - 1) * block_dims[2] - (M - 1) + i_2, Ns[2])
+        j_3 = mod1((block_index[3] - 1) * block_dims[3] - (M - 1) + i_3, Ns[3])
+        is = (i_1, i_2, i_3)
+        js = (j_1, j_2, j_3)
+        u_local[is...] = u_global[js...]  # TODO: use linear index instead of is?
     end
     nothing
 end
@@ -165,7 +214,7 @@ function interpolate!(
             groupsize_dims = ntuple(d -> d == 1 ? groupsize : 1, D)  # "augment" first dimension
             ndrange = groupsize_dims .* ngroups
             kernel! = interpolate_to_points_shmem_kernel!(backend, groupsize_dims, ndrange)
-            kernel!(vp_sorted, gs, xs_comp, us, pointperm_, Δxs, block_dims)
+            kernel!(vp_sorted, gs, xs_comp, us, pointperm_, bd.cumulative_npoints_per_block, Δxs, block_dims)
         end
     end
 

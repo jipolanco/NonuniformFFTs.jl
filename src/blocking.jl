@@ -70,7 +70,7 @@ type_length(::Type{<:NTuple{N}}) where {N} = N
     max_shmem_size = 48 << 10  # 48 KiB -- TODO: make this depend on the actual GPU?
     max_block_length = max_shmem_size ÷ sizeof(Z)  # maximum number of elements in a block
     m = floor(Int, max_block_length^(1/D))  # block size in each direction (including ghost cells / padding)
-    n = m - 2M  # exclude ghost cells
+    n = m - (2M - 1)  # exclude ghost cells
     if n ≤ 0
         throw(ArgumentError(
             lazy"""
@@ -92,26 +92,26 @@ struct BlockDataGPU{
         IndexVector <: AbstractVector{I},
         SortPoints <: StaticBool,
     } <: AbstractBlockData
-    method :: Symbol  # method used for spreading and interpolation; options: (1) :global_memory (2) :shared_memory
+    method :: Symbol     # method used for spreading and interpolation; options: (1) :global_memory (2) :shared_memory
+    Δxs :: NTuple{N, T}  # grid step; the size of a block in units of length is block_dims .* Δxs.
     nblocks_per_dir  :: NTuple{N, I}  # number of blocks in each direction
     block_dims       :: NTuple{N, I}  # maximum dimensions of a block (excluding ghost cells)
-    block_sizes      :: NTuple{N, T}  # size of each block (in units of length)
     cumulative_npoints_per_block :: IndexVector    # cumulative sum of number of points in each block (length = num_blocks + 1, first value is 0)
     blockidx      :: IndexVector  # linear index of block associated to each point (length = Np)
     pointperm     :: IndexVector
     sort_points   :: SortPoints
     function BlockDataGPU(
             method::Symbol,
+            Δxs::NTuple{N, T},
             nblocks_per_dir::NTuple{N, I},
             block_dims::NTuple{N, I},
-            block_sizes::NTuple{N, T},
             npoints_per_block::V, sort::S,
         ) where {N, I, T, V, S}
         method ∈ (:global_memory, :shared_memory) || throw(ArgumentError("expected gpu_method ∈ (:global_memory, :shared_memory)"))
         blockidx = similar(npoints_per_block, 0)
         pointperm = similar(npoints_per_block, 0)
         new{N, I, T, V, S}(
-            method, nblocks_per_dir, block_dims, block_sizes, npoints_per_block, blockidx, pointperm, sort,
+            method, Δxs, nblocks_per_dir, block_dims, npoints_per_block, blockidx, pointperm, sort,
         )
     end
 end
@@ -130,11 +130,11 @@ function BlockDataGPU(
         # Override input block size. We try to maximise the use of shared memory.
         block_dims = block_dims_gpu_shmem(Z, Ñs, h)
     end
-    nblocks_per_dir = map(cld, Ñs, block_dims)  # basically equal to ceil(Ñ / block_dim) --> effective block size is ≤ block_dims
-    L = T(2) * π
-    block_sizes = map(nblocks -> L / nblocks, nblocks_per_dir)
+    nblocks_per_dir = map(cld, Ñs, block_dims)  # basically equal to ceil(Ñ / block_dim)
+    L = T(2) * π  # domain period
+    Δxs = map(N -> L / N, Ñs)  # grid step (oversampled grid)
     cumulative_npoints_per_block = KA.allocate(backend, Int, prod(nblocks_per_dir) + 1)
-    BlockDataGPU(method, nblocks_per_dir, block_dims, block_sizes, cumulative_npoints_per_block, sort_points)
+    BlockDataGPU(method, Δxs, nblocks_per_dir, block_dims, cumulative_npoints_per_block, sort_points)
 end
 
 get_pointperm(bd::BlockDataGPU) = bd.pointperm
@@ -145,7 +145,7 @@ function set_points_impl!(
         transform::F = identity, synchronise,
     ) where {F <: Function}
     (;
-        cumulative_npoints_per_block, nblocks_per_dir, block_sizes,
+        Δxs, cumulative_npoints_per_block, nblocks_per_dir, block_dims,
         blockidx, pointperm, sort_points,
     ) = bd
 
@@ -173,8 +173,8 @@ function set_points_impl!(
     @timeit timer "(1) Assign blocks" let
         local kernel! = assign_blocks_kernel!(backend, workgroupsize)
         kernel!(
-            blockidx, cumulative_npoints_per_block, points_comp, xp,
-            block_sizes, nblocks_per_dir, sort_points, transform;
+            blockidx, cumulative_npoints_per_block, points_comp, xp, Δxs,
+            block_dims, nblocks_per_dir, sort_points, transform;
             ndrange,
         )
         maybe_synchronise(backend, synchronise)
@@ -192,8 +192,8 @@ function set_points_impl!(
     @timeit timer "(3) Sort" let
         local kernel! = sortperm_kernel!(backend, workgroupsize)
         kernel!(
-            pointperm, cumulative_npoints_per_block, blockidx, xp,
-            block_sizes, nblocks_per_dir, transform;
+            pointperm, cumulative_npoints_per_block, blockidx, xp, Δxs,
+            block_dims, nblocks_per_dir, transform;
             ndrange,
         )
         maybe_synchronise(backend, synchronise)
@@ -214,9 +214,18 @@ end
 
 # Get index of block where x⃗ is located (assumed to be in [0, 2π)).
 @inline function block_index(
-        x⃗::NTuple{N,T}, block_sizes::NTuple{N,T}, nblocks_per_dir::NTuple{N},
+        x⃗::NTuple{N,T}, Δxs::NTuple{N,T}, block_dims::NTuple{N,Integer}, nblocks_per_dir::NTuple{N},
     ) where {N, T <: AbstractFloat}
-    is = map(Kernels.point_to_cell, x⃗, block_sizes)
+    is = ntuple(Val(N)) do n
+        @inline
+        # Note: we could directly use the block size Δx_block = Δx * block_dims, but this
+        # may lead to inconsistency with interpolation and spreading kernels (leading to
+        # errors) due to numerical accuracy issues. So we first obtain the index on the
+        # Δx grid, then we translate that to a block index by dividing by the block
+        # dimensions (= how many Δx's in a single block).
+        i = Kernels.point_to_cell(x⃗[n], Δxs[n])  # index of grid cell where point is located
+        cld(i, block_dims[n])  # index of block where point is located
+    end
     @inbounds LinearIndices(nblocks_per_dir)[is...]
 end
 
@@ -225,7 +234,8 @@ end
         cumulative_npoints_per_block::AbstractVector{<:Integer},
         points::NTuple,
         @Const(xp),
-        @Const(block_sizes::NTuple),
+        @Const(Δxs),
+        @Const(block_dims::NTuple),
         @Const(nblocks_per_dir::NTuple),
         @Const(sort_points),
         @Const(transform::F),
@@ -233,7 +243,7 @@ end
     I = @index(Global, Linear)
     @inbounds x⃗ = xp[I]
     y⃗ = to_unit_cell_gpu(transform(Tuple(x⃗))) :: NTuple
-    n = block_index(y⃗, block_sizes, nblocks_per_dir)
+    n = block_index(y⃗, Δxs, block_dims, nblocks_per_dir)
 
     # Note: here index_within_block is the value *after* incrementing (≥ 1).
     S = eltype(cumulative_npoints_per_block)
@@ -255,14 +265,15 @@ end
         @Const(cumulative_npoints_per_block),
         @Const(blockidx),
         @Const(xp),
-        @Const(block_sizes),
+        @Const(Δxs),
+        @Const(block_dims),
         @Const(nblocks_per_dir),
         @Const(transform::F),
     ) where {F}
     I = @index(Global, Linear)
     @inbounds x⃗ = xp[I]
     y⃗ = to_unit_cell_gpu(transform(Tuple(x⃗))) :: NTuple
-    n = block_index(y⃗, block_sizes, nblocks_per_dir)
+    n = block_index(y⃗, Δxs, block_dims, nblocks_per_dir)
     @inbounds J = cumulative_npoints_per_block[n] + blockidx[I]
     @inbounds pointperm[J] = I
     nothing
