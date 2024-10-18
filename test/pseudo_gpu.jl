@@ -6,6 +6,9 @@
 # JLArray (since it's supposed to mimic GPU arrays). Even with allowscalar(true), kernels
 # seem to fail for other reasons.
 
+# TODO:
+# - use new JLBackend in the latest GPUArrays
+
 using NonuniformFFTs
 using StaticArrays: SVector  # for convenience
 using KernelAbstractions: KernelAbstractions as KA
@@ -115,5 +118,9 @@ end
     end
     @testset "No blocking" begin  # spatial sorting disabled
         compare_with_cpu(ComplexF64, dims; block_size = nothing)
+    end
+    @testset "gpu_method = :shared_memory" begin
+        @testset "Float32" compare_with_cpu(Float32, dims; gpu_method = :shared_memory)
+        @testset "ComplexF32" compare_with_cpu(ComplexF32, dims; gpu_method = :shared_memory)
     end
 end
