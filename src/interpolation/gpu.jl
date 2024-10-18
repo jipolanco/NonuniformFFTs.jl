@@ -26,7 +26,7 @@ end
         @Const(points::NTuple{D}),
         @Const(us::NTuple{C}),
         @Const(pointperm),
-        @Const(Δxs::NTuple{D}),           # grid step in each direction (oversampled grid)
+        @Const(prefactor::Real),    # = volume of a grid cell = prod(Δxs)
     ) where {C, D}
     i = @index(Global, Linear)
 
@@ -43,7 +43,7 @@ end
 
     indvals = get_inds_vals_gpu(gs, points, Ns, j)
 
-    v⃗ = interpolate_from_arrays_gpu(us, indvals, Ns, Δxs)
+    v⃗ = interpolate_from_arrays_gpu(us, indvals, Ns, prefactor)
 
     for n ∈ eachindex(vp, v⃗)
         @inbounds vp[n][j] = v⃗[n]
@@ -59,7 +59,7 @@ end
         @Const(us::NTuple{C}),
         @Const(pointperm),
         @Const(cumulative_npoints_per_block::AbstractVector),
-        @Const(Δxs::NTuple{D}),           # grid step in each direction (oversampled grid)
+        @Const(prefactor::Real),    # = volume of a grid cell = prod(Δxs)
         ::Val{block_dims},
     ) where {C, D, block_dims}
     groupsize = @groupsize()::Dims{D}
@@ -77,7 +77,6 @@ end
     # This block will take care of non-uniform points (a + 1):b
     @inbounds a = cumulative_npoints_per_block[block_n]
     @inbounds b = cumulative_npoints_per_block[block_n + 1]
-    prefactor = prod(Δxs)  # interpolations need to be multiplied by the volume of a grid cell
 
     # Shift from indices in global array to indices in local array
     idx_shift = @. (block_index - 1) * block_dims + 1
@@ -105,8 +104,8 @@ end
                 local vals = gdata.values    # kernel values
                 local M = Kernels.half_support(gs[n])
                 local i₀ = gdata.i - idx_shift[n]
-                @assert i₀ ≥ 0
-                @assert i₀ + 2M ≤ block_dims_padded[n]
+                # @assert i₀ ≥ 0
+                # @assert i₀ + 2M ≤ block_dims_padded[n]
                 i₀ => vals
             end
 
@@ -123,10 +122,7 @@ end
 @inline function gridvalues_to_local_memory!(
         u_local::AbstractArray{T, D},
         u_global::AbstractArray{T, D},
-        ::Val{M},
-        block_index::Dims{D}, block_dims::Dims{D},
-        threadidxs::Dims{D},
-        groupsize::Dims{D},
+        ::Val{M}, block_index::Dims{D}, block_dims::Dims{D}, threadidxs::Dims{D}, groupsize::Dims{D},
     ) where {T, D, M}
     if @generated
         quote
@@ -233,6 +229,7 @@ function interpolate!(
 
     xs_comp = StructArrays.components(x⃗s)
     Δxs = map(Kernels.gridstep, gs)
+    prefactor = prod(Δxs)  # interpolations need to be multiplied by the volume of a grid cell
 
     pointperm = get_pointperm(bd)                  # nothing in case of NullBlockData
     sort_points = get_sort_points(bd)::StaticBool  # False in the case of NullBlockData
@@ -249,15 +246,17 @@ function interpolate!(
         pointperm_ = pointperm
     end
 
+    # We use dynamically sized kernels to avoid recompilation, since number of points may
+    # change from one call to another.
+    ndrange_points = size(x⃗s)  # iterate through points
+    groupsize_points = default_workgroupsize(backend, ndrange_points)
+
     method = gpu_method(bd)
 
     if method === :global_memory
-        # We use dynamically sized kernels to avoid recompilation, since number of points may
-        # change from one call to another.
-        let ndrange = size(x⃗s)  # iterate through points
-            groupsize = default_workgroupsize(backend, ndrange)
+        let ndrange = ndrange_points, groupsize = groupsize_points
             kernel! = interpolate_to_point_naive_kernel!(backend, groupsize)
-            kernel!(vp_sorted, gs, xs_comp, us, pointperm_, Δxs; ndrange)
+            kernel!(vp_sorted, gs, xs_comp, us, pointperm_, prefactor; ndrange)
         end
     elseif method === :shared_memory
         @assert bd isa BlockDataGPU
@@ -273,12 +272,12 @@ function interpolate!(
             # @show ngroups block_dims block_dims_padded
             ndrange = groupsize .* ngroups
             kernel! = interpolate_to_points_shmem_kernel!(backend, groupsize, ndrange)
-            kernel!(vp_sorted, gs, xs_comp, us, pointperm_, bd.cumulative_npoints_per_block, Δxs, block_dims)
+            kernel!(vp_sorted, gs, xs_comp, us, pointperm_, bd.cumulative_npoints_per_block, prefactor, block_dims)
         end
     end
 
     if sort_points === True()
-        let groupsize = default_workgroupsize(backend, ndrange)
+        let ndrange = ndrange_points, groupsize = groupsize_points
             kernel_perm! = interp_permute_kernel!(backend, groupsize)
             kernel_perm!(vp_all, vp_sorted, pointperm; ndrange)
             foreach(KA.unsafe_free!, vp_sorted)  # manually deallocate temporary arrays
@@ -293,6 +292,7 @@ end
 # The distribution of threads across directions mainly (only?) affects the copies between
 # shared and global memories, so it can have an important influence of performance due to
 # memory accesses.
+# NOTE: this is also used in spreading
 function groupsize_shmem(ngroups::NTuple{D}, shmem_size::NTuple{D}, Np) where {D}
     # (1) Determine the total number of threads.
     groupsize = 64  # minimum group size should be equal to the warp size (usually 32 on CUDA and 64 on AMDGPU)
@@ -326,7 +326,7 @@ end
         us::NTuple{C, AbstractArray{T, D}},
         indvals::NTuple{D, <:Pair},
         Ns::Dims{D},
-        Δxs::NTuple{D, Tr},
+        prefactor::Tr,
     ) where {T, Tr, C, D}
     if @generated
         gprod_init = Symbol(:gprod_, D + 1)  # the name of this variable is important!
@@ -336,7 +336,7 @@ end
             vals = map(last, indvals)    # evaluated kernel values in each direction
             inds = map(eachindex, vals)  # = (1:L, 1:L, ...) where L = 2M is the kernel width
             vs = zero(MVector{$C, $T})   # interpolated value (output)
-            $gprod_init = prod(Δxs)  # product of kernel values (initially Δx[1] * Δx[2] * ...)
+            $gprod_init = prefactor  # product of kernel values (initially Δx[1] * Δx[2] * ...)
             @nloops(
                 $D, i,
                 d -> inds[d],  # for i_d ∈ 1:L
@@ -368,7 +368,7 @@ end
         vals_first, vals_tail = first(vals), Base.tail(vals)
         istart_first, istart_tail = first(inds_start), Base.tail(inds_start)
         N, Ns_tail = first(Ns), Base.tail(Ns)
-        gprod_base = prod(Δxs)  # this factor is needed in interpolation only
+        gprod_base = prefactor  # this factor is needed in interpolation only
         @inbounds for I_tail ∈ CartesianIndices(inds_tail)
             is_tail = Tuple(I_tail)
             gs_tail = map(inbounds_getindex, vals_tail, is_tail)
