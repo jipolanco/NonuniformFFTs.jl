@@ -54,7 +54,7 @@ end
 
 @kernel function interpolate_to_points_shmem_kernel!(
         vp::NTuple{C, AbstractVector{Z}},
-        @Const(gs::NTuple{D, AbstractKernelData{<:Any, M}}),
+        @Const(gs::NTuple{D}),
         @Const(points::NTuple{D}),
         @Const(us::NTuple{C, AbstractArray{Z}}),
         @Const(pointperm),
@@ -62,7 +62,7 @@ end
         @Const(prefactor::Real),    # = volume of a grid cell = prod(Δxs)
         ::Val{block_dims},
         ::Val{shmem_size},  # this is a bit redundant, but seems to be required for CPU backends (used in tests)
-    ) where {C, D, Z <: Number, M, block_dims, shmem_size}
+    ) where {C, D, Z <: Number, block_dims, shmem_size}
 
     @uniform begin
         groupsize = @groupsize()::Dims{D}
@@ -79,6 +79,7 @@ end
     # Interpolate components one by one (to avoid using too much memory)
     for c ∈ 1:C
         # Copy grid data from global to shared memory
+        M = Kernels.half_support(gs[1])
         gridvalues_to_local_memory!(u_local, us[c], Val(M), block_index, block_dims, threadidxs, groupsize)
 
         @synchronize  # make sure all threads have the same shared data

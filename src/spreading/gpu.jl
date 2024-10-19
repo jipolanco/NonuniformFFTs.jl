@@ -224,14 +224,14 @@ end
 
 @kernel function spread_from_points_shmem_kernel!(
         us::NTuple{C, AbstractArray{T}},
-        @Const(gs::NTuple{D, AbstractKernelData{<:Any, M}}),
+        @Const(gs::NTuple{D}),
         @Const(points::NTuple{D}),
         @Const(vp::NTuple{C, AbstractVector{Z}}),
         @Const(pointperm),
         @Const(cumulative_npoints_per_block::AbstractVector),
         ::Val{block_dims},
         ::Val{shmem_size},  # this is a bit redundant, but seems to be required for CPU backends (used in tests)
-    ) where {C, D, T <: AbstractFloat, Z <: Number, M, block_dims, shmem_size}
+    ) where {C, D, T, Z, block_dims, shmem_size}
 
     @uniform begin
         groupsize = @groupsize()::Dims{D}
@@ -293,6 +293,7 @@ end
 
         @synchronize  # make sure we have finished writing to shared memory
 
+        M = Kernels.half_support(gs[1])
         add_from_local_to_global_memory!(
             Z, us[c], u_local, Ns, Val(M), block_index,
             block_dims, threadidxs, groupsize,
