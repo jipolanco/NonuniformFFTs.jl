@@ -299,7 +299,6 @@ end
             batch_size = min(Np, b - batch_begin)
             # Iterate over points in the batch (ideally 1 thread per point).
             # Each thread writes to shared memory.
-            # TODO: can we have a two-level parallelism? e.g. parallelise over dimensions
             @inbounds for p in threadidx:nthreads:batch_size
                 # Spread from point j
                 i = batch_begin + p  # index of non-uniform point
@@ -309,18 +308,26 @@ end
                     @inbounds pointperm[i]
                 end
                 for d ∈ 1:D
-                    x = points[d][j]
-                    points_sm[d, p] = x
-                    g = gs[d]
-                    gdata = Kernels.evaluate_kernel(g, x)
-                    ishift = (block_index[d] - 1) * block_dims[d] + 1
-                    inds_start[d, p] = gdata.i - ishift
-                    local vals = gdata.values
-                    for m ∈ eachindex(vals)
-                        window_vals[m, d, p] = vals[m]
-                    end
+                    points_sm[d, p] = points[d][j]
                 end
                 vp_sm[p] = vp[c][j]
+            end
+
+            @synchronize
+
+            # Now evaluate windows associated to each point.
+            local inds = CartesianIndices((1:batch_size, 1:D))  # parallelise over dimensions + points
+            @inbounds for n in threadidx:nthreads:length(inds)
+                p, d = Tuple(inds[n])
+                g = gs[d]
+                x = points_sm[d, p]
+                gdata = Kernels.evaluate_kernel(g, x)
+                ishift = (block_index[d] - 1) * block_dims[d] + 1
+                inds_start[d, p] = gdata.i - ishift
+                local vals = gdata.values
+                for m ∈ eachindex(vals)
+                    window_vals[m, d, p] = vals[m]
+                end
             end
 
             @synchronize  # make sure all threads have the same shared data
