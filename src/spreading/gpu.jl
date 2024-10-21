@@ -332,8 +332,7 @@ end
             # Parallel evaluation of window functions over all dimensions
             let
                 inds = CartesianIndices((1:D, 1:2M))
-                subinds = (1:length(inds))[threadidx:nthreads:end]
-                @inbounds for n ∈ subinds
+                @inbounds for n ∈ threadidx:nthreads:length(inds)
                     d, m = Tuple(inds[n])  # dimension, support point
                     x = points[d][j]
                     g = gs[d]
