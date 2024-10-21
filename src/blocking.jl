@@ -66,8 +66,18 @@ type_length(::Type{<:NTuple{N}}) where {N} = N
 # We try to make sure that the total block size (including 2M ghost cells in each direction)
 # is not larger than the available shared memory. In CUDA the limit is usually 48 KiB.
 # Note that the result is a compile-time constant (on Julia 1.11.1 at least).
-@inline function block_dims_gpu_shmem(::Type{Z}, ::Dims{D}, ::HalfSupport{M}) where {Z <: Number, D, M}
-    free_shmem = 1 << 10  # how much memory to leave free for other allocations
+@inline function block_dims_gpu_shmem(::Type{Z}, ::Dims{D}, ::HalfSupport{M}, ::Val{Np}) where {Z <: Number, D, M, Np}
+    T = real(Z)
+    # These are extra shared-memory needs in spreading kernel (see spread_from_points_shmem_kernel!).
+    # Here Np is the batch size (batch_size parameter).
+    shmem_needs = sizeof(T) * (
+        2M * D * Np +  # window_vals
+        D * Np +       # points_sm
+        D * Np         # inds_start
+    ) + (
+        sizeof(Z) * Np  # vp_sm
+    )
+    free_shmem = shmem_needs  # how much memory to leave free for other allocations
     max_shmem_size = (48 << 10) - free_shmem  # 48 KiB -- TODO: make this depend on the actual GPU?
     max_block_length = max_shmem_size ÷ sizeof(Z)  # maximum number of elements in a block
     m = floor(Int, max_block_length^(1/D))  # block size in each direction (including ghost cells / padding)
@@ -92,6 +102,7 @@ struct BlockDataGPU{
         N, I <: Integer, T <: AbstractFloat,
         IndexVector <: AbstractVector{I},
         SortPoints <: StaticBool,
+        Np,
     } <: AbstractBlockData
     method :: Symbol     # method used for spreading and interpolation; options: (1) :global_memory (2) :shared_memory
     Δxs :: NTuple{N, T}  # grid step; the size of a block in units of length is block_dims .* Δxs.
@@ -101,18 +112,22 @@ struct BlockDataGPU{
     blockidx      :: IndexVector  # linear index of block associated to each point (length = Np)
     pointperm     :: IndexVector
     sort_points   :: SortPoints
+    batch_size :: Val{Np}  # how many non-uniform points per batch in SM spreading?
     function BlockDataGPU(
             method::Symbol,
             Δxs::NTuple{N, T},
             nblocks_per_dir::NTuple{N, I},
             block_dims::NTuple{N, I},
-            npoints_per_block::V, sort::S,
-        ) where {N, I, T, V, S}
+            npoints_per_block::V, sort::S;
+            batch_size::Val{Np},
+        ) where {N, I, T, V, S, Np}
+        Np::Integer
         method ∈ (:global_memory, :shared_memory) || throw(ArgumentError("expected gpu_method ∈ (:global_memory, :shared_memory)"))
         blockidx = similar(npoints_per_block, 0)
         pointperm = similar(npoints_per_block, 0)
-        new{N, I, T, V, S}(
+        new{N, I, T, V, S, Np}(
             method, Δxs, nblocks_per_dir, block_dims, npoints_per_block, blockidx, pointperm, sort,
+            batch_size,
         )
     end
 end
@@ -125,17 +140,18 @@ function BlockDataGPU(
         backend::KA.Backend, block_dims::Dims{D}, Ñs::Dims{D}, h::HalfSupport{M},
         sort_points::StaticBool;
         method::Symbol,
+        batch_size::Val = Val(16),  # batch size (in number of non-uniform points) used in spreading if gpu_method == :shared_memory
     ) where {Z <: Number, D, M}
     T = real(Z)  # in case Z is complex
     if method === :shared_memory
         # Override input block size. We try to maximise the use of shared memory.
-        block_dims = block_dims_gpu_shmem(Z, Ñs, h)
+        block_dims = block_dims_gpu_shmem(Z, Ñs, h, batch_size)
     end
     nblocks_per_dir = map(cld, Ñs, block_dims)  # basically equal to ceil(Ñ / block_dim)
     L = T(2) * π  # domain period
     Δxs = map(N -> L / N, Ñs)  # grid step (oversampled grid)
     cumulative_npoints_per_block = KA.allocate(backend, Int, prod(nblocks_per_dir) + 1)
-    BlockDataGPU(method, Δxs, nblocks_per_dir, block_dims, cumulative_npoints_per_block, sort_points)
+    BlockDataGPU(method, Δxs, nblocks_per_dir, block_dims, cumulative_npoints_per_block, sort_points; batch_size)
 end
 
 get_pointperm(bd::BlockDataGPU) = bd.pointperm

@@ -309,6 +309,7 @@ function _PlanNUFFT(
         block_size::Union{Integer, Dims{D}, Nothing} = default_block_size(Ns, backend),
         synchronise::Bool = false,
         gpu_method::Symbol = :global_memory,
+        batch_size::Val = Val(16),  # currently only used in shared-memory GPU spreading
     ) where {T <: Number, D}
     ks = init_wavenumbers(T, Ns)
     # Determine dimensions of oversampled grid.
@@ -343,7 +344,7 @@ function _PlanNUFFT(
     else
         block_dims = get_block_dims(Ñs, block_size)
         if backend isa GPU
-            blocks = BlockDataGPU(T, backend, block_dims, Ñs, h, sort_points; method = gpu_method)
+            blocks = BlockDataGPU(T, backend, block_dims, Ñs, h, sort_points; method = gpu_method, batch_size,)
         else
             blocks = BlockData(T, block_dims, Ñs, h, num_transforms, sort_points)
             FFTW.set_num_threads(Threads.nthreads())

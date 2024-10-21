@@ -202,7 +202,7 @@ function spread_from_points!(
         Z = eltype(us[1])
         M = Kernels.half_support(gs[1])
         @assert all(g -> Kernels.half_support(g) === M, gs)  # check that they're all equal
-        block_dims_val = block_dims_gpu_shmem(Z, size(us[1]), HalfSupport(M))  # this is usually a compile-time constant...
+        block_dims_val = block_dims_gpu_shmem(Z, size(us[1]), HalfSupport(M), bd.batch_size)  # this is usually a compile-time constant...
         block_dims = Val(block_dims_val)  # ...which means this doesn't require a dynamic dispatch
         @assert block_dims_val === bd.block_dims
         let ngroups = bd.nblocks_per_dir  # this is the required number of workgroups (number of blocks in CUDA)
@@ -213,8 +213,8 @@ function spread_from_points!(
             kernel! = spread_from_points_shmem_kernel!(backend, groupsize, ndrange)
             kernel!(
                 us_real, gs, xs_comp, vp_sorted, pointperm_,
-                bd.cumulative_npoints_per_block, HalfSupport(M), block_dims,
-                Val(shmem_size),
+                bd.cumulative_npoints_per_block, HalfSupport(M),
+                block_dims, Val(shmem_size), bd.batch_size,
             )
         end
     end
@@ -238,6 +238,10 @@ end
 ## ========================================================================================== ##
 ## Shared-memory implementation
 
+# Process non-uniform points in batches of Np points (or less).
+# The idea is to completely avoid slow atomic writes to shared memory arrays (u_local),
+# while parallelising some operations across up to Np points.
+# TODO: Should Np be equal to the number of threads? or how to choose it optimally so that the block size stays not too small?
 @kernel function spread_from_points_shmem_kernel!(
         us::NTuple{C, AbstractArray{T}},
         @Const(gs::NTuple{D}),
@@ -248,7 +252,8 @@ end
         ::HalfSupport{M},
         ::Val{block_dims},
         ::Val{shmem_size},  # this is a bit redundant, but seems to be required for CPU backends (used in tests)
-    ) where {C, D, T, Z, M, block_dims, shmem_size}
+        ::Val{Np},  # batch_size
+    ) where {C, D, T, Z, M, Np, block_dims, shmem_size}
 
     @uniform begin
         groupsize = @groupsize()::Dims{D}
@@ -271,8 +276,10 @@ end
     # Allocate static shared memory
     u_local = @localmem(T, shmem_size)
     @assert T <: Real
-    window_vals = @localmem(T, (2M, D))
-    inds_start = @localmem(Int, D)
+    window_vals = @localmem(T, (2M, D, Np))
+    points_sm = @localmem(T, (D, Np))  # points copied to shared memory
+    inds_start = @localmem(Int, (D, Np))
+    vp_sm = @localmem(Z, Np)  # input values copied to shared memory
 
     # Interpolate components one by one (to avoid using too much memory)
     for c ∈ 1:C
@@ -287,70 +294,45 @@ end
         @inbounds a = cumulative_npoints_per_block[block_n]
         @inbounds b = cumulative_npoints_per_block[block_n + 1]
 
-        # for i in (a + threadidx):nthreads:b
-        #     # Spread from point j
-        #     j = if pointperm === nothing
-        #         i
-        #     else
-        #         @inbounds pointperm[i]
-        #     end
-        #
-        #     # TODO: can we do this just once for all components? (if C > 1)
-        #     indvals = ntuple(Val(D)) do n
-        #         @inline
-        #         local x = @inbounds points[n][j]
-        #         local g = gs[n]
-        #         local Δx = Kernels.gridstep(g)
-        #         icell = @inline Kernels.point_to_cell(x, Δx)
-        #         vals = @inline Kernels.evaluate_kernel_direct(g, icell, x)
-        #         # gdata = Kernels.evaluate_kernel(g, x)
-        #         # local vals = gdata.values    # kernel values
-        #         local ishift = (block_index[n] - 1) * block_dims[n] + 1
-        #         local i₀ = icell - ishift
-        #         # local i₀ = gdata.i - ishift
-        #         # @assert i₀ ≥ 0
-        #         # @assert i₀ + 2M ≤ block_dims_padded[n]
-        #         i₀ => vals
-        #     end
-        #
-        #     @inbounds v = vp[c][j]
-        #     spread_onto_array_shmem!(u_local, indvals, v)
-        # end
-
-        # All threads iterate over the same non-uniform points.
-        # This is to avoid atomic operations on shared memory, which seems to be quite slow.
-        @inbounds for i in (a + 1):b
-            # Spread from point j
-            j = if pointperm === nothing
-                i
-            else
-                @inbounds pointperm[i]
-            end
-
-            # Parallel evaluation of window functions over all dimensions
-            let
-                inds = CartesianIndices((1:D, 1:2M))
-                @inbounds for n ∈ threadidx:nthreads:length(inds)
-                    d, m = Tuple(inds[n])  # dimension, support point
-                    x = points[d][j]
-                    g = gs[d]
-                    Δx = Kernels.gridstep(g)
-                    icell = @inline Kernels.point_to_cell(x, Δx)
-                    ishift = (block_index[d] - 1) * block_dims[d] + 1
-                    i₀ = icell - ishift
-                    inds_start[d] = i₀  # multiple threads may write this, but that's ok
-                    window_vals[m, d] = @inline Kernels.evaluate_kernel_direct(g, icell, m, x)
+        # The first batch deals with points (a + 1):min(a + Np, b)
+        @inbounds for batch_begin in a:Np:(b - 1)
+            batch_size = min(Np, b - batch_begin)
+            # Iterate over points in the batch (ideally 1 thread per point).
+            # Each thread writes to shared memory.
+            # TODO: can we have a two-level parallelism? e.g. parallelise over dimensions
+            @inbounds for p in threadidx:nthreads:batch_size
+                # Spread from point j
+                i = batch_begin + p  # index of non-uniform point
+                j = if pointperm === nothing
+                    i
+                else
+                    @inbounds pointperm[i]
                 end
+                for d ∈ 1:D
+                    x = points[d][j]
+                    points_sm[d, p] = x
+                    g = gs[d]
+                    gdata = Kernels.evaluate_kernel(g, x)
+                    ishift = (block_index[d] - 1) * block_dims[d] + 1
+                    inds_start[d, p] = gdata.i - ishift
+                    local vals = gdata.values
+                    for m ∈ eachindex(vals)
+                        window_vals[m, d, p] = vals[m]
+                    end
+                end
+                vp_sm[p] = vp[c][j]
             end
 
-            @inbounds v = vp[c][j]
+            @synchronize  # make sure all threads have the same shared data
 
-            @synchronize
-
-            inds_start_t = ntuple(d -> @inbounds(inds_start[d]), Val(D))  # as a tuple
-
-            # Spread in parallel
-            spread_onto_array_shmem_threads!(u_local, inds_start_t, window_vals, v; threadidxs, groupsize, threadidx, nthreads)
+            # Now all threads spread together onto shared memory
+            @inbounds for p in 1:batch_size
+                local istart = ntuple(d -> @inbounds(inds_start[d, p]), Val(D))
+                local vals = @view window_vals[:, :, p]  # TODO: does this have a cost?
+                local v = vp_sm[p]
+                spread_onto_array_shmem_threads!(u_local, istart, vals, v; threadidx, nthreads)
+                @synchronize  # make sure threads don't write concurrently to the same place (since we don't use atomics)
+            end
         end
 
         @synchronize  # make sure we have finished writing to shared memory
@@ -372,47 +354,12 @@ end
 end
 
 # Spread a single "component" (one transform at a time).
-@inline function spread_onto_array_shmem!(
-        u_local::AbstractArray{T, D},
-        indvals::NTuple{D},
-        v::Z,
-    ) where {T, D, Z}
-    if @generated
-        gprod_init = Symbol(:gprod_, D + 1)  # the name of this variable is important!
-        Tr = real(T)
-        quote
-            inds_start = map(first, indvals)  # start of active region in output array
-            vals = map(last, indvals)    # evaluated kernel values in each direction
-            inds = map(eachindex, vals)  # = (1:L, 1:L, ...) where L = 2M is the kernel width
-            $gprod_init = one($Tr)       # product of kernel values (initially 1)
-            @nloops(
-                $D, i,
-                d -> inds[d],  # for i_d ∈ 1:L
-                d -> begin
-                    @inbounds gprod_d = gprod_{d + 1} * vals[d][i_d]
-                    @inbounds j_d = inds_start[d] + i_d
-                end,
-                begin
-                    js = @ntuple($D, j)
-                    w = v * gprod_1
-                    _atomic_add!(u_local, w, js)  # this is slow!! (atomics in shared memory) -- is it Atomix's fault?
-                end,
-            )
-            v
-        end
-    else
-        aaa  # TODO: implement
-    end
-end
-
-# Spread a single "component" (one transform at a time).
 # This is parallelised across threads in a workgroup.
 @inline function spread_onto_array_shmem_threads!(
         u_local::AbstractArray{T, D},
         inds_start::NTuple{D, Integer},
         window_vals::AbstractArray{T, 2},  # static-size shared-memory array (2M, D)
         v::Z;
-        threadidxs::NTuple{D}, groupsize::NTuple{D},
         threadidx, nthreads,
     ) where {T, D, Z}
     inds = CartesianIndices(ntuple(_ -> axes(window_vals, 1), Val(D)))

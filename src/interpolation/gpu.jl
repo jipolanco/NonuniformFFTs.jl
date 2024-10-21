@@ -100,7 +100,7 @@ function interpolate!(
         Z = eltype(us[1])
         M = Kernels.half_support(gs[1])
         @assert all(g -> Kernels.half_support(g) === M, gs)  # check that they're all equal
-        block_dims_val = block_dims_gpu_shmem(Z, size(us[1]), HalfSupport(M))  # this is usually a compile-time constant...
+        block_dims_val = block_dims_gpu_shmem(Z, size(us[1]), HalfSupport(M), bd.batch_size)  # this is usually a compile-time constant...
         block_dims = Val(block_dims_val)  # ...which means this doesn't require a dynamic dispatch
         @assert block_dims_val === bd.block_dims
         let ngroups = bd.nblocks_per_dir  # this is the required number of workgroups (number of blocks in CUDA)
@@ -108,6 +108,8 @@ function interpolate!(
             shmem_size = block_dims_padded
             groupsize = groupsize_shmem(ngroups, block_dims_padded, length(x⃗s))
             ndrange = groupsize .* ngroups
+            # TODO:
+            # - try out batches in interpolation?
             kernel! = interpolate_to_points_shmem_kernel!(backend, groupsize, ndrange)
             kernel!(
                 vp_sorted, gs, xs_comp, us, pointperm_, bd.cumulative_npoints_per_block,
