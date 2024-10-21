@@ -321,7 +321,7 @@ end
 
         # All threads iterate over the same non-uniform points.
         # This is to avoid atomic operations on shared memory, which seems to be quite slow.
-        for i in (a + 1):b
+        @inbounds for i in (a + 1):b
             # Spread from point j
             j = if pointperm === nothing
                 i
@@ -336,36 +336,35 @@ end
                 @inbounds for n ∈ subinds
                     d, m = Tuple(inds[n])  # dimension, support point
                     x = points[d][j]
-                    local g = gs[d]
-                    local Δx = Kernels.gridstep(g)
-                    local icell = @inline Kernels.point_to_cell(x, Δx)
-                    local ishift = (block_index[d] - 1) * block_dims[d] + 1
-                    local i₀ = icell - ishift
+                    g = gs[d]
+                    Δx = Kernels.gridstep(g)
+                    icell = @inline Kernels.point_to_cell(x, Δx)
+                    ishift = (block_index[d] - 1) * block_dims[d] + 1
+                    i₀ = icell - ishift
                     inds_start[d] = i₀  # multiple threads may write this, but that's ok
                     window_vals[d][m] = @inline Kernels.evaluate_kernel_direct(g, icell, m, x)
                 end
-            end
-
-            # TODO:
-            # - can we do this just once for all components? (if C > 1)
-            indvals = ntuple(Val(D)) do d
-                inds_start[d] => window_vals[d]
             end
 
             @inbounds v = vp[c][j]
 
             @synchronize
 
+            inds_start_t = ntuple(d -> @inbounds(inds_start[d]), Val(D))  # as a tuple
+
             # Spread in parallel
-            spread_onto_array_shmem_threads!(u_local, indvals, v, threadidxs, groupsize)
+            spread_onto_array_shmem_threads!(u_local, inds_start_t, window_vals, v; threadidxs, groupsize, threadidx, nthreads)
         end
 
         @synchronize  # make sure we have finished writing to shared memory
 
-        add_from_local_to_global_memory!(
-            Z, us[c], u_local, Ns, Val(M), block_index,
-            block_dims, threadidxs, groupsize,
-        )
+        if a < b  # skip this step if there were actually no points in this block (if a == b)
+            add_from_local_to_global_memory!(
+                Z, us[c], u_local, Ns, Val(M);
+                block_index, block_dims, threadidxs, groupsize,
+                threadidx, nthreads,
+            )
+        end
 
         if c < C
             @synchronize  # wait before jumping to next component
@@ -413,37 +412,25 @@ end
 # This is parallelised across threads in a workgroup.
 @inline function spread_onto_array_shmem_threads!(
         u_local::AbstractArray{T, D},
-        indvals::NTuple{D},
-        v::Z,
+        inds_start::NTuple{D, Integer},
+        vals::NTuple{D, AbstractVector},  # these are static-size shared-memory arrays
+        v::Z;
         threadidxs::NTuple{D}, groupsize::NTuple{D},
+        threadidx, nthreads,
     ) where {T, D, Z}
-    if @generated
-        gprod_init = Symbol(:gprod_, D + 1)  # the name of this variable is important!
-        Tr = real(T)
-        quote
-            inds_start = map(first, indvals)  # start of active region in output array
-            vals = map(last, indvals)    # evaluated kernel values in each direction
-            # inds = map(eachindex, vals)  # = (1:L, 1:L, ...) where L = 2M is the kernel width
-            inds = @ntuple($D, n -> eachindex(vals[n])[threadidxs[n]:groupsize[n]:end])
-            $gprod_init = one($Tr)       # product of kernel values (initially 1)
-            @nloops(
-                $D, i,
-                d -> inds[d],  # for i_d ∈ 1:L
-                d -> begin
-                    @inbounds gprod_d = gprod_{d + 1} * vals[d][i_d]
-                    @inbounds j_d = inds_start[d] + i_d
-                end,
-                begin
-                    js = @ntuple($D, j)
-                    w = v * gprod_1
-                    _add_maybecomplex!(u_local, w, js)
-                end,
-            )
-            v
+    inds = CartesianIndices(map(eachindex, vals))
+    Tr = real(T)
+    @inbounds for n ∈ threadidx:nthreads:length(inds)
+        I = inds[n]
+        js = Tuple(I) .+ inds_start
+        gprod = one(Tr)
+        for d ∈ 1:D
+            gprod *= vals[d][I[d]]
         end
-    else
-        aaa  # TODO: implement
+        w = v * gprod
+        _add_maybecomplex!(u_local, w, js)
     end
+    nothing
 end
 
 # Add values from shared to global memory.
@@ -452,13 +439,14 @@ end
         u_global::AbstractArray{T, D},  # actual data is always real
         u_local::AbstractArray{T, D},
         Ns::Dims{D},
-        ::Val{M}, block_index::Dims{D}, block_dims::Dims{D}, threadidxs::Dims{D}, groupsize::Dims{D},
+        ::Val{M};
+        block_index::Dims{D}, block_dims::Dims{D}, threadidxs::Dims{D}, groupsize::Dims{D},
+        threadidx, nthreads,
     ) where {Z, T, D, M}
     if @generated
         @assert T <: Real  # for atomic operations
         skip = sizeof(Z) ÷ sizeof(T)  # 1 (Z real) or 2 (Z complex)
         quote
-            # @assert skip ∈ (1, 2)
             skips = @ntuple($D, n -> n == 1 ? $skip : 1)
             inds = @ntuple($D, n -> axes(u_local, n)[1:(end ÷ skips[n])][threadidxs[n]:groupsize[n]:end])
             offsets = @ntuple(
@@ -496,7 +484,44 @@ end
             nothing
         end
     else
-        aaa  # TODO: implement
+        # Unlike the @generated case, here we parallelise over linear indices instead of
+        # separate Cartesian directions. Performance is very similar to the @generated case.
+        @assert T <: Real  # for atomic operations
+        skip = sizeof(Z) ÷ sizeof(T)  # 1 (Z real) or 2 (Z complex)
+        inds = CartesianIndices(
+            ntuple(Val(D)) do d
+                # The logical indices are 1:end÷skip in the first dimension.
+                d == 1 ? axes(u_local, 1)[1:end÷skip] : axes(u_local, d)
+            end
+        )
+        offsets = ntuple(Val(D)) do n
+            @inline
+            local off = (block_index[n] - 1) * block_dims[n] - (M - 1)
+            ifelse(off < 0, off + Ns[n], off)  # make sure the offset is non-negative (to avoid some wrapping below)
+        end
+        @inbounds for n ∈ threadidx:nthreads:length(inds)
+            I = inds[n]
+            is = Tuple(I)
+            js = ntuple(Val(D)) do d
+                @inline
+                j = is[d] + offsets[d]
+                ifelse(j > Ns[d], j - Ns[d], j)
+            end
+            @inbounds if Z <: Real
+                w = u_local[is...]
+                Atomix.@atomic u_global[js...] += w
+            elseif Z <: Complex
+                is_tail = Base.tail(is)
+                js_tail = Base.tail(js)
+                ifirst = 2 * is[1] - 1
+                jfirst = 2 * js[1] - 1
+                w = u_local[ifirst, is_tail...]  # real part
+                Atomix.@atomic u_global[jfirst, js_tail...] += w
+                w = u_local[ifirst + 1, is_tail...]  # imaginary part
+                Atomix.@atomic u_global[jfirst + 1, js_tail...] += w
+            end
+        end
+        nothing
     end
 end
 
