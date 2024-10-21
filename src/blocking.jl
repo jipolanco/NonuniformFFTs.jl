@@ -67,7 +67,8 @@ type_length(::Type{<:NTuple{N}}) where {N} = N
 # is not larger than the available shared memory. In CUDA the limit is usually 48 KiB.
 # Note that the result is a compile-time constant (on Julia 1.11.1 at least).
 @inline function block_dims_gpu_shmem(::Type{Z}, ::Dims{D}, ::HalfSupport{M}) where {Z <: Number, D, M}
-    max_shmem_size = 48 << 10  # 48 KiB -- TODO: make this depend on the actual GPU?
+    free_shmem = 1 << 10  # how much memory to leave free for other allocations
+    max_shmem_size = (48 << 10) - free_shmem  # 48 KiB -- TODO: make this depend on the actual GPU?
     max_block_length = max_shmem_size ÷ sizeof(Z)  # maximum number of elements in a block
     m = floor(Int, max_block_length^(1/D))  # block size in each direction (including ghost cells / padding)
     n = m - (2M - 1)  # exclude ghost cells

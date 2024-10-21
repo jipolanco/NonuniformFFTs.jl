@@ -270,10 +270,8 @@ end
 
     # Allocate static shared memory
     u_local = @localmem(T, shmem_size)
-    window_vals = ntuple(Val(D)) do _
-        @assert T <: Real
-        @localmem(T, 2M)
-    end
+    @assert T <: Real
+    window_vals = @localmem(T, (2M, D))
     inds_start = @localmem(Int, D)
 
     # Interpolate components one by one (to avoid using too much memory)
@@ -341,7 +339,7 @@ end
                     ishift = (block_index[d] - 1) * block_dims[d] + 1
                     i₀ = icell - ishift
                     inds_start[d] = i₀  # multiple threads may write this, but that's ok
-                    window_vals[d][m] = @inline Kernels.evaluate_kernel_direct(g, icell, m, x)
+                    window_vals[m, d] = @inline Kernels.evaluate_kernel_direct(g, icell, m, x)
                 end
             end
 
@@ -412,19 +410,19 @@ end
 @inline function spread_onto_array_shmem_threads!(
         u_local::AbstractArray{T, D},
         inds_start::NTuple{D, Integer},
-        vals::NTuple{D, AbstractVector},  # these are static-size shared-memory arrays
+        window_vals::AbstractArray{T, 2},  # static-size shared-memory array (2M, D)
         v::Z;
         threadidxs::NTuple{D}, groupsize::NTuple{D},
         threadidx, nthreads,
     ) where {T, D, Z}
-    inds = CartesianIndices(map(eachindex, vals))
+    inds = CartesianIndices(ntuple(_ -> axes(window_vals, 1), Val(D)))
     Tr = real(T)
     @inbounds for n ∈ threadidx:nthreads:length(inds)
         I = inds[n]
         js = Tuple(I) .+ inds_start
         gprod = one(Tr)
         for d ∈ 1:D
-            gprod *= vals[d][I[d]]
+            gprod *= window_vals[I[d], d]
         end
         w = v * gprod
         _add_maybecomplex!(u_local, w, js)
