@@ -281,6 +281,17 @@ end
     inds_start = @localmem(Int, (D, Np))
     vp_sm = @localmem(Z, Np)  # input values copied to shared memory
 
+    # Buffer for indices and lengths.
+    # This is needed in CPU version (used in tests), to avoid variables from being
+    # "forgotten" after a @synchronize barrier.
+    buf_sm = @localmem(Int, 3)
+
+    # This block will take care of non-uniform points (a + 1):b
+    if threadidx == 1
+        @inbounds buf_sm[1] = cumulative_npoints_per_block[block_n]
+        @inbounds buf_sm[2] = cumulative_npoints_per_block[block_n + 1]
+    end
+
     # Interpolate components one by one (to avoid using too much memory)
     for c ∈ 1:C
         # Reset shared memory to zero
@@ -290,13 +301,10 @@ end
 
         @synchronize  # make sure shared memory is fully set to zero
 
-        # This block will take care of non-uniform points (a + 1):b
-        @inbounds a = cumulative_npoints_per_block[block_n]
-        @inbounds b = cumulative_npoints_per_block[block_n + 1]
-
         # The first batch deals with points (a + 1):min(a + Np, b)
-        @inbounds for batch_begin in a:Np:(b - 1)
-            batch_size = min(Np, b - batch_begin)
+        @inbounds for batch_begin in buf_sm[1]:Np:(buf_sm[2] - 1)
+            batch_size = min(Np, buf_sm[2] - batch_begin)  # current batch size
+            buf_sm[3] = batch_size
             # Iterate over points in the batch (ideally 1 thread per point).
             # Each thread writes to shared memory.
             @inbounds for p in threadidx:nthreads:batch_size
@@ -316,7 +324,7 @@ end
             @synchronize
 
             # Now evaluate windows associated to each point.
-            local inds = CartesianIndices((1:batch_size, 1:D))  # parallelise over dimensions + points
+            local inds = CartesianIndices((1:buf_sm[3], 1:D))  # parallelise over dimensions + points
             @inbounds for n in threadidx:nthreads:length(inds)
                 p, d = Tuple(inds[n])
                 g = gs[d]
@@ -333,7 +341,7 @@ end
             @synchronize  # make sure all threads have the same shared data
 
             # Now all threads spread together onto shared memory
-            @inbounds for p in 1:batch_size
+            @inbounds for p in 1:buf_sm[3]
                 local istart = ntuple(d -> @inbounds(inds_start[d, p]), Val(D))
                 local vals = @view window_vals[:, :, p]  # TODO: does this have a cost?
                 local v = vp_sm[p]
@@ -344,7 +352,7 @@ end
 
         @synchronize  # make sure we have finished writing to shared memory
 
-        if a < b  # skip this step if there were actually no points in this block (if a == b)
+        @inbounds if buf_sm[1] < buf_sm[2]  # skip this step if there were actually no points in this block (if a == b)
             add_from_local_to_global_memory!(
                 Z, us[c], u_local, Ns, Val(M);
                 block_index, block_dims, threadidxs, groupsize,
