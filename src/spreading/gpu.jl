@@ -206,8 +206,8 @@ function spread_from_points!(
         block_dims = Val(block_dims_val)  # ...which means this doesn't require a dynamic dispatch
         @assert block_dims_val === bd.block_dims
         let ngroups = bd.nblocks_per_dir  # this is the required number of workgroups (number of blocks in CUDA)
-            block_dims_padded = @. block_dims_val + 2M - 1  # dimensions of shared memory array
-            shmem_size = spread_real_dims(Z, block_dims_padded)
+            block_dims_padded = @. block_dims_val + 2M - 1
+            shmem_size = block_dims_padded  # dimensions of big shared memory array
             groupsize = groupsize_shmem(ngroups, block_dims_padded, length(x⃗s))
             ndrange = groupsize .* ngroups
             kernel! = spread_from_points_shmem_kernel!(backend, groupsize, ndrange)
@@ -274,7 +274,8 @@ end
     threadidx = @index(Local, Linear)    # in 1:nthreads
 
     # Allocate static shared memory
-    u_local = @localmem(T, shmem_size)
+    u_local = @localmem(Z, shmem_size)
+    # @assert shmem_size == block_dims .+ (2M - 1)
     @assert T <: Real
     window_vals = @localmem(T, (2M, D, Np))
     points_sm = @localmem(T, (D, Np))  # points copied to shared memory
@@ -285,11 +286,15 @@ end
     # This is needed in CPU version (used in tests), to avoid variables from being
     # "forgotten" after a @synchronize barrier.
     buf_sm = @localmem(Int, 3)
+    ishifts_sm = @localmem(Int, D)  # shift between local and global array in each direction
 
     # This block will take care of non-uniform points (a + 1):b
     if threadidx == 1
-        @inbounds buf_sm[1] = cumulative_npoints_per_block[block_n]
-        @inbounds buf_sm[2] = cumulative_npoints_per_block[block_n + 1]
+        @inbounds buf_sm[1] = cumulative_npoints_per_block[block_n]       # = a
+        @inbounds buf_sm[2] = cumulative_npoints_per_block[block_n + 1]   # = b
+        @inbounds for d ∈ 1:D
+            ishifts_sm[d] = (block_index[d] - 1) * block_dims[d] + 1
+        end
     end
 
     # Interpolate components one by one (to avoid using too much memory)
@@ -330,7 +335,7 @@ end
                 g = gs[d]
                 x = points_sm[d, p]
                 gdata = Kernels.evaluate_kernel(g, x)
-                ishift = (block_index[d] - 1) * block_dims[d] + 1
+                ishift = ishifts_sm[d]
                 inds_start[d, p] = gdata.i - ishift
                 local vals = gdata.values
                 for m ∈ eachindex(vals)
@@ -343,9 +348,8 @@ end
             # Now all threads spread together onto shared memory
             @inbounds for p in 1:buf_sm[3]
                 local istart = ntuple(d -> @inbounds(inds_start[d, p]), Val(D))
-                local vals = @view window_vals[:, :, p]  # TODO: does this have a cost?
                 local v = vp_sm[p]
-                spread_onto_array_shmem_threads!(u_local, istart, vals, v; threadidx, nthreads)
+                spread_onto_array_shmem_threads!(u_local, istart, window_vals, v, p; threadidx, nthreads)
                 @synchronize  # make sure threads don't write concurrently to the same place (since we don't use atomics)
             end
         end
@@ -354,8 +358,7 @@ end
 
         @inbounds if buf_sm[1] < buf_sm[2]  # skip this step if there were actually no points in this block (if a == b)
             add_from_local_to_global_memory!(
-                Z, us[c], u_local, Ns, Val(M);
-                block_index, block_dims, threadidxs, groupsize,
+                us[c], u_local, Ns, ishifts_sm, Val(M);
                 threadidx, nthreads,
             )
         end
@@ -371,117 +374,63 @@ end
 # Spread a single "component" (one transform at a time).
 # This is parallelised across threads in a workgroup.
 @inline function spread_onto_array_shmem_threads!(
-        u_local::AbstractArray{T, D},
+        u_local::AbstractArray{Z, D},
         inds_start::NTuple{D, Integer},
-        window_vals::AbstractArray{T, 2},  # static-size shared-memory array (2M, D)
-        v::Z;
+        window_vals::AbstractArray{T, 3},  # static-size shared-memory array (2M, D, Np)
+        v::Z, p::Integer;
         threadidx, nthreads,
     ) where {T, D, Z}
-    inds = CartesianIndices(ntuple(_ -> axes(window_vals, 1), Val(D)))
+    inds = CartesianIndices(ntuple(_ -> axes(window_vals, 1), Val(D)))  # = (1:2M, 1:2M, ...)
     Tr = real(T)
     @inbounds for n ∈ threadidx:nthreads:length(inds)
         I = inds[n]
         js = Tuple(I) .+ inds_start
         gprod = one(Tr)
         for d ∈ 1:D
-            gprod *= window_vals[I[d], d]
+            gprod *= window_vals[I[d], d, p]
         end
         w = v * gprod
-        _add_maybecomplex!(u_local, w, js)
+        u_local[js...] += w
     end
     nothing
 end
 
 # Add values from shared to global memory.
 @inline function add_from_local_to_global_memory!(
-        ::Type{Z},  # "logical" type of data (e.g. ComplexF64)
-        u_global::AbstractArray{T, D},  # actual data is always real
-        u_local::AbstractArray{T, D},
+        u_global::AbstractArray{T, D},  # actual data in global array is always real
+        u_local::AbstractArray{Z, D},   # shared-memory array can be complex
         Ns::Dims{D},
+        ishifts,
         ::Val{M};
-        block_index::Dims{D}, block_dims::Dims{D}, threadidxs::Dims{D}, groupsize::Dims{D},
         threadidx, nthreads,
     ) where {Z, T, D, M}
-    if @generated
-        @assert T <: Real  # for atomic operations
-        skip = sizeof(Z) ÷ sizeof(T)  # 1 (Z real) or 2 (Z complex)
-        quote
-            skips = @ntuple($D, n -> n == 1 ? $skip : 1)
-            inds = @ntuple($D, n -> axes(u_local, n)[1:(end ÷ skips[n])][threadidxs[n]:groupsize[n]:end])
-            offsets = @ntuple(
-                $D,
-                n -> let
-                    off = (block_index[n] - 1) * block_dims[n] - ($M - 1)
-                    ifelse(off < 0, off + Ns[n], off)  # make sure the offset is non-negative (to avoid some wrapping below)
-                end
-            )
-            @nloops(
-                $D, i,
-                d -> inds[d],
-                d -> begin
-                    j_d = offsets[d] + i_d
-                    j_d = ifelse(j_d > Ns[d], j_d - Ns[d], j_d)
-                end,
-                begin
-                    is = @ntuple($D, i)
-                    js = @ntuple($D, j)
-                    @inbounds if $skip === 1  # real data (Z <: Real)
-                        w = u_local[is...]
-                        Atomix.@atomic u_global[js...] += w
-                    elseif $skip === 2  # complex data (Z <: Complex)
-                        is_tail = @ntuple($(D - 1), d -> i_{d + 1})
-                        js_tail = @ntuple($(D - 1), d -> j_{d + 1})
-                        ifirst = 2 * i_1 - 1
-                        jfirst = 2 * j_1 - 1
-                        w = u_local[ifirst, is_tail...]  # real part
-                        Atomix.@atomic u_global[jfirst, js_tail...] += w
-                        w = u_local[ifirst + 1, is_tail...]  # imaginary part
-                        Atomix.@atomic u_global[jfirst + 1, js_tail...] += w
-                    end
-                end,
-            )
-            nothing
-        end
-    else
-        # Unlike the @generated case, here we parallelise over linear indices instead of
-        # separate Cartesian directions. Performance is very similar to the @generated case.
-        @assert T <: Real  # for atomic operations
-        skip = sizeof(Z) ÷ sizeof(T)  # 1 (Z real) or 2 (Z complex)
-        inds = CartesianIndices(
-            ntuple(Val(D)) do d
-                # The logical indices are 1:end÷skip in the first dimension.
-                d == 1 ? axes(u_local, 1)[1:end÷skip] : axes(u_local, d)
-            end
-        )
-        offsets = ntuple(Val(D)) do n
-            @inline
-            local off = (block_index[n] - 1) * block_dims[n] - (M - 1)
-            ifelse(off < 0, off + Ns[n], off)  # make sure the offset is non-negative (to avoid some wrapping below)
-        end
-        @inbounds for n ∈ threadidx:nthreads:length(inds)
-            I = inds[n]
-            is = Tuple(I)
-            js = ntuple(Val(D)) do d
-                @inline
-                j = is[d] + offsets[d]
-                ifelse(j > Ns[d], j - Ns[d], j)
-            end
-            @inbounds if Z <: Real
-                w = u_local[is...]
-                Atomix.@atomic u_global[js...] += w
-            elseif Z <: Complex
-                is_tail = Base.tail(is)
-                js_tail = Base.tail(js)
-                ifirst = 2 * is[1] - 1
-                jfirst = 2 * js[1] - 1
-                w = u_local[ifirst, is_tail...]  # real part
-                Atomix.@atomic u_global[jfirst, js_tail...] += w
-                w = u_local[ifirst + 1, is_tail...]  # imaginary part
-                Atomix.@atomic u_global[jfirst + 1, js_tail...] += w
-            end
-        end
-        nothing
+    @assert T <: Real  # for atomic operations
+    inds = CartesianIndices(axes(u_local))
+    offsets = ntuple(Val(D)) do d
+        @inline
+        local off = ishifts[d] - M
+        ifelse(off < 0, off + Ns[d], off)  # make sure the offset is non-negative (to avoid some wrapping below)
     end
+    @inbounds for n ∈ threadidx:nthreads:length(inds)
+        I = inds[n]
+        is = Tuple(I)
+        js = ntuple(Val(D)) do d
+            @inline
+            j = is[d] + offsets[d]
+            ifelse(j > Ns[d], j - Ns[d], j)
+        end
+        @inbounds if Z <: Real
+            w = u_local[is...]
+            Atomix.@atomic u_global[js...] += w
+        elseif Z <: Complex
+            js_tail = Base.tail(js)
+            jfirst = 2 * js[1] - 1
+            w = u_local[is...]
+            Atomix.@atomic u_global[jfirst, js_tail...] += real(w)
+            Atomix.@atomic u_global[jfirst + 1, js_tail...] += imag(w)
+        end
+    end
+    nothing
 end
 
 ## ==================================================================================================== ##

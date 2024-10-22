@@ -74,8 +74,13 @@ type_length(::Type{<:NTuple{N}}) where {N} = N
         2M * D * Np +  # window_vals
         D * Np +       # points_sm
         D * Np         # inds_start
-    ) + (
-        sizeof(Z) * Np  # vp_sm
+    ) +
+    sizeof(Z) * (
+        Np  # vp_sm
+    ) +
+    sizeof(Int) * (
+        3 +  # buf_sm
+        D    # ishifts_sm
     )
     free_shmem = shmem_needs  # how much memory to leave free for other allocations
     max_shmem_size = (48 << 10) - free_shmem  # 48 KiB -- TODO: make this depend on the actual GPU?
