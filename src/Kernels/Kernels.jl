@@ -85,6 +85,13 @@ end
 # Note: evaluate_kernel_func generates a function which is callable from GPU kernels.
 @inline evaluate_kernel(g::AbstractKernelData, x₀) = evaluate_kernel_func(g)(x₀)
 
+@inline function evaluate_kernel_direct(g::AbstractKernelData, x)
+    Δx = gridstep(g)
+    i, r = point_to_cell(x, Δx)
+    values = _evaluate_kernel_direct(g, i, r)  # TODO: this is not yet defined for all kernels (only KB + BKB for now)
+    (; i, values,)
+end
+
 @inline function kernel_indices(i, ::AbstractKernelData{K, M}, args...) where {K, M}
     kernel_indices(i, HalfSupport(M), args...)
 end

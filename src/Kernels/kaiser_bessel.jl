@@ -172,3 +172,20 @@ function evaluate_kernel_func(g::KaiserBesselKernelData{M, T}) where {M, T}
         (; i, values,)
     end
 end
+
+function _evaluate_kernel_direct(
+        g::KaiserBesselKernelData{M, T}, i::Integer, r::T,
+    ) where {M, T}
+    (; β,) = g
+    X = (r - T(i - 1)) / M  # source position relative to xs[i]
+    # @assert 0 ≤ X < 1
+    Xc = 2 * X - 1  # in [-1, 1)
+    L = 2M
+    ntuple(Val(L)) do j
+        h = 1 - 2 * (j - one(T)/2) / L  # midpoint of interval
+        δ = 1 / L                  # half-width of interval
+        y = h + Xc * δ
+        s = sqrt(1 - y^2)
+        besseli0(β * s)
+    end
+end
