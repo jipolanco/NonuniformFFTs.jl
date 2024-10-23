@@ -212,9 +212,8 @@ function spread_from_points!(
             ndrange = groupsize .* ngroups
             kernel! = spread_from_points_shmem_kernel!(backend, groupsize, ndrange)
             kernel!(
-                us_real, gs, xs_comp, vp_sorted, pointperm_,
-                bd.cumulative_npoints_per_block, HalfSupport(M),
-                block_dims, Val(shmem_size), bd.batch_size,
+                us_real, gs, xs_comp, vp_sorted, pointperm_, bd.cumulative_npoints_per_block,
+                HalfSupport(M), block_dims, Val(shmem_size), bd.batch_size,
             )
         end
     end
@@ -287,8 +286,8 @@ end
     buf_sm = @localmem(Int, 3)
     ishifts_sm = @localmem(Int, D)  # shift between local and global array in each direction
 
-    # This block will take care of non-uniform points (a + 1):b
     if threadidx == 1
+        # This block (workgroup) will take care of non-uniform points (a + 1):b
         @inbounds buf_sm[1] = cumulative_npoints_per_block[block_n]       # = a
         @inbounds buf_sm[2] = cumulative_npoints_per_block[block_n + 1]   # = b
         @inbounds for d ∈ 1:D
