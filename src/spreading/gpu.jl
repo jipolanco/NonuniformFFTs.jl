@@ -34,9 +34,6 @@ end
 @inline spread_actual_dims(::Type{<:Real}, Ns) = Ns
 @inline spread_actual_dims(::Type{<:Complex}, Ns) = Base.setindex(Ns, Ns[1] >> 1, 1)  # actual number of complex elements in first dimension
 
-@inline spread_real_dims(::Type{<:Real}, Ns) = Ns
-@inline spread_real_dims(::Type{<:Complex}, Ns) = Base.setindex(Ns, Ns[1] << 1, 1)
-
 @inline function spread_onto_arrays_gpu!(
         us::NTuple{C, AbstractArray{T, D}},
         indvals::NTuple{D, <:Pair},
@@ -118,22 +115,6 @@ end
         itail = Base.tail(inds)
         Atomix.@atomic u[i₁ + 1, itail...] += real(v)
         Atomix.@atomic u[i₁ + 2, itail...] += imag(v)
-    end
-    nothing
-end
-
-# Same as _atomic_add!, but without the atomics.
-@inline function _add_maybecomplex!(u::AbstractArray{T}, v::T, inds::Tuple) where {T <: Real}
-    @inbounds u[inds...] += v
-    nothing
-end
-
-@inline function _add_maybecomplex!(u::AbstractArray{T}, v::Complex{T}, inds::Tuple) where {T <: Real}
-    @inbounds begin
-        i₁ = 2 * (inds[1] - 1)  # convert from logical index (equivalent complex array) to memory index (real array)
-        itail = Base.tail(inds)
-        u[i₁ + 1, itail...] += real(v)
-        u[i₁ + 2, itail...] += imag(v)
     end
     nothing
 end
