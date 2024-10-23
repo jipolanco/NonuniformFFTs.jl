@@ -5,6 +5,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Added
+
+- Add shared-memory implementation of GPU transforms.
+  They are disabled by default, and can be enabled by passing `gpu_method = :shared_memory`
+  (default is `:global_memory`).
+
 ## [v0.5.6](https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.5.6) - 2024-10-17
 
 ### Changed
