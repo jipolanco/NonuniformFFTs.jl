@@ -63,14 +63,14 @@ type_length(::Type{<:NTuple{N}}) where {N} = N
 # ================================================================================ #
 
 # Determine block size if using the shared-memory implementation.
-# We try to make sure that the total block size (including 2M ghost cells in each direction)
+# We try to make sure that the total block size (including 2M - 1 ghost cells in each direction)
 # is not larger than the available shared memory. In CUDA the limit is usually 48 KiB.
 # Note that the result is a compile-time constant (on Julia 1.11.1 at least).
 @inline function block_dims_gpu_shmem(::Type{Z}, ::Dims{D}, ::HalfSupport{M}, ::Val{Np}) where {Z <: Number, D, M, Np}
     T = real(Z)
     # These are extra shared-memory needs in spreading kernel (see spread_from_points_shmem_kernel!).
-    # Here Np is the batch size (batch_size parameter).
-    shmem_needs = sizeof(T) * (
+    # Here Np is the batch size (gpu_batch_size parameter).
+    base_shmem_required = sizeof(T) * (
         2M * D * Np +  # window_vals
         D * Np +       # points_sm
         D * Np         # inds_start
@@ -82,8 +82,7 @@ type_length(::Type{<:NTuple{N}}) where {N} = N
         3 +  # buf_sm
         D    # ishifts_sm
     )
-    free_shmem = shmem_needs  # how much memory to leave free for other allocations
-    max_shmem_size = (48 << 10) - free_shmem  # 48 KiB -- TODO: make this depend on the actual GPU?
+    max_shmem_size = (48 << 10) - base_shmem_required  # 48 KiB -- TODO: make this depend on the actual GPU?
     max_block_length = max_shmem_size ÷ sizeof(Z)  # maximum number of elements in a block
     m = floor(Int, max_block_length^(1/D))  # block size in each direction (including ghost cells / padding)
     n = m - (2M - 1)  # exclude ghost cells

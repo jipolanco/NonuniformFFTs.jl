@@ -307,7 +307,6 @@ end
 end
 
 # Copy values from global to shared memory.
-# - can we optimise memory access patterns?
 @inline function gridvalues_to_local_memory!(
         u_local::AbstractArray{T, D},
         u_global::AbstractArray{T, D},

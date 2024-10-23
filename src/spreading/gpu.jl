@@ -279,12 +279,22 @@ end
 
         @synchronize  # make sure shared memory is fully set to zero
 
+        # We operate in batches of up to `Np` non-uniform points / sources.
+        # The aim is to completely avoid atomic operations on shared memory: instead of
+        # parallelising over non-uniform points (1 point = 1 thread), we make all threads
+        # work on the same set of points, so that, in the end, all threads have the required
+        # information to spread point values onto `u_local`. That spreading operation is
+        # done by parallelising over the local grid of dimensions M^D (so that every thread
+        # writes to a different part of the array), instead of parallelising over the
+        # non-uniform points which would require atomics.
+
         # The first batch deals with points (a + 1):min(a + Np, b)
         @inbounds for batch_begin in buf_sm[1]:Np:(buf_sm[2] - 1)
             batch_size = min(Np, buf_sm[2] - batch_begin)  # current batch size
             buf_sm[3] = batch_size
-            # Iterate over points in the batch (ideally 1 thread per point).
-            # Each thread writes to shared memory.
+
+            # (1) Iterate over points in the batch.
+            # Each active thread writes to shared memory.
             @inbounds for p in threadidx:nthreads:batch_size
                 # Spread from point j
                 i = batch_begin + p  # index of non-uniform point
@@ -301,8 +311,8 @@ end
 
             @synchronize
 
-            # Now evaluate windows associated to each point.
-            local inds = CartesianIndices((1:buf_sm[3], 1:D))  # parallelise over dimensions + points
+            # (2) Evaluate window functions around each non-uniform point.
+            inds = CartesianIndices((1:buf_sm[3], 1:D))  # parallelise over dimensions + points
             @inbounds for n in threadidx:nthreads:length(inds)
                 p, d = Tuple(inds[n])
                 g = gs[d]
@@ -318,7 +328,8 @@ end
 
             @synchronize  # make sure all threads have the same shared data
 
-            # Now all threads spread together onto shared memory
+            # (3) All threads spread together onto shared memory, avoiding all collisions
+            # and thus not requiring atomic operations.
             @inbounds for p in 1:buf_sm[3]
                 local istart = ntuple(d -> @inbounds(inds_start[d, p]), Val(D))
                 local v = vp_sm[p]
@@ -329,6 +340,7 @@ end
 
         @synchronize  # make sure we have finished writing to shared memory
 
+        # Add values from shared memory onto global memory.
         @inbounds if buf_sm[1] < buf_sm[2]  # skip this step if there were actually no points in this block (if a == b)
             add_from_local_to_global_memory!(
                 us[c], u_local, Ns, ishifts_sm, Val(M);

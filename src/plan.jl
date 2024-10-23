@@ -109,28 +109,28 @@ The created plan contains all data needed to perform NUFFTs for non-uniform data
   This can improve performance if executing multiple transforms on the same non-uniform points.
   Note that, even when enabled, this does not modify the `points` argument passed to `set_points!`.
 
-- `gpu_method`: allows to select between two different implementations of
+- `gpu_method`: allows to select between different implementations of
   GPU transforms. Possible options are:
 
   * `:global_memory`: directly read and write onto arrays in global memory in spreading
     (type-1) and interpolation (type-2) operations;
 
-  * `:shared_memory`: copy data between global memory and faster shared memory (memory
-    shared between threads/work items within a single GPU workgroup) and perform most
-    operations in shared-memory, which is faster and can avoid some atomic operations in
-    type-1 transforms.
-    We try to use as much shared memory as is typically available on current GPUs (which is
-    not much, typically 48 KiB).
-    But still, this method can be much faster than the `:global_memory`, and may become the
-    default in the future.
-    Note that this method completely ignores the `block_size` parameter, as the block size is adjusted
-    to maximise shared memory usage.
-    See also the `gpu_batch_size` parameter below.
+  * `:shared_memory`: copy data between global memory and shared memory (local
+    to each GPU workgroup) and perform most operations in the latter, which is faster and
+    can help avoid some atomic operations in type-1 transforms. We try to use as much shared
+    memory as is typically available on current GPUs (which is not much, typically 48 KiB on
+    CUDA). But still, this method can be much faster than the `:global_memory` and may
+    become the default in the future. Note that this method completely ignores the
+    `block_size` parameter, as the actual block size is adjusted to maximise shared memory
+    usage. The performance of type-1 transforms can be further adjusted using the
+    `gpu_batch_size` parameter described below.
 
-  The default is currently `:global_memory` but this may change in the future.
+  The default is `:global_memory` but this may change in the future.
 
 - `gpu_batch_size = Val(16)`: batch size used in type-1 transforms when `gpu_method = :shared_memory`.
-  This can have a big impact on performance.
+  The idea is that, to avoid atomic operations on shared-memory arrays, we process
+  non-uniform points in batches of `Np` points (16 by default).
+  This can have a large impact on performance.
 
 ## Other parameters
 
