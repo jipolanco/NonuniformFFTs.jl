@@ -21,7 +21,7 @@
     Z = eltype(vp[1])
     Ns_real = size(first(us))  # dimensions of raw input data
     @assert eltype(first(us)) <: Real # output is a real array (but may actually describe complex data)
-    Ns = spread_actual_dims(Z, Ns_real)  # divides the Ns_real[1] by 2 if Z <: Complex
+    Ns = spread_actual_dims(Z, Ns_real)  # drop the first dimension (of size 2) if Z <: Complex
 
     indvals = get_inds_vals_gpu(gs, points, Ns, j)
 
@@ -32,10 +32,10 @@
 end
 
 @inline spread_actual_dims(::Type{<:Real}, Ns) = Ns
-@inline spread_actual_dims(::Type{<:Complex}, Ns) = Base.setindex(Ns, Ns[1] >> 1, 1)  # actual number of complex elements in first dimension
+@inline spread_actual_dims(::Type{<:Complex}, Ns) = Base.tail(Ns)  # actual number of complex elements: drop first dimension
 
 @inline function spread_onto_arrays_gpu!(
-        us::NTuple{C, AbstractArray{T, D}},
+        us::NTuple{C, AbstractArray{T}},
         indvals::NTuple{D, <:Pair},
         vs::NTuple{C},
         Ns::Dims{D},
@@ -111,13 +111,14 @@ end
 # so the output must be a real array `u`.
 @inline function _atomic_add!(u::AbstractArray{T}, v::Complex{T}, inds::Tuple) where {T <: Real}
     @inbounds begin
-        i₁ = 2 * (inds[1] - 1)  # convert from logical index (equivalent complex array) to memory index (real array)
-        itail = Base.tail(inds)
-        Atomix.@atomic u[i₁ + 1, itail...] += real(v)
-        Atomix.@atomic u[i₁ + 2, itail...] += imag(v)
+        Atomix.@atomic u[1, inds...] += real(v)
+        Atomix.@atomic u[2, inds...] += imag(v)
     end
     nothing
 end
+
+to_real_array(u::AbstractArray{T}) where {T <: Real} = u
+to_real_array(u::AbstractArray{T}) where {T <: Complex} = reinterpret(reshape, real(T), u)  # adds an extra first dimension with size 2
 
 # GPU implementation.
 # We assume all arrays are already on the GPU.
@@ -138,14 +139,7 @@ function spread_from_points!(
     # Reinterpret `us` as real arrays, in case they are complex.
     # This is to avoid current issues with atomic operations on complex data
     # (https://github.com/JuliaGPU/KernelAbstractions.jl/issues/497).
-    Z = eltype(us[1])
-    T = real(Z)
-    us_real = if Z <: Real
-        us
-    else  # complex case
-        @assert Z <: Complex
-        map(u -> reinterpret(T, u), us)  # note: we don't use reshape, so the first dimension has 2x elements
-    end
+    us_real = map(to_real_array, us)  # doesn't change anything if data is already real (Z === T)
 
     pointperm = get_pointperm(bd)                  # nothing in case of NullBlockData
     sort_points = get_sort_points(bd)::StaticBool  # False in the case of NullBlockData
@@ -245,7 +239,7 @@ end
         # the actual dataset dimensions.
         @assert T === real(Z) # output is a real array (but may actually describe complex data)
         Ns_real = size(first(us))  # dimensions of raw input data
-        Ns = spread_actual_dims(Z, Ns_real)  # divides the Ns_real[1] by 2 if Z <: Complex
+        Ns = spread_actual_dims(Z, Ns_real)  # drop the first dimension (of size 2) if Z <: Complex
     end
 
     block_n = @index(Group, Linear)      # linear index of block
@@ -376,7 +370,7 @@ end
 
 # Add values from shared to global memory.
 @inline function add_from_local_to_global_memory!(
-        u_global::AbstractArray{T, D},  # actual data in global array is always real
+        u_global::AbstractArray{T},     # actual data in global array is always real (and may have an extra first dimension)
         u_local::AbstractArray{Z, D},   # shared-memory array can be complex
         Ns::Dims{D},
         ishifts,
@@ -384,6 +378,7 @@ end
         threadidx, nthreads,
     ) where {Z, T, D, M}
     @assert T <: Real  # for atomic operations
+    # @assert ndims(u_global) === D + (Z <: Complex)  # extra dimension if data is complex
     inds = CartesianIndices(axes(u_local))
     offsets = ntuple(Val(D)) do d
         @inline
@@ -398,16 +393,8 @@ end
             j = is[d] + offsets[d]
             ifelse(j > Ns[d], j - Ns[d], j)
         end
-        @inbounds if Z <: Real
-            w = u_local[is...]
-            Atomix.@atomic u_global[js...] += w
-        elseif Z <: Complex
-            js_tail = Base.tail(js)
-            jfirst = 2 * js[1] - 1
-            w = u_local[is...]
-            Atomix.@atomic u_global[jfirst, js_tail...] += real(w)
-            Atomix.@atomic u_global[jfirst + 1, js_tail...] += imag(w)
-        end
+        w = u_local[is...]
+        _atomic_add!(u_global, w, js)
     end
     nothing
 end
