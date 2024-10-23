@@ -143,38 +143,3 @@ function evaluate_kernel_func(g::BackwardsKaiserBesselKernelData{M, T}) where {M
         (; i, values,)
     end
 end
-
-# TODO: remove?
-function evaluate_kernel_direct(
-        g::BackwardsKaiserBesselKernelData{M, T}, i::Integer, x::T,
-    ) where {M, T}
-    (; Δx, β,) = g
-    # i = point_to_cell(x, Δx)
-    X = x / Δx - T(i - 1)  # source position relative to xs[i]
-    # @assert 0 ≤ X < 1
-    Xc = 2 * X - 1  # in [-1, 1)
-    L = 2M
-    ntuple(Val(L)) do j
-        h = 1 - 2 * (j - one(T)/2) / L  # midpoint of interval
-        δ = 1 / L                  # half-width of interval
-        y = h + Xc * δ
-        @fastmath s = sqrt(1 - y^2)
-        @fastmath sinh(β * s)::T / (s * T(π))
-    end
-end
-
-function evaluate_kernel_direct(
-        g::BackwardsKaiserBesselKernelData{M, T}, i::Integer, n::Integer, x::T,
-    ) where {M, T}
-    (; Δx, β,) = g
-    # @assert 1 ≤ n ≤ 2M
-    X = x / Δx - T(i - 1)  # source position relative to xs[i]
-    # @assert 0 ≤ X < 1
-    Xc = 2 * X - 1  # in [-1, 1)
-    L = 2M
-    h = 1 - 2 * (n - one(T)/2) / L  # midpoint of interval
-    δ = 1 / L                  # half-width of interval
-    y = h + Xc * δ
-    @fastmath s = sqrt(1 - y^2)
-    @fastmath sinh(β * s)::T / (s * T(π))
-end
