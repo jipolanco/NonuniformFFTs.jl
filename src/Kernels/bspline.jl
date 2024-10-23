@@ -98,8 +98,8 @@ function evaluate_kernel_func(g::BSplineKernelData{M}) where {M}
     # This can be shown using the partition of unity property.
     (; Δt,) = g
     function (x)
-        i = point_to_cell(x, Δt)  # assume Δx = Δt
-        x′ = i - (x / Δt)  # normalised coordinate, 0 < x′ ≤ 1 (this assumes Δx = Δt)
+        i, r = point_to_cell(x, Δt)  # assume Δx = Δt
+        x′ = i - r  # normalised coordinate, 0 < x′ ≤ 1 (this assumes Δx = Δt)
         # @assert 0 ≤ x′ ≤ 1
         k = 2M  # B-spline order
         values = bsplines_evaluate_all(x′, Val(k), typeof(Δt))

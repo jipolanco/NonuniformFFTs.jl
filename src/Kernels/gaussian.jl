@@ -121,7 +121,7 @@ end
 function evaluate_kernel_func(g::GaussianKernelData{M}) where {M}
     (; τ, Δx, cs,) = g
     @inline @fastmath function (x)
-        i = point_to_cell(x, Δx)
+        i, r = point_to_cell(x, Δx)
         X = x - (i - 1) * Δx  # source position relative to xs[i]
         # @assert 0 ≤ X < i * Δx
         a = exp(-X^2 / τ)

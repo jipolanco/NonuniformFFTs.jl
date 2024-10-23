@@ -43,13 +43,13 @@ end
     @testset "Kernels.point_to_cell" begin
         Δx = 2π / 3
         let x = prevfloat(L / 3)
-            @test Kernels.point_to_cell(x, Δx) == 1
+            @test Kernels.point_to_cell(x, Δx)[1] == 1
         end
         let x = prevfloat(2 * L / 3)
-            @test Kernels.point_to_cell(x, Δx) == 2
+            @test Kernels.point_to_cell(x, Δx)[1] == 2
         end
         let x = prevfloat(L)
-            @test Kernels.point_to_cell(x, Δx) == 3
+            @test Kernels.point_to_cell(x, Δx)[1] == 3
         end
     end
 end
@@ -65,7 +65,7 @@ end
 
     @testset "Kernels.point_to_cell" begin
         Δx = T(2π) / 24
-        i = Kernels.point_to_cell(x, Δx)
+        i, r = Kernels.point_to_cell(x, Δx)
         @test (i - 1) * Δx ≤ x < i * Δx
     end
 

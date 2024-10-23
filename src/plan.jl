@@ -98,6 +98,7 @@ The created plan contains all data needed to perform NUFFTs for non-uniform data
   The current default is 4096 on the CPU and around 1024 on the GPU (but depends on the number of dimensions).
   These may change in the future or even depend on the actual computing device.
   On the CPU, using block partitioning is required for running with multiple threads.
+  On the GPU, this option is ignored if `gpu_method = :shared_memory`.
   Blocking / spatial sorting can be completely disabled by passing `block_size = nothing` (but this is
   generally slower).
 
@@ -107,6 +108,29 @@ The created plan contains all data needed to perform NUFFTs for non-uniform data
   In this case, more time will be spent in [`set_points!`](@ref) and less time on the actual transforms.
   This can improve performance if executing multiple transforms on the same non-uniform points.
   Note that, even when enabled, this does not modify the `points` argument passed to `set_points!`.
+
+- `gpu_method`: allows to select between different implementations of
+  GPU transforms. Possible options are:
+
+  * `:global_memory`: directly read and write onto arrays in global memory in spreading
+    (type-1) and interpolation (type-2) operations;
+
+  * `:shared_memory`: copy data between global memory and shared memory (local
+    to each GPU workgroup) and perform most operations in the latter, which is faster and
+    can help avoid some atomic operations in type-1 transforms. We try to use as much shared
+    memory as is typically available on current GPUs (which is not much, typically 48 KiB on
+    CUDA). But still, this method can be much faster than the `:global_memory` and may
+    become the default in the future. Note that this method completely ignores the
+    `block_size` parameter, as the actual block size is adjusted to maximise shared memory
+    usage. The performance of type-1 transforms can be further adjusted using the
+    `gpu_batch_size` parameter described below.
+
+  The default is `:global_memory` but this may change in the future.
+
+- `gpu_batch_size = Val(16)`: batch size used in type-1 transforms when `gpu_method = :shared_memory`.
+  The idea is that, to avoid atomic operations on shared-memory arrays, we process
+  non-uniform points in batches of `Np` points (16 by default).
+  This can have a large impact on performance.
 
 ## Other parameters
 
@@ -308,6 +332,8 @@ function _PlanNUFFT(
         backend::KA.Backend = CPU(),
         block_size::Union{Integer, Dims{D}, Nothing} = default_block_size(Ns, backend),
         synchronise::Bool = false,
+        gpu_method::Symbol = :global_memory,
+        gpu_batch_size::Val = Val(16),  # currently only used in shared-memory GPU spreading
     ) where {T <: Number, D}
     ks = init_wavenumbers(T, Ns)
     # Determine dimensions of oversampled grid.
@@ -342,7 +368,7 @@ function _PlanNUFFT(
     else
         block_dims = get_block_dims(Ñs, block_size)
         if backend isa GPU
-            blocks = BlockDataGPU(T, backend, block_dims, Ñs, sort_points)
+            blocks = BlockDataGPU(T, backend, block_dims, Ñs, h, sort_points; method = gpu_method, batch_size = gpu_batch_size,)
         else
             blocks = BlockData(T, block_dims, Ñs, h, num_transforms, sort_points)
             FFTW.set_num_threads(Threads.nthreads())

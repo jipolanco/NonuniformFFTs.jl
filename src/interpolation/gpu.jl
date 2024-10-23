@@ -1,5 +1,24 @@
 using StaticArrays: MVector
 
+# Note: this is also used in spreading
+@inline function get_inds_vals_gpu(gs::NTuple{D}, points::NTuple{D}, Ns::NTuple{D}, j::Integer) where {D}
+    ntuple(Val(D)) do n
+        @inline
+        get_inds_vals_gpu(gs[n], points[n], Ns[n], j)
+    end
+end
+
+# Note: this is also used in spreading
+@inline function get_inds_vals_gpu(g::AbstractKernelData, points::AbstractVector, N::Integer, j::Integer)
+    x = @inbounds points[j]
+    gdata = Kernels.evaluate_kernel(g, x)
+    vals = gdata.values    # kernel values
+    M = Kernels.half_support(g)
+    i₀ = gdata.i - M  # active region is (i₀ + 1):(i₀ + 2M) (up to periodic wrapping)
+    i₀ = ifelse(i₀ < 0, i₀ + N, i₀)  # make sure i₀ ≥ 0
+    i₀ => vals
+end
+
 # Interpolate onto a single point
 @kernel function interpolate_to_point_naive_kernel!(
         vp::NTuple{C},
@@ -7,7 +26,7 @@ using StaticArrays: MVector
         @Const(points::NTuple{D}),
         @Const(us::NTuple{C}),
         @Const(pointperm),
-        @Const(Δxs::NTuple{D}),           # grid step in each direction (oversampled grid)
+        @Const(prefactor::Real),    # = volume of a grid cell = prod(Δxs)
     ) where {C, D}
     i = @index(Global, Linear)
 
@@ -22,21 +41,9 @@ using StaticArrays: MVector
     # don't perform atomic operations. This is why the code is simpler here.
     Ns = size(first(us))  # grid dimensions
 
-    indvals = ntuple(Val(D)) do n
-        @inline
-        @inbounds begin
-            g = gs[n]
-            x = points[n][j]
-            gdata = Kernels.evaluate_kernel(g, x)
-            vals = gdata.values    # kernel values
-            M = Kernels.half_support(gs[n])
-            i₀ = gdata.i - M  # active region is (i₀ + 1):(i₀ + 2M) (up to periodic wrapping)
-            i₀ = ifelse(i₀ < 0, i₀ + Ns[n], i₀)  # make sure i₀ ≥ 0
-            i₀ => vals
-        end
-    end
+    indvals = get_inds_vals_gpu(gs, points, Ns, j)
 
-    v⃗ = interpolate_from_arrays_gpu(us, indvals, Ns, Δxs)
+    v⃗ = interpolate_from_arrays_gpu(us, indvals, Ns, prefactor)
 
     for n ∈ eachindex(vp, v⃗)
         @inbounds vp[n][j] = v⃗[n]
@@ -48,17 +55,18 @@ end
 function interpolate!(
         backend::GPU,
         bd::Union{BlockDataGPU, NullBlockData},
-        gs,
+        gs::NTuple{D},
         vp_all::NTuple{C, AbstractVector},
         us::NTuple{C, AbstractArray},
         x⃗s::AbstractVector,
-    ) where {C}
+    ) where {C, D}
     # Note: the dimensions of arrays have already been checked via check_nufft_nonuniform_data.
     Base.require_one_based_indexing(x⃗s)  # this is to make sure that all indices match
     foreach(Base.require_one_based_indexing, vp_all)
 
     xs_comp = StructArrays.components(x⃗s)
     Δxs = map(Kernels.gridstep, gs)
+    prefactor = prod(Δxs)  # interpolations need to be multiplied by the volume of a grid cell
 
     pointperm = get_pointperm(bd)                  # nothing in case of NullBlockData
     sort_points = get_sort_points(bd)::StaticBool  # False in the case of NullBlockData
@@ -77,15 +85,44 @@ function interpolate!(
 
     # We use dynamically sized kernels to avoid recompilation, since number of points may
     # change from one call to another.
-    ndrange = size(x⃗s)  # iterate through points
-    workgroupsize = default_workgroupsize(backend, ndrange)
-    kernel! = interpolate_to_point_naive_kernel!(backend, workgroupsize)
-    kernel!(vp_sorted, gs, xs_comp, us, pointperm_, Δxs; ndrange)
+    ndrange_points = size(x⃗s)  # iterate through points
+    groupsize_points = default_workgroupsize(backend, ndrange_points)
+
+    method = gpu_method(bd)
+
+    if method === :global_memory
+        let ndrange = ndrange_points, groupsize = groupsize_points
+            kernel! = interpolate_to_point_naive_kernel!(backend, groupsize)
+            kernel!(vp_sorted, gs, xs_comp, us, pointperm_, prefactor; ndrange)
+        end
+    elseif method === :shared_memory
+        @assert bd isa BlockDataGPU
+        Z = eltype(us[1])
+        M = Kernels.half_support(gs[1])
+        @assert all(g -> Kernels.half_support(g) === M, gs)  # check that they're all equal
+        block_dims_val = block_dims_gpu_shmem(Z, size(us[1]), HalfSupport(M), bd.batch_size)  # this is usually a compile-time constant...
+        block_dims = Val(block_dims_val)  # ...which means this doesn't require a dynamic dispatch
+        @assert block_dims_val === bd.block_dims
+        let ngroups = bd.nblocks_per_dir  # this is the required number of workgroups (number of blocks in CUDA)
+            block_dims_padded = @. block_dims_val + 2M - 1  # dimensions of shared memory array
+            shmem_size = block_dims_padded
+            groupsize = groupsize_shmem(ngroups, block_dims_padded, length(x⃗s))
+            ndrange = groupsize .* ngroups
+            kernel! = interpolate_to_points_shmem_kernel!(backend, groupsize, ndrange)
+            kernel!(
+                vp_sorted, gs, xs_comp, us, pointperm_, bd.cumulative_npoints_per_block,
+                prefactor,
+                block_dims, Val(shmem_size),
+            )
+        end
+    end
 
     if sort_points === True()
-        kernel_perm! = interp_permute_kernel!(backend, workgroupsize)
-        kernel_perm!(vp_all, vp_sorted, pointperm; ndrange)
-        foreach(KA.unsafe_free!, vp_sorted)  # manually deallocate temporary arrays
+        let ndrange = ndrange_points, groupsize = groupsize_points
+            kernel_perm! = interp_permute_kernel!(backend, groupsize)
+            kernel_perm!(vp_all, vp_sorted, pointperm; ndrange)
+            foreach(KA.unsafe_free!, vp_sorted)  # manually deallocate temporary arrays
+        end
     end
 
     vp_all
@@ -95,7 +132,7 @@ end
         us::NTuple{C, AbstractArray{T, D}},
         indvals::NTuple{D, <:Pair},
         Ns::Dims{D},
-        Δxs::NTuple{D, Tr},
+        prefactor::Tr,
     ) where {T, Tr, C, D}
     if @generated
         gprod_init = Symbol(:gprod_, D + 1)  # the name of this variable is important!
@@ -105,7 +142,7 @@ end
             vals = map(last, indvals)    # evaluated kernel values in each direction
             inds = map(eachindex, vals)  # = (1:L, 1:L, ...) where L = 2M is the kernel width
             vs = zero(MVector{$C, $T})   # interpolated value (output)
-            $gprod_init = prod(Δxs)  # product of kernel values (initially Δx[1] * Δx[2] * ...)
+            $gprod_init = prefactor  # product of kernel values (initially Δx[1] * Δx[2] * ...)
             @nloops(
                 $D, i,
                 d -> inds[d],  # for i_d ∈ 1:L
@@ -137,7 +174,7 @@ end
         vals_first, vals_tail = first(vals), Base.tail(vals)
         istart_first, istart_tail = first(inds_start), Base.tail(inds_start)
         N, Ns_tail = first(Ns), Base.tail(Ns)
-        gprod_base = prod(Δxs)  # this factor is needed in interpolation only
+        gprod_base = prefactor  # this factor is needed in interpolation only
         @inbounds for I_tail ∈ CartesianIndices(inds_tail)
             is_tail = Tuple(I_tail)
             gs_tail = map(inbounds_getindex, vals_tail, is_tail)
@@ -170,4 +207,168 @@ end
         @inbounds vp[n][j] = vp_in[n][i]
     end
     nothing
+end
+
+## ========================================================================================== ##
+## Shared-memory implementation
+
+# Note: this is also used in spreading.
+function groupsize_shmem(ngroups::NTuple{D}, shmem_size::NTuple{D}, Np) where {D}
+    # (1) Determine the total number of threads.
+    # Not sure if it's worth it to define as a function of the inputs (currently unused).
+    # From tests, the value of 64 seems to be optimal in various situations.
+    groupsize = 64  # minimum group size should be equal to the warp size (usually 32 on CUDA and 64 on AMDGPU)
+    # (2) Determine number of threads in each direction.
+    # We don't really care about the Cartesian distribution of threads, since we always
+    # parallelise over linear indices.
+    gsizes = ntuple(_ -> 1, Val(D))
+    Base.setindex(gsizes, groupsize, 1)  # = (groupsize, 1, 1, ...)
+end
+
+@kernel function interpolate_to_points_shmem_kernel!(
+        vp::NTuple{C, AbstractVector{Z}},
+        @Const(gs::NTuple{D}),
+        @Const(points::NTuple{D}),
+        @Const(us::NTuple{C, AbstractArray{Z}}),
+        @Const(pointperm),
+        @Const(cumulative_npoints_per_block::AbstractVector),
+        @Const(prefactor::Real),    # = volume of a grid cell = prod(Δxs)
+        ::Val{block_dims},
+        ::Val{shmem_size},  # this is a bit redundant, but seems to be required for CPU backends (used in tests)
+    ) where {C, D, Z <: Number, block_dims, shmem_size}
+
+    @uniform begin
+        groupsize = @groupsize()::Dims{D}
+        nthreads = prod(groupsize)
+    end
+
+    block_n = @index(Group, Linear)      # linear index of block
+    block_index = @index(Group, NTuple)  # workgroup index (= block index)
+    threadidx = @index(Local, Linear)    # in 1:nthreads
+
+    u_local = @localmem(Z, shmem_size)  # allocate shared memory
+
+    # This needs to be in shared memory for CPU tests (otherwise it doesn't survive across
+    # @synchronize barriers).
+    ishifts_sm = @localmem(Int, D)  # shift between local and global array in each direction
+
+    if threadidx == 1
+        # This block (workgroup) will take care of non-uniform points (a + 1):b
+        @inbounds for d ∈ 1:D
+            ishifts_sm[d] = (block_index[d] - 1) * block_dims[d] + 1
+        end
+    end
+
+    @synchronize  # synchronise ishifts_sm
+
+    # Interpolate components one by one (to avoid using too much memory)
+    @inbounds for c ∈ 1:C
+        # Copy grid data from global to shared memory
+        M = Kernels.half_support(gs[1])
+        gridvalues_to_local_memory!(
+            u_local, us[c], ishifts_sm, Val(M);
+            threadidx, nthreads,
+        )
+
+        @synchronize  # make sure all threads have the same shared data
+
+        # This block will take care of non-uniform points (a + 1):b
+        @inbounds a = cumulative_npoints_per_block[block_n]
+        @inbounds b = cumulative_npoints_per_block[block_n + 1]
+
+        for i in (a + threadidx):nthreads:b
+            # Interpolate at point j
+            j = if pointperm === nothing
+                i
+            else
+                @inbounds pointperm[i]
+            end
+
+            # TODO: can we do this just once for all components? (if C > 1)
+            indvals = ntuple(Val(D)) do d
+                @inline
+                x = @inbounds points[d][j]
+                gdata = Kernels.evaluate_kernel(gs[d], x)
+                local i₀ = gdata.i - ishifts_sm[d]
+                local vals = gdata.values    # kernel values
+                # @assert i₀ ≥ 0
+                # @assert i₀ + 2M ≤ block_dims_padded[n]
+                i₀ => vals
+            end
+
+            inds_start = map(first, indvals)
+            window_vals = map(last, indvals)
+            v = interpolate_from_arrays_shmem(u_local, inds_start, window_vals, prefactor)
+            @inbounds vp[c][j] = v
+        end
+    end
+
+    nothing
+end
+
+# Copy values from global to shared memory.
+@inline function gridvalues_to_local_memory!(
+        u_local::AbstractArray{T, D},
+        u_global::AbstractArray{T, D},
+        ishifts,
+        ::Val{M};
+        threadidx, nthreads,
+    ) where {T, D, M}
+    Ns = size(u_global)
+    inds = CartesianIndices(axes(u_local))
+    offsets = ntuple(Val(D)) do d
+        @inline
+        off = ishifts[d] - M
+        ifelse(off < 0, off + Ns[d], off)  # make sure the offset is non-negative (to avoid some wrapping below)
+    end
+    @inbounds for n ∈ threadidx:nthreads:length(inds)
+        is = Tuple(inds[n])
+        js = ntuple(Val(D)) do d
+            @inline
+            j = is[d] + offsets[d]
+            ifelse(j > Ns[d], j - Ns[d], j)
+        end
+        u_local[n] = u_global[js...]
+    end
+    nothing
+end
+
+# Interpolate a single "component" (one transform at a time).
+# Here vp is a vector instead of a tuple of vectors.
+@inline function interpolate_from_arrays_shmem(
+        u_local::AbstractArray{Z, D},
+        inds_start::NTuple{D},
+        window_vals::NTuple{D},
+        prefactor,
+    ) where {Z, D}
+    if @generated
+        gprod_init = Symbol(:gprod_, D + 1)  # the name of this variable is important!
+        quote
+            $gprod_init = prefactor
+            v = zero(Z)
+            inds = map(eachindex, window_vals)  # = (1:2M, 1:2M, ...)
+            @nloops(
+                $D, i,
+                d -> inds[d],
+                d -> begin
+                    @inbounds gprod_d = gprod_{d + 1} * window_vals[d][i_d]
+                    @inbounds j_d = inds_start[d] + i_d
+                end,
+                begin
+                    js = @ntuple($D, j)
+                    @inbounds v += gprod_1 * u_local[js...]
+                end,
+            )
+            v
+        end
+    else
+        v = zero(Z)
+        inds = map(eachindex, window_vals)  # = (1:2M, 1:2M, ...)
+        @inbounds for I ∈ CartesianIndices(inds)
+            gprod = prefactor * prod(ntuple(d -> @inbounds(window_vals[d][I[d]]), Val(D)))
+            js = inds_start .+ Tuple(I)
+            v += gprod * u_local[js...]
+        end
+        v
+    end
 end
