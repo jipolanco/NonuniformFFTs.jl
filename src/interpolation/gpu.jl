@@ -248,16 +248,25 @@ end
 
     u_local = @localmem(Z, shmem_size)  # allocate shared memory
 
-    ishifts = ntuple(Val(D)) do d
-        (block_index[d] - 1) * block_dims[d] + 1
+    # This needs to be in shared memory for CPU tests (otherwise it doesn't survive across
+    # @synchronize barriers).
+    ishifts_sm = @localmem(Int, D)  # shift between local and global array in each direction
+
+    if threadidx == 1
+        # This block (workgroup) will take care of non-uniform points (a + 1):b
+        @inbounds for d ∈ 1:D
+            ishifts_sm[d] = (block_index[d] - 1) * block_dims[d] + 1
+        end
     end
+
+    @synchronize  # synchronise ishifts_sm
 
     # Interpolate components one by one (to avoid using too much memory)
     @inbounds for c ∈ 1:C
         # Copy grid data from global to shared memory
         M = Kernels.half_support(gs[1])
         gridvalues_to_local_memory!(
-            u_local, us[c], ishifts, Val(M);
+            u_local, us[c], ishifts_sm, Val(M);
             threadidx, nthreads,
         )
 
@@ -280,7 +289,7 @@ end
                 @inline
                 x = @inbounds points[d][j]
                 gdata = Kernels.evaluate_kernel(gs[d], x)
-                local i₀ = gdata.i - ishifts[d]
+                local i₀ = gdata.i - ishifts_sm[d]
                 local vals = gdata.values    # kernel values
                 # @assert i₀ ≥ 0
                 # @assert i₀ + 2M ≤ block_dims_padded[n]
