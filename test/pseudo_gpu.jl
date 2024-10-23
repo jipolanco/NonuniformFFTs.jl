@@ -50,7 +50,7 @@ end
 
 # ================================================================================ #
 
-function run_plan(p::PlanNUFFT, xp_init::AbstractArray, vp_init::AbstractVector)
+function run_plan(p::PlanNUFFT, xp_init::AbstractArray, vp_init::NTuple{Nc, AbstractVector}) where {Nc}
     (; backend,) = p
 
     xp = adapt(backend, xp_init)
@@ -78,32 +78,34 @@ function run_plan(p::PlanNUFFT, xp_init::AbstractArray, vp_init::AbstractVector)
     T = eltype(p)  # this is actually defined in AbstractNFFTs; it represents the type in Fourier space (always complex)
     @test T <: Complex
     dims = size(p)
-    us = KA.allocate(backend, T, dims)
+    us = map(_ -> KA.allocate(backend, T, dims), vp)
     exec_type1!(us, p, vp)
 
-    wp = similar(vp)
+    wp = map(similar, vp)
     exec_type2!(wp, p, us)
 
     (; backend, us, wp,)
 end
 
-function compare_with_cpu(::Type{T}, dims; Np = prod(dims), kws...) where {T <: Number}
+function compare_with_cpu(::Type{T}, dims; Np = prod(dims), ntransforms::Val{Nc} = Val(1), kws...) where {T <: Number, Nc}
     # Generate some non-uniform random data on the CPU
     rng = Xoshiro(42)
     N = length(dims)    # number of dimensions
     Tr = real(T)
     xp_init = [rand(rng, SVector{N, Tr}) * Tr(2π) for _ ∈ 1:Np]  # non-uniform points in [0, 2π]ᵈ
-    vp_init = randn(rng, T, Np)          # random values at points
+    vp_init = ntuple(_ -> randn(rng, T, Np), ntransforms)
 
-    params = (; m = HalfSupport(4), kernel = KaiserBesselKernel(), σ = 1.5, kws...)
+    params = (; m = HalfSupport(4), kernel = KaiserBesselKernel(), σ = 1.5, ntransforms, kws...)
     p_cpu = PlanNUFFT(T, dims; params..., backend = CPU())
     p_gpu = PlanNUFFT(T, dims; params..., backend = PseudoGPU())
 
     r_cpu = run_plan(p_cpu, xp_init, vp_init)
     r_gpu = run_plan(p_gpu, xp_init, vp_init)
 
-    @test r_cpu.us ≈ r_gpu.us  # output of type-1 transform
-    @test r_cpu.wp ≈ r_gpu.wp  # output of type-2 transform
+    for c ∈ 1:Nc
+        @test r_cpu.us[c] ≈ r_gpu.us[c]  # output of type-1 transform
+        @test r_cpu.wp[c] ≈ r_gpu.wp[c]  # output of type-2 transform
+    end
 
     nothing
 end
@@ -122,5 +124,10 @@ end
     @testset "gpu_method = :shared_memory" begin
         @testset "Float32" compare_with_cpu(Float32, dims; gpu_method = :shared_memory)
         @testset "ComplexF32" compare_with_cpu(ComplexF32, dims; gpu_method = :shared_memory)
+    end
+    @testset "Multiple transforms" begin
+        ntransforms = Val(2)
+        @testset "Global memory" compare_with_cpu(Float32, dims; ntransforms, gpu_method = :global_memory)
+        @testset "Shared memory" compare_with_cpu(Float32, dims; ntransforms, gpu_method = :shared_memory)
     end
 end

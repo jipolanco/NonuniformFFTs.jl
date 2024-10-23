@@ -342,9 +342,9 @@ end
             )
         end
 
-        if c < C
-            @synchronize  # wait before jumping to next component
-        end
+        # Avoid resetting u_local too early in the next iteration (c -> c + 1).
+        # This is mostly useful when c < C (but putting an `if` fails...).
+        @synchronize
     end
 
     nothing
