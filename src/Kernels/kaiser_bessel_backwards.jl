@@ -134,10 +134,10 @@ function evaluate_fourier_func(g::BackwardsKaiserBesselKernelData)
 end
 
 function evaluate_kernel_func(g::BackwardsKaiserBesselKernelData{M, T}) where {M, T}
-    (; w, Δx, cs,) = g
+    (; Δx, cs,) = g
     function (x)
-        i = point_to_cell(x, Δx)
-        X = x / w - T(i - 1) / M  # source position relative to xs[i]
+        i, r = point_to_cell(x, Δx)  # r = x / Δx
+        X = (r - T(i - 1)) / M  # source position relative to xs[i]
         # @assert 0 ≤ X < 1 / M
         values = evaluate_piecewise(X, cs)
         (; i, values,)

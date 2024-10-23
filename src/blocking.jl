@@ -245,7 +245,7 @@ end
         # errors) due to numerical accuracy issues. So we first obtain the index on the
         # Δx grid, then we translate that to a block index by dividing by the block
         # dimensions (= how many Δx's in a single block).
-        i = Kernels.point_to_cell(x⃗[n], Δxs[n])  # index of grid cell where point is located
+        i, r = Kernels.point_to_cell(x⃗[n], Δxs[n])  # index of grid cell where point is located
         cld(i, block_dims[n])  # index of block where point is located
     end
     @inbounds LinearIndices(nblocks_per_dir)[is...]
@@ -410,7 +410,7 @@ function set_points_impl!(
     @timeit timer "(1) Assign blocks" @inbounds for (i, x⃗) ∈ pairs(xp)
         # Get index of block where point x⃗ is located.
         y⃗ = to_unit_cell(transform(NTuple{N}(x⃗)))  # converts `x⃗` to Tuple if it's an SVector
-        is = map(Kernels.point_to_cell, y⃗, block_sizes)
+        is = map(first ∘ Kernels.point_to_cell, y⃗, block_sizes)  # we use first((i, r)) -> i
         if bd.sort_points === False()
             points[i] = y⃗  # copy folded point (doesn't need to be sorted)
         end
@@ -440,7 +440,7 @@ function set_points_impl!(
             # We recompute the block index associated to this point.
             x⃗ = xp[i]
             y⃗ = to_unit_cell(transform(NTuple{N}(x⃗)))  # converts `x⃗` to Tuple if it's an SVector
-            is = map(Kernels.point_to_cell, y⃗, block_sizes)
+            is = map(first ∘ Kernels.point_to_cell, y⃗, block_sizes)  # we use first((i, r)) -> i
             n = to_linear_index[is...]  # linear index of block
             j = cumulative_npoints_per_block[n] + blockidx[i]
             pointperm[j] = i

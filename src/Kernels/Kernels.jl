@@ -71,6 +71,7 @@ function init_fourier_coefficients!(g::AbstractKernelData, ks::AbstractVector)
 end
 
 # Assign a cell index to a location `x`. This assumes 0 ≤ x < 2π.
+# This also returns x / Δx to avoid recomputing it later.
 @inline function point_to_cell(x, Δx)
     r = x / Δx
     i = unsafe_trunc(Int, r)  # assumes r ≥ 0
@@ -78,7 +79,7 @@ end
     # is very close (but slightly smaller) to i * Δx.
     i += (i * Δx ≤ x)  # this is almost always true (so we increment by 1)
     # @assert (i - 1) * Δx ≤ x < i * Δx
-    i
+    i, r
 end
 
 # Note: evaluate_kernel_func generates a function which is callable from GPU kernels.
