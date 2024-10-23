@@ -266,18 +266,30 @@ end
         nthreads = prod(groupsize)
     end
 
-    threadidxs = @index(Local, NTuple)   # in (1:nthreads_x, 1:nthreads_y, ...)
     threadidx = @index(Local, Linear)    # in 1:nthreads
     block_index = @index(Group, NTuple)  # workgroup index (= block index)
     block_n = @index(Group, Linear)      # linear index of block
 
     u_local = @localmem(Z, shmem_size)  # allocate shared memory
 
+    ishifts_sm = @localmem(Int, D)  # shift between local and global array in each direction
+
+    if threadidx == 1
+        @inbounds for d ∈ 1:D
+            ishifts_sm[d] = (block_index[d] - 1) * block_dims[d] + 1
+        end
+    end
+
+    @synchronize
+
     # Interpolate components one by one (to avoid using too much memory)
     for c ∈ 1:C
         # Copy grid data from global to shared memory
         M = Kernels.half_support(gs[1])
-        gridvalues_to_local_memory!(u_local, us[c], Val(M), block_index, block_dims, threadidxs, groupsize)
+        gridvalues_to_local_memory!(
+            u_local, us[c], ishifts_sm, Val(M);
+            threadidx, nthreads,
+        )
 
         @synchronize  # make sure all threads have the same shared data
 
@@ -294,13 +306,13 @@ end
             end
 
             # TODO: can we do this just once for all components? (if C > 1)
-            indvals = ntuple(Val(D)) do n
+            indvals = ntuple(Val(D)) do d
                 @inline
-                x = @inbounds points[n][j]
-                gdata = Kernels.evaluate_kernel(gs[n], x)
-                local vals = gdata.values    # kernel values
-                local ishift = (block_index[n] - 1) * block_dims[n] + 1
+                x = @inbounds points[d][j]
+                gdata = Kernels.evaluate_kernel(gs[d], x)
+                ishift = ishifts_sm[d]
                 local i₀ = gdata.i - ishift
+                local vals = gdata.values    # kernel values
                 # @assert i₀ ≥ 0
                 # @assert i₀ + 2M ≤ block_dims_padded[n]
                 i₀ => vals
@@ -319,54 +331,27 @@ end
 @inline function gridvalues_to_local_memory!(
         u_local::AbstractArray{T, D},
         u_global::AbstractArray{T, D},
-        ::Val{M}, block_index::Dims{D}, block_dims::Dims{D}, threadidxs::Dims{D}, groupsize::Dims{D},
+        ishifts,
+        ::Val{M};
+        threadidx, nthreads,
     ) where {T, D, M}
-    if @generated
-        quote
-            Ns = size(u_global)
-            inds = @ntuple($D, n -> axes(u_local, n)[threadidxs[n]:groupsize[n]:end])
-            offsets = @ntuple(
-                $D,
-                n -> let
-                    off = (block_index[n] - 1) * block_dims[n] - ($M - 1)
-                    ifelse(off < 0, off + Ns[n], off)  # make sure the offset is non-negative (to avoid some wrapping below)
-                end
-            )
-            @nloops(
-                $D, i,
-                d -> inds[d],
-                d -> begin
-                    j_d = offsets[d] + i_d
-                    j_d = ifelse(j_d > Ns[d], j_d - Ns[d], j_d)
-                end,
-                begin
-                    is = @ntuple($D, i)
-                    js = @ntuple($D, j)
-                    @inbounds u_local[is...] = u_global[js...]
-                end,
-            )
-            nothing
-        end
-    else
-        Ns = size(u_global)
-        inds = ntuple(Val(D)) do n
-            axes(u_local, n)[threadidxs[n]:groupsize[n]:end]  # this determines the parallelisation pattern
-        end
-        offsets = ntuple(Val(D)) do n
-            @inline
-            off = (block_index[n] - 1) * block_dims[n] - (M - 1)
-            ifelse(off < 0, off + Ns[n], off)  # make sure the offset is non-negative (to avoid some wrapping below)
-        end
-        @inbounds for is ∈ Iterators.product(inds...)
-            js = ntuple(Val(D)) do n
-                @inline
-                j = offsets[n] + is[n]
-                ifelse(j > Ns[n], j - Ns[n], j)
-            end
-            u_local[is...] = u_global[js...]
-        end
-        nothing
+    Ns = size(u_global)
+    inds = CartesianIndices(axes(u_local))
+    offsets = ntuple(Val(D)) do d
+        @inline
+        off = ishifts[d] - M
+        ifelse(off < 0, off + Ns[d], off)  # make sure the offset is non-negative (to avoid some wrapping below)
     end
+    @inbounds for n ∈ threadidx:nthreads:length(inds)
+        is = Tuple(inds[n])
+        js = ntuple(Val(D)) do d
+            @inline
+            j = is[d] + offsets[d]
+            ifelse(j > Ns[d], j - Ns[d], j)
+        end
+        u_local[n] = u_global[js...]
+    end
+    nothing
 end
 
 # Interpolate a single "component" (one transform at a time).

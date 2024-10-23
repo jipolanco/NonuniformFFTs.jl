@@ -270,7 +270,6 @@ end
 
     block_n = @index(Group, Linear)      # linear index of block
     block_index = @index(Group, NTuple)  # workgroup index (= block index)
-    threadidxs = @index(Local, NTuple)   # in (1:nthreads_x, 1:nthreads_y, ...)
     threadidx = @index(Local, Linear)    # in 1:nthreads
 
     # Allocate static shared memory
