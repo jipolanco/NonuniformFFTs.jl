@@ -108,13 +108,11 @@ function interpolate!(
             shmem_size = block_dims_padded
             groupsize = groupsize_shmem(ngroups, block_dims_padded, length(x⃗s))
             ndrange = groupsize .* ngroups
-            # TODO:
-            # - try out batches in interpolation?
             kernel! = interpolate_to_points_shmem_kernel!(backend, groupsize, ndrange)
             kernel!(
                 vp_sorted, gs, xs_comp, us, pointperm_, bd.cumulative_npoints_per_block,
-                prefactor, block_dims,
-                Val(shmem_size),
+                prefactor,
+                block_dims, Val(shmem_size),
             )
         end
     end
@@ -128,41 +126,6 @@ function interpolate!(
     end
 
     vp_all
-end
-
-# Determine groupsize (number of threads per direction) in :shared_memory method.
-# Here Np is the number of non-uniform points.
-# The distribution of threads across directions mainly (only?) affects the copies between
-# shared and global memories, so it can have an important influence of performance due to
-# memory accesses.
-# NOTE: this is also used in spreading
-function groupsize_shmem(ngroups::NTuple{D}, shmem_size::NTuple{D}, Np) where {D}
-    # (1) Determine the total number of threads.
-    groupsize = 64  # minimum group size should be equal to the warp size (usually 32 on CUDA and 64 on AMDGPU)
-    # Increase groupsize if number of points is much larger (at least 4×) than the groupsize.
-    # Not sure this is a good idea if the point distribution is very inhomogeneous...
-    # TODO see if this improves performance in highly dense cases
-    # points_per_group = Np / prod(ngroups)  # average number of points per block
-    # while groupsize < 1024 && 4 * groupsize ≤ points_per_group
-    #     groupsize *= 2
-    # end
-    # (2) Determine number of threads in each direction.
-    # This mainly affects the performance of global -> shared memory copies.
-    # It seems like it's better to parallelise the outer dimensions first.
-    gsizes = ntuple(_ -> 1, Val(D))
-    p = 1  # product of sizes
-    i = D  # parallelise outer dimensions first
-    while p < groupsize
-        if gsizes[i] < shmem_size[i] || i == 1
-            gsizes = Base.setindex(gsizes, gsizes[i] * 2, i)
-            p *= 2
-        else
-            @assert i > 1
-            i -= 1
-        end
-    end
-    @assert p == groupsize == prod(gsizes)
-    gsizes
 end
 
 @inline function interpolate_from_arrays_gpu(
@@ -248,6 +211,19 @@ end
 
 ## ========================================================================================== ##
 ## Shared-memory implementation
+
+# Note: this is also used in spreading.
+function groupsize_shmem(ngroups::NTuple{D}, shmem_size::NTuple{D}, Np) where {D}
+    # (1) Determine the total number of threads.
+    # Not sure if it's worth it to define as a function of the inputs (currently unused).
+    # From tests, the value of 64 seems to be optimal in various situations.
+    groupsize = 64  # minimum group size should be equal to the warp size (usually 32 on CUDA and 64 on AMDGPU)
+    # (2) Determine number of threads in each direction.
+    # We don't really care about the Cartesian distribution of threads, since we always
+    # parallelise over linear indices.
+    gsizes = ntuple(_ -> 1, Val(D))
+    Base.setindex(gsizes, groupsize, 1)  # = (groupsize, 1, 1, ...)
+end
 
 @kernel function interpolate_to_points_shmem_kernel!(
         vp::NTuple{C, AbstractVector{Z}},
