@@ -20,7 +20,10 @@ available_static_shared_memory(backend::KA.Backend) = 48 << 10  # 48 KiB (usual 
 # We try to make sure that the total block size (including 2M - 1 ghost cells in each direction)
 # is not larger than the available shared memory. In CUDA the limit is usually 48 KiB.
 # Note that the result is a compile-time constant (on Julia 1.11.1 at least).
-@inline function block_dims_gpu_shmem(backend, ::Type{Z}, ::Dims{D}, ::HalfSupport{M}, ::Val{Np}) where {Z <: Number, D, M, Np}
+@inline function block_dims_gpu_shmem(
+        backend, ::Type{Z}, ::Dims{D}, ::HalfSupport{M}, ::Val{Np};
+        warn = false,
+    ) where {Z <: Number, D, M, Np}
     T = real(Z)
     # These are extra shared-memory needs in spreading kernel (see spread_from_points_shmem_kernel!).
     # Here Np is the batch size (gpu_batch_size parameter).
@@ -49,10 +52,11 @@ available_static_shared_memory(backend::KA.Backend) = 48 << 10  # 48 KiB (usual 
               - element type: Z = $Z
               - half-support: M = $M
               - number of dimensions: D = $D
+              - spreading batch size: Np = $Np
             If possible, reduce some of these parameters, or else switch to gpu_method = :global_memory."""
         ))
         # TODO: warning if n is too small? (likely slower than global_memory method)
-    elseif n < 5
+    elseif warn && n < 4  # the n < 4 limit is completely empirical
         @warn lazy"""
             GPU shared memory size might be too small for the chosen problem.
             Switching to gpu_method = :global_memory will likely be faster.
@@ -60,6 +64,7 @@ available_static_shared_memory(backend::KA.Backend) = 48 << 10  # 48 KiB (usual 
               - element type: Z = $Z
               - half-support: M = $M
               - number of dimensions: D = $D
+              - spreading batch size: Np = $Np
             This gives blocks of dimensions $block_dims (not including 2M - 1 = $(2M - 1) ghost cells in each direction).
             If possible, reduce some of these parameters, or else switch to gpu_method = :global_memory."""
     end
