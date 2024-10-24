@@ -318,7 +318,7 @@ end
                 p, d = Tuple(inds[n])
                 g = gs[d]
                 x = points_sm[d, p]
-                gdata = Kernels.evaluate_kernel(g, x)
+                gdata = Kernels.evaluate_kernel_direct(g, x)
                 ishift = ishifts_sm[d]
                 inds_start[d, p] = gdata.i - ishift
                 local vals = gdata.values

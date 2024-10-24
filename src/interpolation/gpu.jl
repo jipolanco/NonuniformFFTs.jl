@@ -256,7 +256,7 @@ end
             indvals = ntuple(Val(D)) do d
                 @inline
                 x = @inbounds points[d][j]
-                gdata = Kernels.evaluate_kernel(gs[d], x)
+                gdata = Kernels.evaluate_kernel_direct(gs[d], x)
                 local i₀ = gdata.i - ishifts_sm[d]
                 local vals = gdata.values    # kernel values
                 # @assert i₀ ≥ 0
