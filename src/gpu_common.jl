@@ -12,11 +12,15 @@ function groupsize_shmem(ngroups::NTuple{D}, shmem_size::NTuple{D}, Np) where {D
     Base.setindex(gsizes, groupsize, 1)  # = (groupsize, 1, 1, ...)
 end
 
+# Total amount of shared memory available (in bytes).
+# This might be overridden in package extensions for specific backends.
+available_static_shared_memory(backend::KA.Backend) = 48 << 10  # 48 KiB (usual in CUDA)
+
 # Determine block size if using the shared-memory implementation.
 # We try to make sure that the total block size (including 2M - 1 ghost cells in each direction)
 # is not larger than the available shared memory. In CUDA the limit is usually 48 KiB.
 # Note that the result is a compile-time constant (on Julia 1.11.1 at least).
-@inline function block_dims_gpu_shmem(::Type{Z}, ::Dims{D}, ::HalfSupport{M}, ::Val{Np}) where {Z <: Number, D, M, Np}
+@inline function block_dims_gpu_shmem(backend, ::Type{Z}, ::Dims{D}, ::HalfSupport{M}, ::Val{Np}) where {Z <: Number, D, M, Np}
     T = real(Z)
     # These are extra shared-memory needs in spreading kernel (see spread_from_points_shmem_kernel!).
     # Here Np is the batch size (gpu_batch_size parameter).
@@ -32,23 +36,34 @@ end
         3 +  # buf_sm
         D    # ishifts_sm
     )
-    max_shmem_size = (48 << 10) - base_shmem_required  # 48 KiB -- TODO: make this depend on the actual GPU?
-    max_block_length = max_shmem_size ÷ sizeof(Z)  # maximum number of elements in a block
+    max_shmem = available_static_shared_memory(backend)
+    max_shmem_blocks = max_shmem - base_shmem_required  # maximum shared-memory for block data (local grid)
+    max_block_length = max_shmem_blocks ÷ sizeof(Z)  # maximum number of elements in a block
     m = floor(Int, max_block_length^(1/D))  # block size in each direction (including ghost cells / padding)
     n = m - (2M - 1)  # exclude ghost cells
+    block_dims = ntuple(_ -> n, Val(D))  # = (n, n, ...)
     if n ≤ 0
         throw(ArgumentError(
             lazy"""
             GPU shared memory size is too small for the chosen problem:
-              - element type: $Z
-              - half-support: $M
-              - number of dimensions: $D
+              - element type: Z = $Z
+              - half-support: M = $M
+              - number of dimensions: D = $D
             If possible, reduce some of these parameters, or else switch to gpu_method = :global_memory."""
         ))
         # TODO: warning if n is too small? (likely slower than global_memory method)
-        # What is small? n < M?
+    elseif n < 5
+        @warn lazy"""
+            GPU shared memory size might be too small for the chosen problem.
+            Switching to gpu_method = :global_memory will likely be faster.
+            Current parameters:
+              - element type: Z = $Z
+              - half-support: M = $M
+              - number of dimensions: D = $D
+            This gives blocks of dimensions $block_dims (not including 2M - 1 = $(2M - 1) ghost cells in each direction).
+            If possible, reduce some of these parameters, or else switch to gpu_method = :global_memory."""
     end
-    ntuple(_ -> n, Val(D))  # = (n, n, ...)
+    block_dims
 end
 
 # This is called from the global memory (naive) implementation of spreading and interpolation kernels.

@@ -110,7 +110,7 @@ function BlockDataGPU(
     T = real(Z)  # in case Z is complex
     if method === :shared_memory
         # Override input block size. We try to maximise the use of shared memory.
-        block_dims = block_dims_gpu_shmem(Z, Ñs, h, batch_size)
+        block_dims = block_dims_gpu_shmem(backend, Z, Ñs, h, batch_size)
     end
     nblocks_per_dir = map(cld, Ñs, block_dims)  # basically equal to ceil(Ñ / block_dim)
     L = T(2) * π  # domain period
