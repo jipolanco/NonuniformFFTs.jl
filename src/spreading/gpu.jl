@@ -69,7 +69,8 @@ end
         end
     else
         # Fallback implementation in case the @generated version above doesn't work.
-        # Actually seems to have the same performance as the @generated version.
+        # Actually seems to have the same performance as the @generated version (but uses a
+        # few more registers).
         inds_start = map(first, indvals)
         vals = map(last, indvals)
         inds = map(eachindex, vals)
@@ -81,11 +82,11 @@ end
             is_tail = Tuple(I_tail)
             gs_tail = map(inbounds_getindex, vals_tail, is_tail)
             gprod_tail = prod(gs_tail)
-            js_tail = map(istart_tail, is_tail, Ns_tail) do j₀, i, Nloc
+            js_tail = ntuple(Val(D - 1)) do d
                 # Determine output index in the current dimension.
                 @inline
-                j = j₀ + i
-                ifelse(j > Nloc, j - Nloc, j)  # periodic wrapping
+                j = istart_tail[d] + is_tail[d]
+                ifelse(j > Ns_tail[d], j - Ns_tail[d], j)  # periodic wrapping
             end
             for i ∈ inds_first
                 j = istart_first + i
@@ -177,7 +178,7 @@ function spread_from_points!(
         Z = eltype(us[1])
         M = Kernels.half_support(gs[1])
         @assert all(g -> Kernels.half_support(g) === M, gs)  # check that they're all equal
-        block_dims_val = block_dims_gpu_shmem(Z, size(us[1]), HalfSupport(M), bd.batch_size)  # this is usually a compile-time constant...
+        block_dims_val = block_dims_gpu_shmem(backend, Z, size(us[1]), HalfSupport(M), bd.batch_size)  # this is usually a compile-time constant...
         block_dims = Val(block_dims_val)  # ...which means this doesn't require a dynamic dispatch
         @assert block_dims_val === bd.block_dims
         let ngroups = bd.nblocks_per_dir  # this is the required number of workgroups (number of blocks in CUDA)

@@ -11,6 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   This is disabled by default, and can be enabled by passing `gpu_method = :shared_memory`
   (default is `:global_memory`).
 
+### Changed
+
+- [BREAKING] Change default precision of transforms.
+  By default, transforms on `Float64` or `ComplexF64` now have a relative precision of the order of $10^{-7}$.
+  This corresponds to setting `m = HalfSupport(4)` and oversampling factor `σ = 2.0`.
+  Previously, the default was `m = HalfSupport(8)` and `σ = 2.0`, corresponding
+  to a relative precision of the order of $10^{-14}$.
+
 ## [v0.5.6](https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.5.6) - 2024-10-17
 
 ### Changed

@@ -62,45 +62,6 @@ type_length(::Type{<:NTuple{N}}) where {N} = N
 
 # ================================================================================ #
 
-# Determine block size if using the shared-memory implementation.
-# We try to make sure that the total block size (including 2M - 1 ghost cells in each direction)
-# is not larger than the available shared memory. In CUDA the limit is usually 48 KiB.
-# Note that the result is a compile-time constant (on Julia 1.11.1 at least).
-@inline function block_dims_gpu_shmem(::Type{Z}, ::Dims{D}, ::HalfSupport{M}, ::Val{Np}) where {Z <: Number, D, M, Np}
-    T = real(Z)
-    # These are extra shared-memory needs in spreading kernel (see spread_from_points_shmem_kernel!).
-    # Here Np is the batch size (gpu_batch_size parameter).
-    base_shmem_required = sizeof(T) * (
-        2M * D * Np +  # window_vals
-        D * Np +       # points_sm
-        D * Np         # inds_start
-    ) +
-    sizeof(Z) * (
-        Np  # vp_sm
-    ) +
-    sizeof(Int) * (
-        3 +  # buf_sm
-        D    # ishifts_sm
-    )
-    max_shmem_size = (48 << 10) - base_shmem_required  # 48 KiB -- TODO: make this depend on the actual GPU?
-    max_block_length = max_shmem_size ÷ sizeof(Z)  # maximum number of elements in a block
-    m = floor(Int, max_block_length^(1/D))  # block size in each direction (including ghost cells / padding)
-    n = m - (2M - 1)  # exclude ghost cells
-    if n ≤ 0
-        throw(ArgumentError(
-            lazy"""
-            GPU shared memory size is too small for the chosen problem:
-              - element type: $Z
-              - half-support: $M
-              - number of dimensions: $D
-            If possible, reduce some of these parameters, or else switch to gpu_method = :global_memory."""
-        ))
-        # TODO: warning if n is too small? (likely slower than global_memory method)
-        # What is small? n < M?
-    end
-    ntuple(_ -> n, Val(D))  # = (n, n, ...)
-end
-
 # GPU implementation
 struct BlockDataGPU{
         N, I <: Integer, T <: AbstractFloat,
@@ -149,7 +110,8 @@ function BlockDataGPU(
     T = real(Z)  # in case Z is complex
     if method === :shared_memory
         # Override input block size. We try to maximise the use of shared memory.
-        block_dims = block_dims_gpu_shmem(Z, Ñs, h, batch_size)
+        # Show warning if the determined block size is too small.
+        block_dims = block_dims_gpu_shmem(backend, Z, Ñs, h, batch_size; warn = true)
     end
     nblocks_per_dir = map(cld, Ñs, block_dims)  # basically equal to ceil(Ñ / block_dim)
     L = T(2) * π  # domain period
