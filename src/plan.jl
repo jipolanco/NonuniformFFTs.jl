@@ -78,7 +78,10 @@ The created plan contains all data needed to perform NUFFTs for non-uniform data
 
 ## NUFFT parameters
 
-- `m = HalfSupport(8)`: the half-support of the convolution kernels. Large values
+The following parameters control transform accuracy. The default values give a relative accuracy of
+the order of ``10^{-7}`` for `Float64` or `ComplexF64` data.
+
+- `m = HalfSupport(4)`: the half-support of the convolution kernels. Large values
   increase accuracy at the cost of performance.
 
 - `σ = 2.0`: NUFFT oversampling factor. Typical values are 2.0 (more accurate) and 1.25 (faster),
@@ -421,7 +424,7 @@ end
 @inline to_static(ntrans::Int) = Val(ntrans)
 
 # This constructor relies on constant propagation to make the output fully inferred.
-Base.@constprop :aggressive function PlanNUFFT(::Type{T}, Ns::Dims; m = 8, kws...) where {T <: Number}
+Base.@constprop :aggressive function PlanNUFFT(::Type{T}, Ns::Dims; m = 4, kws...) where {T <: Number}
     h = to_halfsupport(m)
     PlanNUFFT(T, Ns, h; kws...)
 end
