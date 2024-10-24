@@ -144,7 +144,7 @@ function evaluate_kernel_func(g::BackwardsKaiserBesselKernelData{M, T}) where {M
     end
 end
 
-function _evaluate_kernel_direct(
+@inline function _evaluate_kernel_direct(
         g::BackwardsKaiserBesselKernelData{M, T}, i::Integer, r::T,
     ) where {M, T}
     (; β,) = g
@@ -152,13 +152,11 @@ function _evaluate_kernel_direct(
     # @assert 0 ≤ X < 1
     Xc = 2 * X - 1  # in [-1, 1)
     L = 2M
-    ntuple(Val(L)) do j
-        # Note: we go from right (+1) to left (-1).
-        h = 1 - 2 * (j - one(T)/2) / L  # midpoint of interval
-        δ = 1 / L                  # half-width of interval
-        y = h + Xc * δ    # transform Xc ∈ [-1, 1) -> y ∈ [h - δ, h + δ]
-        z = 1 - y^2
-        s = sqrt(z)
-        sinh(β * s)::T / (s * T(π))
-    end
+    δ = 1 / L
+    js = SVector(ntuple(identity, Val(L)))
+    hs = @. 1 - 2 * (js - one(T) / 2) / L
+    ys = @. hs + Xc * δ
+    zs = @. 1 - ys^2
+    s = @fastmath sqrt.(zs)  # the @fastmath avoids checking that z ≥ 0, returns NaN otherwise
+    Tuple(@. sinh(β * s) / (s * T(π)))
 end
