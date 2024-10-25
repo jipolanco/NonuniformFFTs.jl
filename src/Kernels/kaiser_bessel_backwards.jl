@@ -157,6 +157,9 @@ end
     hs = @. 1 - 2 * (js - one(T) / 2) / L
     ys = @. hs + Xc * δ
     zs = @. 1 - ys^2
+    # TODO: "protect" against division by zero? what about performance?
     s = @fastmath sqrt.(zs)  # the @fastmath avoids checking that z ≥ 0, returns NaN otherwise
-    Tuple(@. sinh(β * s) / (s * T(π)))
+    mask = iszero.(s)
+    vals = @. ifelse(mask, β * one(s) / T(π), sinh(β * s) / (s * T(π)))
+    Tuple(vals)
 end
