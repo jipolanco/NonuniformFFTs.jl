@@ -13,11 +13,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- [BREAKING] Change default precision of transforms.
+- **BREAKING**: Change default precision of transforms.
   By default, transforms on `Float64` or `ComplexF64` now have a relative precision of the order of $10^{-7}$.
   This corresponds to setting `m = HalfSupport(4)` and oversampling factor `σ = 2.0`.
   Previously, the default was `m = HalfSupport(8)` and `σ = 2.0`, corresponding
   to a relative precision of the order of $10^{-14}$.
+
+- On GPUs, we now use direct evaluation of kernel functions (e.g.
+  Kaiser-Bessel) instead of polynomial approximations, as this seems to be
+  faster and uses far fewer GPU registers.
+
+- On CUDA, the default kernel is now `KaiserBesselKernel` instead of `BackwardsKaiserBesselKernel`.
+  The former seems to be a bit faster when using Bessel functions defined in CUDA.
+  Accuracy doesn't change much since both kernels have similar precisions.
 
 ## [v0.5.6](https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.5.6) - 2024-10-17
 
