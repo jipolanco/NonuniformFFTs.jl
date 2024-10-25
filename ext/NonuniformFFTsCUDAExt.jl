@@ -13,4 +13,9 @@ using CUDA: @device_override
 @device_override Kernels._besseli0(x::Float64) = ccall("extern __nv_cyl_bessel_i0", llvmcall, Cdouble, (Cdouble,), x)
 @device_override Kernels._besseli0(x::Float32) = ccall("extern __nv_cyl_bessel_i0f", llvmcall, Cfloat, (Cfloat,), x)
 
+# Set KaiserBesselKernel as default backend on CUDA.
+# It's slightly faster than BackwardsKaiserBesselKernel when using Bessel functions from CUDA (wrapped above).
+# The difference is not huge though.
+NonuniformFFTs.default_kernel(::CUDABackend) = KaiserBesselKernel()
+
 end
