@@ -54,7 +54,7 @@ function AbstractNFFTs.nodes!(p::PlanNUFFT{Complex{T}}, xp::Matrix{T}) where {T 
     invoke(AbstractNFFTs.nodes!, Tuple{PlanNUFFT, AbstractMatrix{T}}, p, xp)
 end
 
-Base.@constprop :aggressive function convert_window_function(w::Symbol)
+Base.@constprop :aggressive function convert_window_function(w::Symbol, backend)
     if w === :gauss
         GaussianKernel()
     elseif w === :spline
@@ -67,7 +67,7 @@ Base.@constprop :aggressive function convert_window_function(w::Symbol)
     elseif w === :kaiser_bessel
         BackwardsKaiserBesselKernel()
     else
-        default_kernel()
+        default_kernel(backend)
     end
 end
 
@@ -81,7 +81,7 @@ end
 Base.@constprop :aggressive function PlanNUFFT(
         xp::AbstractMatrix{Tr}, Ns::Dims;
         fftflags = FFTW.ESTIMATE, blocking = true, sortNodes = false,
-        window = default_kernel(),
+        window = default_kernel(KA.get_backend(xp)),
         fftshift = true,  # for compatibility with NFFT.jl
         synchronise = false,
         kwargs...,
@@ -93,7 +93,7 @@ Base.@constprop :aggressive function PlanNUFFT(
     backend = KA.get_backend(xp)  # e.g. use GPU backend if xp is a GPU array
     sort_points = sortNodes ? True() : False()  # this is type-unstable (unless constant propagation happens)
     block_size = blocking ? default_block_size(Ns, backend) : nothing  # also type-unstable
-    kernel = window isa AbstractKernel ? window : convert_window_function(window)
+    kernel = window isa AbstractKernel ? window : convert_window_function(window, backend)
     p = PlanNUFFT(
         Complex{Tr}, Ns, HalfSupport(m);
         backend, σ = Tr(σ), sort_points, fftshift, block_size,

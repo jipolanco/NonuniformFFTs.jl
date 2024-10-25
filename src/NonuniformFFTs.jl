@@ -45,7 +45,8 @@ export
     exec_type1!,
     exec_type2!
 
-default_kernel() = BackwardsKaiserBesselKernel()
+default_kernel(::KA.Backend) = BackwardsKaiserBesselKernel()
+default_kernel() = default_kernel(CPU())
 
 default_block_size(::Dims, ::CPU) = 4096  # in number of linear elements
 default_block_size(::Dims, ::GPU) = 1024  # except in 2D and 3D (see below)
