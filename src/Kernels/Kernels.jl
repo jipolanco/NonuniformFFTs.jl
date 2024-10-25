@@ -88,7 +88,7 @@ end
 @inline function evaluate_kernel_direct(g::AbstractKernelData, x)
     Δx = gridstep(g)
     i, r = point_to_cell(x, Δx)
-    values = _evaluate_kernel_direct(g, i, r)  # TODO: this is not yet defined for all kernels (only KB + BKB for now)
+    values = _evaluate_kernel_direct(g, i, r)
     (; i, values,)
 end
 
