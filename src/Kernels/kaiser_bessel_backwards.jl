@@ -137,8 +137,8 @@ function evaluate_kernel_func(g::BackwardsKaiserBesselKernelData{M, T}) where {M
     (; Δx, cs,) = g
     function (x)
         i, r = point_to_cell(x, Δx)  # r = x / Δx
-        X = (r - T(i - 1)) / M  # source position relative to xs[i]
-        # @assert 0 ≤ X < 1 / M
+        X = r - T(i - 1)  # = (x - x[i]) / Δx = x / Δx - (i - 1)
+        # @assert 0 ≤ X < 1
         values = evaluate_piecewise(X, cs)
         (; i, values,)
     end
@@ -150,16 +150,15 @@ end
     (; β,) = g
     X = r - T(i - 1)  # = (x - x[i]) / Δx = x / Δx - (i - 1)
     # @assert 0 ≤ X < 1
-    Xc = 2 * X - 1  # in [-1, 1)
-    L = 2M
-    δ = 1 / L
-    js = SVector(ntuple(identity, Val(L)))
-    hs = @. 1 - 2 * (js - one(T) / 2) / L
-    ys = @. hs + Xc * δ
+    js = SVector(ntuple(identity, Val(2M)))
+    ys = @. T(M - js + X) / M
     zs = @. 1 - ys^2
-    # TODO: "protect" against division by zero? what about performance?
     s = @fastmath sqrt.(zs)  # the @fastmath avoids checking that z ≥ 0, returns NaN otherwise
-    mask = iszero.(s)
-    vals = @. ifelse(mask, β * one(s) / T(π), sinh(β * s) / (s * T(π)))
+    vals = map(s) do s
+        @inline
+        # In rare cases `s` can be zero (if the point x is on the grid, and thus r = 0).
+        # The kernel is well defined at s = 0 since sinh(x)/x → 1 when x → 0 (same as sinc).
+        ifelse(iszero(s), one(s), sinh(β * s) / (β * s)) * (β / T(π))
+    end
     Tuple(vals)
 end

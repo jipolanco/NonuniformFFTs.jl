@@ -166,8 +166,8 @@ function evaluate_kernel_func(g::KaiserBesselKernelData{M, T}) where {M, T}
     (; Δx, cs,) = g
     function (x)
         i, r = point_to_cell(x, Δx)
-        X = (r - T(i - 1)) / M  # source position relative to xs[i]
-        # @assert 0 ≤ X < 1 / M
+        X = r - T(i - 1)  # = (x - x[i]) / Δx = x / Δx - (i - 1)
+        # @assert 0 ≤ X < 1
         values = evaluate_piecewise(X, cs)
         (; i, values,)
     end
@@ -179,12 +179,8 @@ end
     (; β,) = g
     X = r - T(i - 1)  # = (x - x[i]) / Δx = x / Δx - (i - 1)
     # @assert 0 ≤ X < 1
-    Xc = 2 * X - 1  # in [-1, 1)
-    L = 2M
-    δ = 1 / L
-    js = SVector(ntuple(identity, Val(L)))
-    hs = @. 1 - 2 * (js - one(T) / 2) / L
-    ys = @. hs + Xc * δ
+    js = SVector(ntuple(identity, Val(2M)))
+    ys = @. T(M - js + X) / M
     zs = @. 1 - ys^2
     s = @fastmath sqrt.(zs)  # the @fastmath avoids checking that z ≥ 0, returns NaN otherwise
     Tuple(@. besseli0(β * s))
