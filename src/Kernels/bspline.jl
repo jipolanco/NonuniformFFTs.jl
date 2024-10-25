@@ -107,6 +107,14 @@ function evaluate_kernel_func(g::BSplineKernelData{M}) where {M}
     end
 end
 
+function _evaluate_kernel_direct(
+        ::BSplineKernelData{M}, i::Integer, r::T,
+    ) where {M, T}
+    x′ = i - r  # normalised coordinate, 0 < x′ ≤ 1
+    k = 2M  # B-spline order
+    bsplines_evaluate_all(x′, Val(k), T)
+end
+
 function evaluate_fourier_func(g::BSplineKernelData{M}) where {M}
     (; Δt,) = g
     function (k)

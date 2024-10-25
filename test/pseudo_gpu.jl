@@ -103,8 +103,13 @@ function compare_with_cpu(::Type{T}, dims; Np = prod(dims), ntransforms::Val{Nc}
     r_gpu = run_plan(p_gpu, xp_init, vp_init)
 
     for c ∈ 1:Nc
-        @test r_cpu.us[c] ≈ r_gpu.us[c]  # output of type-1 transform
-        @test r_cpu.wp[c] ≈ r_gpu.wp[c]  # output of type-2 transform
+        # The differences of the order of 1e-7 (= roughly the expected accuracy given the
+        # chosen parameters) are explained by the fact that the CPU uses a polynomial
+        # approximation of the KB kernel, while the GPU evaluates it "exactly" from its
+        # definition (based on Bessel functions for KB).
+        rtol = Tr === Float64 ? 1e-7 : Tr === Float32 ? 1f-5 : nothing
+        @test r_cpu.us[c] ≈ r_gpu.us[c] rtol=rtol  # output of type-1 transform
+        @test r_cpu.wp[c] ≈ r_gpu.wp[c] rtol=rtol  # output of type-2 transform
     end
 
     nothing

@@ -81,7 +81,7 @@ end
 
 @inline function get_inds_vals_gpu(g::AbstractKernelData, points::AbstractVector, N::Integer, j::Integer)
     x = @inbounds points[j]
-    gdata = Kernels.evaluate_kernel(g, x)
+    gdata = Kernels.evaluate_kernel_direct(g, x)
     vals = gdata.values    # kernel values
     M = Kernels.half_support(g)
     i₀ = gdata.i - M  # active region is (i₀ + 1):(i₀ + 2M) (up to periodic wrapping)

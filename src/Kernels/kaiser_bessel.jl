@@ -1,10 +1,10 @@
 export KaiserBesselKernel
 
-using Bessels: besseli0, besseli1
+using Bessels: Bessels
 
 # This is the equivalent variance of a KB window with width w = 1.
 # Should be compared to the variance of a Gaussian window.
-kb_equivalent_variance(β) = besseli0(β) / (β * besseli1(β))
+kb_equivalent_variance(β) = Bessels.besseli0(β) / (β * Bessels.besseli1(β))
 
 @doc raw"""
     KaiserBesselKernel <: AbstractKernel
@@ -118,7 +118,7 @@ struct KaiserBesselKernelData{
         gk = KA.allocate(backend, T, 0)
         Npoly = M + 4  # degree of polynomial is d = Npoly - 1
         cs = solve_piecewise_polynomial_coefficients(T, Val(M), Val(Npoly)) do x
-            besseli0(β * sqrt(1 - x^2))
+            Bessels.besseli0(β * sqrt(1 - x^2))
         end
         KaiserBesselKernelData{M}(Δx, σ, w, β, β², cs, gk)
     end
@@ -166,9 +166,33 @@ function evaluate_kernel_func(g::KaiserBesselKernelData{M, T}) where {M, T}
     (; Δx, cs,) = g
     function (x)
         i, r = point_to_cell(x, Δx)
-        X = (r - T(i - 1)) / M  # source position relative to xs[i]
-        # @assert 0 ≤ X < 1 / M
+        X = r - T(i - 1)  # = (x - x[i]) / Δx = x / Δx - (i - 1)
+        # @assert 0 ≤ X < 1
         values = evaluate_piecewise(X, cs)
         (; i, values,)
     end
+end
+
+# Not sure Bessels.besseli0 is optimised/overridden for GPUs. It works but I'm not sure it's
+# optimal, since it uses the implementation in Bessels.jl which is not made for
+# GPUs. An alternative would be to use functions from SpecialFunctions.jl, for which CUDA.jl
+# redirects to CUDA functions. However, CUDA.jl currently doesn't wrap the cyl_bessel_i0
+# function needed here (and also, SpecialFunctions doesn't provide a besseli0 function, but
+# only a besseli function for arbitrary order).
+# So, on CUDA, we use a package extension (ext/NonuniformFFTsCUDAExt.jl) to override this
+# function, and call the CUDA-defined version instead.
+_besseli0(x) = Bessels.besseli0(x)
+
+@inline function _evaluate_kernel_direct(
+        g::KaiserBesselKernelData{M, T}, i::Integer, r::T,
+    ) where {M, T}
+    (; β,) = g
+    X = r - T(i - 1)  # = (x - x[i]) / Δx = x / Δx - (i - 1)
+    # @assert 0 ≤ X < 1
+    js = SVector(ntuple(identity, Val(2M)))
+    ys = @. T(M - js + X) / M
+    zs = @. 1 - ys^2
+    s = @fastmath sqrt.(zs)  # the @fastmath avoids checking that z ≥ 0, returns NaN otherwise
+    vals = _besseli0.(β * s)
+    Tuple(vals)
 end

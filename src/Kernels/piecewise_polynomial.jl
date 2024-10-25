@@ -74,9 +74,8 @@ function solve_piecewise_polynomial_coefficients(
 end
 
 function evaluate_piecewise(δ, cs::NTuple)
-    L = length(first(cs))
-    # @assert 0 ≤ δ < 2/L == 1/M
-    x = L * δ - 1  # in [-1, 1]
+    # @assert 0 ≤ δ < 1
+    x = 2δ - 1  # in [-1, 1]
     evaluate_horner(x, cs)
 end
 

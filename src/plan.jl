@@ -413,11 +413,12 @@ end
 function PlanNUFFT(
         ::Type{T}, Ns::Dims, h::HalfSupport;
         ntransforms = Val(1),
-        kernel::AbstractKernel = default_kernel(),
+        backend = CPU(),
+        kernel::AbstractKernel = default_kernel(backend),
         σ::Real = real(T)(2), kws...,
     ) where {T <: Number}
     R = real(T)
-    _PlanNUFFT(T, kernel, h, R(σ), Ns, to_static(ntransforms); kws...)
+    _PlanNUFFT(T, kernel, h, R(σ), Ns, to_static(ntransforms); backend, kws...)
 end
 
 @inline to_static(ntrans::Val) = ntrans

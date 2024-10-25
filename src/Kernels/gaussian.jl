@@ -131,6 +131,19 @@ function evaluate_kernel_func(g::GaussianKernelData{M}) where {M}
     end
 end
 
+# Note: direct evaluation seems to be faster than Gaussian gridding on GPU (tested on A100).
+@inline function _evaluate_kernel_direct(
+        g::GaussianKernelData{M}, i::Integer, r::T,
+    ) where {M, T}
+    (; τ, Δx,) = g
+    X = r - T(i - 1)  # = (x - x[i]) / Δx = x / Δx - (i - 1)
+    # @assert 0 ≤ X < 1
+    js = SVector(ntuple(identity, Val(2M)))
+    ys = @. T(M - js + X) * Δx
+    vals = @. exp(-ys^2 / τ)
+    Tuple(vals)
+end
+
 @inline function gaussian_gridding(a, b, cs::NTuple{M}) where {M}
     if @generated
         v₀ = Symbol(:v_, M)
