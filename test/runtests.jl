@@ -20,6 +20,7 @@ end
 
 @testset "NonuniformFFTs.jl" begin
     @includetest "errors.jl"
+    @includetest "approx_window_functions.jl"
     @includetest "accuracy.jl"
     @includetest "multidimensional.jl"
     @includetest "pseudo_gpu.jl"

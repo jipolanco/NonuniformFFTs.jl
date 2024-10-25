@@ -131,6 +131,7 @@ function evaluate_kernel_func(g::GaussianKernelData{M}) where {M}
     end
 end
 
+# Note: direct evaluation seems to be faster than Gaussian gridding on GPU (tested on A100).
 @inline function _evaluate_kernel_direct(
         g::GaussianKernelData{M}, i::Integer, r::T,
     ) where {M, T}
