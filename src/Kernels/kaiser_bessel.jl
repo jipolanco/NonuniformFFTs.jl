@@ -179,6 +179,8 @@ end
 # redirects to CUDA functions. However, CUDA.jl currently doesn't wrap the cyl_bessel_i0
 # function needed here (and also, SpecialFunctions doesn't provide a besseli0 function, but
 # only a besseli function for arbitrary order).
+# So, on CUDA, we use a package extension (ext/NonuniformFFTsCUDAExt.jl) to override this
+# function, and call the CUDA-defined version instead.
 _besseli0(x) = Bessels.besseli0(x)
 
 @inline function _evaluate_kernel_direct(
