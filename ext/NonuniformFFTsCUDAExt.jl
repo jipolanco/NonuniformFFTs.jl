@@ -18,4 +18,8 @@ using CUDA: @device_override
 # The difference is not huge though.
 NonuniformFFTs.default_kernel(::CUDABackend) = KaiserBesselKernel()
 
+# This generally returns 48KiB.
+NonuniformFFTs.available_static_shared_memory(::CUDABackend) =
+    CUDA.attribute(device(), CUDA.DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK)
+
 end
