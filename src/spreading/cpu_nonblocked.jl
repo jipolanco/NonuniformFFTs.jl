@@ -1,5 +1,5 @@
 """
-    spread_from_point!(gs::NTuple{D, AbstractKernelData}, u::AbstractArray{T, D}, x⃗₀, v)
+    spread_from_point!(gs::NTuple{D, AbstractKernelData}, evalmode::EvaluationMode, u::AbstractArray{T, D}, x⃗₀, v)
 
 Spread value `v` at point `x⃗₀` onto neighbouring grid points.
 
@@ -15,6 +15,7 @@ This can be useful for spreading vector fields, for instance.
 """
 function spread_from_point!(
         gs::NTuple{D, AbstractKernelData},
+        evalmode::EvaluationMode,
         us::NTuple{C, AbstractArray{T, D}} where {T},
         x⃗₀::NTuple{D, Number},
         vs::NTuple{C, Number},
@@ -24,7 +25,7 @@ function spread_from_point!(
     @assert all(u -> size(u) === Ns, us)
 
     # Evaluate 1D kernels.
-    gs_eval = map(Kernels.evaluate_kernel, gs, x⃗₀)
+    gs_eval = map((g, x) -> Kernels.evaluate_kernel(evalmode, g, x), gs, x⃗₀)
 
     # Determine indices to write in `u` arrays.
     inds = map(gs_eval, gs, Ns) do gdata, g, N
@@ -41,6 +42,7 @@ function spread_from_points!(
         ::CPU,
         ::NullBlockData,  # no blocking
         gs,
+        evalmode::EvaluationMode,
         us_all::NTuple{C, AbstractArray},
         x⃗s::AbstractVector,
         vp_all::NTuple{C, AbstractVector},
@@ -51,7 +53,7 @@ function spread_from_points!(
     for i ∈ eachindex(x⃗s)  # iterate over all points
         x⃗ = @inbounds x⃗s[i]
         vs = map(vp -> @inbounds(vp[i]), vp_all)  # non-uniform values at point x⃗
-        spread_from_point!(gs, us_all, x⃗, vs)
+        spread_from_point!(gs, evalmode, us_all, x⃗, vs)
     end
     us_all
 end

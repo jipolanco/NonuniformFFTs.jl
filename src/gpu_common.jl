@@ -72,16 +72,16 @@ available_static_shared_memory(backend::KA.Backend) = 48 << 10  # 48 KiB (usual 
 end
 
 # This is called from the global memory (naive) implementation of spreading and interpolation kernels.
-@inline function get_inds_vals_gpu(gs::NTuple{D}, points::NTuple{D}, Ns::NTuple{D}, j::Integer) where {D}
+@inline function get_inds_vals_gpu(gs::NTuple{D}, evalmode::EvaluationMode, points::NTuple{D}, Ns::NTuple{D}, j::Integer) where {D}
     ntuple(Val(D)) do n
         @inline
-        get_inds_vals_gpu(gs[n], points[n], Ns[n], j)
+        get_inds_vals_gpu(gs[n], evalmode, points[n], Ns[n], j)
     end
 end
 
-@inline function get_inds_vals_gpu(g::AbstractKernelData, points::AbstractVector, N::Integer, j::Integer)
+@inline function get_inds_vals_gpu(g::AbstractKernelData, evalmode::EvaluationMode, points::AbstractVector, N::Integer, j::Integer)
     x = @inbounds points[j]
-    gdata = Kernels.evaluate_kernel_direct(g, x)
+    gdata = Kernels.evaluate_kernel(evalmode, g, x)
     vals = gdata.values    # kernel values
     M = Kernels.half_support(g)
     i₀ = gdata.i - M  # active region is (i₀ + 1):(i₀ + 2M) (up to periodic wrapping)

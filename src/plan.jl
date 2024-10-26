@@ -237,6 +237,7 @@ struct PlanNUFFT{
         Backend <: KA.Backend,
         Treal <: AbstractFloat,  # this is real(T)
         Kernels <: NTuple{N, AbstractKernelData{<:AbstractKernel, M, Treal}},
+        KernelEvalMode <: EvaluationMode,
         Points <: StructVector{NTuple{N, Treal}},
         Data <: AbstractNUFFTData{T, N, Nc},
         Blocks <: AbstractBlockData,
@@ -245,6 +246,7 @@ struct PlanNUFFT{
     } <: AbstractNFFTPlan{Treal, N, 1}  # the AbstractNFFTPlan only really makes sense when T <: Complex
     kernels :: Kernels
     backend :: Backend  # CPU, GPU, ...
+    kernel_evalmode :: KernelEvalMode
     σ       :: Treal   # oversampling factor (≥ 1)
     points  :: Points  # non-uniform points (real values)
     data    :: Data
@@ -261,6 +263,7 @@ function Base.show(io::IO, p::PlanNUFFT{T, N, Nc}) where {T, N, Nc}
     print(io, "$N-dimensional PlanNUFFT with input type $T:")
     print(io, "\n  - backend: ", typeof(backend))
     print(io, "\n  - kernel: ", first(kernels))  # should be the same output in all directions
+    print(io, "\n  - kernel evaluation mode: ", p.kernel_evalmode)  # should be the same output in all directions
     print(io, "\n  - oversampling factor: σ = ", σ)
     print(io, "\n  - uniform dimensions: ", size(p))
     print(io, "\n  - simultaneous transforms: ", Nc)
@@ -349,6 +352,7 @@ function _PlanNUFFT(
         fftshift = false,
         sort_points::StaticBool = False(),
         backend::KA.Backend = CPU(),
+        kernel_evalmode::EvaluationMode = default_kernel_evalmode(backend),
         block_size::Union{Integer, Dims{D}, Nothing} = default_block_size(Ns, backend),
         synchronise::Bool = false,
         gpu_method::Symbol = :global_memory,
@@ -400,7 +404,10 @@ function _PlanNUFFT(
         indmap = KA.allocate(backend, eltype(inds), length(k))
         non_oversampled_indices!(indmap, k, inds; fftshift)
     end
-    PlanNUFFT(kernel_data, backend, σ, points, nufft_data, blocks, fftshift, index_map, timer, synchronise)
+    PlanNUFFT(
+        kernel_data, backend, kernel_evalmode, σ, points, nufft_data, blocks,
+        fftshift, index_map, timer, synchronise,
+    )
 end
 
 function check_nufft_size(Ñ, ::HalfSupport{M}) where M

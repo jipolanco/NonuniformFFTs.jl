@@ -2,6 +2,7 @@
 @kernel function spread_from_point_naive_kernel!(
         us::NTuple{C},
         @Const(gs::NTuple{D}),
+        @Const(evalmode::EvaluationMode),
         @Const(points::NTuple{D}),
         @Const(vp::NTuple{C}),
         @Const(pointperm),
@@ -23,7 +24,7 @@
     @assert eltype(first(us)) <: Real # output is a real array (but may actually describe complex data)
     Ns = spread_actual_dims(Z, Ns_real)  # drop the first dimension (of size 2) if Z <: Complex
 
-    indvals = get_inds_vals_gpu(gs, points, Ns, j)
+    indvals = get_inds_vals_gpu(gs, evalmode, points, Ns, j)
 
     v⃗ = map(v -> @inbounds(v[j]), vp)
     spread_onto_arrays_gpu!(us, indvals, v⃗, Ns)
@@ -127,6 +128,7 @@ function spread_from_points!(
         backend::GPU,
         bd::Union{BlockDataGPU, NullBlockData},
         gs,
+        evalmode::EvaluationMode,
         us::NTuple{C, AbstractGPUArray},
         x⃗s::StructVector,
         vp_all::NTuple{C, AbstractGPUVector},
@@ -171,7 +173,7 @@ function spread_from_points!(
     if method === :global_memory
         let ndrange = ndrange_points, groupsize = groupsize_points
             kernel! = spread_from_point_naive_kernel!(backend, groupsize)
-            kernel!(us_real, gs, xs_comp, vp_sorted, pointperm_; ndrange)
+            kernel!(us_real, gs, evalmode, xs_comp, vp_sorted, pointperm_; ndrange)
         end
     elseif method === :shared_memory
         @assert bd isa BlockDataGPU
@@ -188,7 +190,7 @@ function spread_from_points!(
             ndrange = groupsize .* ngroups
             kernel! = spread_from_points_shmem_kernel!(backend, groupsize, ndrange)
             kernel!(
-                us_real, gs, xs_comp, vp_sorted, pointperm_, bd.cumulative_npoints_per_block,
+                us_real, gs, evalmode, xs_comp, vp_sorted, pointperm_, bd.cumulative_npoints_per_block,
                 HalfSupport(M), block_dims, Val(shmem_size), bd.batch_size,
             )
         end
@@ -220,6 +222,7 @@ end
 @kernel function spread_from_points_shmem_kernel!(
         us::NTuple{C, AbstractArray{T}},
         @Const(gs::NTuple{D}),
+        @Const(evalmode::EvaluationMode),
         @Const(points::NTuple{D}),
         @Const(vp::NTuple{C, AbstractVector{Z}}),
         @Const(pointperm),
@@ -318,7 +321,7 @@ end
                 p, d = Tuple(inds[n])
                 g = gs[d]
                 x = points_sm[d, p]
-                gdata = Kernels.evaluate_kernel_direct(g, x)
+                gdata = Kernels.evaluate_kernel(evalmode, g, x)
                 ishift = ishifts_sm[d]
                 inds_start[d, p] = gdata.i - ishift
                 local vals = gdata.values

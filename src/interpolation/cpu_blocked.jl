@@ -1,5 +1,6 @@
 function interpolate_blocked(
         gs::NTuple{D},
+        evalmode::EvaluationMode,
         us::NTuple{C, AbstractArray{T, D}} where {T},
         x⃗::NTuple{D},
         I₀::NTuple{D},
@@ -10,7 +11,7 @@ function interpolate_blocked(
     @assert all(u -> size(u) === Ns, us)
 
     # Evaluate 1D kernels.
-    gs_eval = map(Kernels.evaluate_kernel, gs, x⃗)
+    gs_eval = map((g, x) -> Kernels.evaluate_kernel(evalmode, g, x), gs, x⃗)
 
     Ms = map(Kernels.half_support, gs)
     δs = Ms .- I₀  # index offset
@@ -93,6 +94,7 @@ function interpolate!(
         backend::CPU,
         bd::BlockData,
         gs,
+        evalmode::EvaluationMode,
         vp_all::NTuple{C, AbstractVector},
         us::NTuple{C, AbstractArray},
         x⃗s::AbstractArray,
@@ -131,7 +133,7 @@ function interpolate!(
                 else
                     x⃗ = x⃗s[l]  # if points have not been permuted
                 end
-                vs = interpolate_blocked(gs, block, x⃗, Tuple(I₀)) :: NTuple{C}  # non-uniform values at point x⃗
+                vs = interpolate_blocked(gs, evalmode, block, x⃗, Tuple(I₀)) :: NTuple{C}  # non-uniform values at point x⃗
                 for (vp, v) ∈ zip(vp_all, vs)
                     @inbounds vp[l] = v
                 end

@@ -24,6 +24,7 @@ using .Kernels:
     AbstractKernel,
     AbstractKernelData,
     HalfSupport,
+    EvaluationMode, Direct, FastApproximation,
     GaussianKernel,
     BSplineKernel,
     KaiserBesselKernel,
@@ -35,6 +36,7 @@ using .Kernels:
 export
     PlanNUFFT,
     HalfSupport,
+    Direct, FastApproximation,
     GaussianKernel,
     BSplineKernel,
     KaiserBesselKernel,
@@ -47,6 +49,9 @@ export
 
 default_kernel(::KA.Backend) = BackwardsKaiserBesselKernel()
 default_kernel() = default_kernel(CPU())
+
+default_kernel_evalmode(::CPU) = FastApproximation()
+default_kernel_evalmode(::GPU) = Direct()  # default to direct kernel evaluation on GPUs
 
 default_block_size(::Dims, ::CPU) = 4096  # in number of linear elements
 default_block_size(::Dims, ::GPU) = 1024  # except in 2D and 3D (see below)
@@ -150,7 +155,7 @@ function exec_type1!(ûs_k::NTuple{C, AbstractArray{<:Complex}}, p::PlanNUFFT, 
         end
 
         @timeit timer "(1) Spreading" begin
-            spread_from_points!(backend, blocks, kernels, us, points, vp)
+            spread_from_points!(backend, blocks, kernels, p.kernel_evalmode, us, points, vp)
             maybe_synchronise(p)
         end
 
@@ -250,7 +255,7 @@ function exec_type2!(vp::NTuple{C, AbstractVector}, p::PlanNUFFT, ûs_k::NTuple
         end
 
         @timeit timer "(3) Interpolation" begin
-            interpolate!(backend, blocks, kernels, vp, us, points)
+            interpolate!(backend, blocks, kernels, p.kernel_evalmode, vp, us, points)
             maybe_synchronise(p)
         end
     end

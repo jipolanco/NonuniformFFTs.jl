@@ -78,6 +78,7 @@ end
 # passed certain keyword arguments.
 # We use @constprop to hopefully avoid some type instabilities, but that doesn't seem to
 # fully help here.
+# TODO: support all keyword arguments of the standard constructor
 Base.@constprop :aggressive function PlanNUFFT(
         xp::AbstractMatrix{Tr}, Ns::Dims;
         fftflags = FFTW.ESTIMATE, blocking = true, sortNodes = false,

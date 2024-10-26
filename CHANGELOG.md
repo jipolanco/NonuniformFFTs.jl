@@ -8,8 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Add alternative implementation of GPU transforms based on shared-memory arrays.
-  This is disabled by default, and can be enabled by passing `gpu_method = :shared_memory`
-  (default is `:global_memory`).
+  This is disabled by default, and can be enabled by passing `gpu_method = :shared_memory` when creating a plan (default is `:global_memory`).
+
+- Add possibility to switch between fast approximation of kernel functions
+  (previously the default and only choice) and direct evaluation (previously not implemented).
+  These correspond to the new `kernel_evalmode` plan creation option.
+  Possible values are `FastApproximation()` and `Direct()`.
+  The default depends on the actual backend.
+  Currently, `FastApproximation()` is used on CPUs and `Direct()` on GPUs,
+  where it is sometimes faster.
 
 ### Changed
 
@@ -19,7 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Previously, the default was `m = HalfSupport(8)` and `σ = 2.0`, corresponding
   to a relative precision of the order of $10^{-14}$.
 
-- On GPUs, we now use direct evaluation of kernel functions (e.g.
+- On GPUs, we now default to direct evaluation of kernel functions (e.g.
   Kaiser-Bessel) instead of polynomial approximations, as this seems to be
   faster and uses far fewer GPU registers.
 
