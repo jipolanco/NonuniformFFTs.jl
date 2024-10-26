@@ -40,7 +40,7 @@ BSplineKernel
 
 ## Kernel evaluation methods
 
-```
+```@docs
 Direct
 FastApproximation
 ```
