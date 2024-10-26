@@ -1,8 +1,13 @@
 abstract type AbstractBlockData end
 
+get_block_dims(bd::AbstractBlockData) = bd.block_dims
+get_sort_points(bd::AbstractBlockData) = bd.sort_points
+
 # Dummy type used when blocking has been disabled in the NUFFT plan.
 struct NullBlockData <: AbstractBlockData end
 with_blocking(::NullBlockData) = false
+get_block_dims(::NullBlockData) = nothing
+get_sort_points(::NullBlockData) = False()
 
 # For now these are only used in the GPU implementation
 get_pointperm(::NullBlockData) = nothing
@@ -99,6 +104,8 @@ end
 
 gpu_method(bd::BlockDataGPU) = bd.method
 with_blocking(::BlockDataGPU) = true
+get_batch_size(bd::BlockDataGPU) = get_batch_size(bd.batch_size)
+get_batch_size(::Val{Np}) where {Np} = Np
 
 function BlockDataGPU(
         ::Type{Z},
@@ -121,7 +128,6 @@ function BlockDataGPU(
 end
 
 get_pointperm(bd::BlockDataGPU) = bd.pointperm
-get_sort_points(bd::BlockDataGPU) = bd.sort_points
 
 function set_points_impl!(
         backend::GPU, bd::BlockDataGPU, points::StructVector, xp, timer;

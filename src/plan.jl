@@ -256,7 +256,8 @@ struct PlanNUFFT{
 end
 
 function Base.show(io::IO, p::PlanNUFFT{T, N, Nc}) where {T, N, Nc}
-    (; kernels, backend, σ, fftshift,) = p
+    (; kernels, backend, σ, blocks, fftshift,) = p
+    M = Kernels.half_support(first(kernels))
     print(io, "$N-dimensional PlanNUFFT with input type $T:")
     print(io, "\n  - backend: ", typeof(backend))
     print(io, "\n  - kernel: ", first(kernels))  # should be the same output in all directions
@@ -265,6 +266,21 @@ function Base.show(io::IO, p::PlanNUFFT{T, N, Nc}) where {T, N, Nc}
     print(io, "\n  - simultaneous transforms: ", Nc)
     frequency_order = fftshift ? "increasing" : "FFTW"
     print(io, "\n  - frequency order: ", frequency_order, " (fftshift = $fftshift)")
+    print(io, "\n  - block size: ")
+    if get_block_dims(blocks) === nothing
+        print(io, "none (blocking disabled)")
+    else
+        print(io, get_block_dims(blocks), " (excluding 2M - 1 = $(2M - 1) ghost cells in each direction)")
+    end
+    print(io, "\n  - internally permuting point order: ", Static.dynamic(get_sort_points(blocks)))
+    if backend isa GPU
+        method = gpu_method(blocks)
+        print(io, "\n  - GPU method: :", method)
+        if method === :shared_memory
+            @assert hasproperty(blocks, :batch_size)
+            print(io, "\n  - batch size for GPU type-1: ", get_batch_size(blocks))
+        end
+    end
     nothing
 end
 
