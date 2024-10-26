@@ -35,13 +35,14 @@ end
 
 function spread_from_point_blocked!(
         gs::NTuple{D, AbstractKernelData},
+        evalmode::EvaluationMode,
         us::NTuple{C, AbstractArray{T, D}} where {T},
         x⃗₀::NTuple{D, Number},
         vs::NTuple{C, Number},
         I₀::NTuple,
     ) where {C, D}
     # Evaluate 1D kernels.
-    gs_eval = map(Kernels.evaluate_kernel, gs, x⃗₀)
+    gs_eval = map((g, x) -> Kernels.evaluate_kernel(evalmode, g, x), gs, x⃗₀)
 
     Ms = map(Kernels.half_support, gs)
     δs = Ms .- I₀  # index offset
@@ -84,6 +85,7 @@ function spread_from_points!(
         ::CPU,
         bd::BlockData,
         gs,
+        evalmode::EvaluationMode,
         us_all::NTuple{C, AbstractArray},
         xp::AbstractVector,
         vp_all::NTuple{C, AbstractVector},
@@ -122,7 +124,7 @@ function spread_from_points!(
                     x⃗ = xp[l]  # if points have not been permuted
                 end
                 vs = map(vp -> @inbounds(vp[l]), vp_all)  # values at the non-uniform point x⃗
-                spread_from_point_blocked!(gs, block, x⃗, vs, Tuple(I₀))
+                spread_from_point_blocked!(gs, evalmode, block, x⃗, vs, Tuple(I₀))
             end
 
             # Indices of current block including padding

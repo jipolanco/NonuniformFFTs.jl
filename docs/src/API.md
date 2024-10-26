@@ -38,6 +38,13 @@ GaussianKernel
 BSplineKernel
 ```
 
+## Kernel evaluation methods
+
+```
+Direct
+FastApproximation
+```
+
 ## Index
 
 ```@index

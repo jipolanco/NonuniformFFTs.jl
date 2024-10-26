@@ -2,6 +2,7 @@ function interpolate!(
         backend::CPU,
         ::NullBlockData,
         gs,
+        evalmode::EvaluationMode,
         vp_all::NTuple{C, AbstractVector},
         us::NTuple{C, AbstractArray},
         x⃗s::AbstractVector,
@@ -11,7 +12,7 @@ function interpolate!(
     foreach(Base.require_one_based_indexing, vp_all)
     for i ∈ eachindex(x⃗s)  # iterate over all points
         x⃗ = @inbounds x⃗s[i]
-        vs = interpolate(gs, us, x⃗) :: NTuple{C}  # non-uniform values at point x⃗
+        vs = interpolate(gs, evalmode, us, x⃗) :: NTuple{C}  # non-uniform values at point x⃗
         for (vp, v) ∈ zip(vp_all, vs)
             @inbounds vp[i] = v
         end
@@ -21,6 +22,7 @@ end
 
 function interpolate(
         gs::NTuple{D, AbstractKernelData},
+        evalmode::EvaluationMode,
         us::NTuple{C, AbstractArray{T, D}} where {T},
         x⃗::NTuple{D},  # coordinates are assumed to be in [0, 2π]
     ) where {D, C}
@@ -30,7 +32,7 @@ function interpolate(
     @assert all(u -> size(u) === Ns, us)
 
     # Evaluate 1D kernels.
-    gs_eval = map(Kernels.evaluate_kernel, gs, x⃗)
+    gs_eval = map((g, x) -> Kernels.evaluate_kernel(evalmode, g, x), gs, x⃗)
 
     # Determine indices to load from `u` arrays.
     inds = map(gs_eval, gs, Ns) do gdata, g, N

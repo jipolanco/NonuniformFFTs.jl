@@ -3,11 +3,45 @@ module Kernels
 using KernelAbstractions: KernelAbstractions as KA
 using Adapt: Adapt, adapt
 
-export HalfSupport
+export HalfSupport, EvaluationMode, Direct, FastApproximation
 
 struct HalfSupport{M} end
 HalfSupport(M) = HalfSupport{M}()
 half_support(::HalfSupport{M}) where {M} = M::Int
+
+abstract type EvaluationMode end
+
+"""
+    Direct <: Kernels.EvaluationMode
+
+Directly evaluate kernels using their definition.
+"""
+struct Direct <: EvaluationMode end
+
+"""
+    FastApproximation <: Kernels.EvaluationMode
+
+Use a fast approximation or algorithm to efficiently evaluate a kernel.
+
+The evaluation type depends on the actual kernel:
+
+- for [`KaiserBesselKernel`](@ref) and [`BackwardsKaiserBesselKernel`](@ref), this uses a
+  fast piecewise polynomial approximation heavily inspired from FINUFFT;
+
+- for [`GaussianKernel`](@ref), this uses the fast Gaussian gridding algorithm proposed by
+  Greengard & Lee (SIAM Rev. 2004);
+
+- for [`BSplineKernel`](@ref), this is currently the same as [`Direct`](@ref) evaluation.
+
+In the first two cases, this is generally faster than [`Direct`](@ref) evaluation for CPU
+transforms.
+
+On GPUs this is not necessarily the case, and results may depend on the actual GPU used.
+For example, on an Nvidia A100, `Direct` evaluation of the `KaiserBesselKernel` (which
+involves Bessel functions) seems to beat polynomial approximation, and is also a bit faster
+than the `BackwardsKaiserBesselKernel` (involving `sinh` functions).
+"""
+struct FastApproximation <: EvaluationMode end
 
 """
     AbstractKernel
@@ -91,6 +125,9 @@ end
     values = _evaluate_kernel_direct(g, i, r)
     (; i, values,)
 end
+
+@inline evaluate_kernel(::FastApproximation, g::AbstractKernelData, x) = evaluate_kernel(g, x)
+@inline evaluate_kernel(::Direct, g::AbstractKernelData, x) = evaluate_kernel_direct(g, x)
 
 @inline function kernel_indices(i, ::AbstractKernelData{K, M}, args...) where {K, M}
     kernel_indices(i, HalfSupport(M), args...)

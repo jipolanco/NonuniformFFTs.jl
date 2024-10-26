@@ -4,6 +4,7 @@ using StaticArrays: MVector
 @kernel function interpolate_to_point_naive_kernel!(
         vp::NTuple{C},
         @Const(gs::NTuple{D}),
+        @Const(evalmode::EvaluationMode),
         @Const(points::NTuple{D}),
         @Const(us::NTuple{C}),
         @Const(pointperm),
@@ -22,7 +23,7 @@ using StaticArrays: MVector
     # don't perform atomic operations. This is why the code is simpler here.
     Ns = size(first(us))  # grid dimensions
 
-    indvals = get_inds_vals_gpu(gs, points, Ns, j)
+    indvals = get_inds_vals_gpu(gs, evalmode, points, Ns, j)
 
     v⃗ = interpolate_from_arrays_gpu(us, indvals, Ns, prefactor)
 
@@ -37,6 +38,7 @@ function interpolate!(
         backend::GPU,
         bd::Union{BlockDataGPU, NullBlockData},
         gs::NTuple{D},
+        evalmode::EvaluationMode,
         vp_all::NTuple{C, AbstractVector},
         us::NTuple{C, AbstractArray},
         x⃗s::AbstractVector,
@@ -74,7 +76,7 @@ function interpolate!(
     if method === :global_memory
         let ndrange = ndrange_points, groupsize = groupsize_points
             kernel! = interpolate_to_point_naive_kernel!(backend, groupsize)
-            kernel!(vp_sorted, gs, xs_comp, us, pointperm_, prefactor; ndrange)
+            kernel!(vp_sorted, gs, evalmode, xs_comp, us, pointperm_, prefactor; ndrange)
         end
     elseif method === :shared_memory
         @assert bd isa BlockDataGPU
@@ -91,7 +93,7 @@ function interpolate!(
             ndrange = groupsize .* ngroups
             kernel! = interpolate_to_points_shmem_kernel!(backend, groupsize, ndrange)
             kernel!(
-                vp_sorted, gs, xs_comp, us, pointperm_, bd.cumulative_npoints_per_block,
+                vp_sorted, gs, evalmode, xs_comp, us, pointperm_, bd.cumulative_npoints_per_block,
                 prefactor,
                 block_dims, Val(shmem_size),
             )
@@ -196,6 +198,7 @@ end
 @kernel function interpolate_to_points_shmem_kernel!(
         vp::NTuple{C, AbstractVector{Z}},
         @Const(gs::NTuple{D}),
+        @Const(evalmode::EvaluationMode),
         @Const(points::NTuple{D}),
         @Const(us::NTuple{C, AbstractArray{Z}}),
         @Const(pointperm),
@@ -256,7 +259,7 @@ end
             indvals = ntuple(Val(D)) do d
                 @inline
                 x = @inbounds points[d][j]
-                gdata = Kernels.evaluate_kernel_direct(gs[d], x)
+                gdata = Kernels.evaluate_kernel(evalmode, gs[d], x)
                 local i₀ = gdata.i - ishifts_sm[d]
                 local vals = gdata.values    # kernel values
                 # @assert i₀ ≥ 0
