@@ -30,8 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Kaiser-Bessel) instead of polynomial approximations, as this seems to be
   faster and uses far fewer GPU registers.
 
-- On CUDA, the default kernel is now `KaiserBesselKernel` instead of `BackwardsKaiserBesselKernel`.
-  The former seems to be a bit faster when using Bessel functions defined in CUDA.
+- On CUDA and AMDGPU, the default kernel is now `KaiserBesselKernel` instead of `BackwardsKaiserBesselKernel`.
+  The direct evaluation of the KB kernel (based on Bessel functions) seems to be a bit faster than backwards KB, both on CUDA and AMDGPU.
   Accuracy doesn't change much since both kernels have similar precisions.
 
 ## [v0.5.6](https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.5.6) - 2024-10-17
