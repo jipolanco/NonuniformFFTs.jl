@@ -11,7 +11,6 @@ get_sort_points(::NullBlockData) = False()
 
 # For now these are only used in the GPU implementation
 get_pointperm(::NullBlockData) = nothing
-get_sort_points(::NullBlockData) = False()
 gpu_method(::NullBlockData) = :global_memory
 
 @kernel function copy_points_unblocked_kernel!(@Const(transform::F), points::NTuple, @Const(xp)) where {F}
