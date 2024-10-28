@@ -7,11 +7,9 @@
 
 Yet another package for computing multidimensional [non-uniform fast Fourier transforms (NUFFTs)](https://en.wikipedia.org/wiki/NUFFT) in Julia.
 
-Like other [existing packages](#differences-with-other-packages), CPU computations
+Like other [existing packages](#differences-with-other-packages), computation of NUFFTs on CPU
 are parallelised using threads.
-By default, all available Julia threads are used.
-
-Preliminary support for GPUs is also available.
+Transforms can also be performed on GPUs.
 In principle all kinds of GPU are supported.
 
 ## Basic usage
@@ -192,7 +190,7 @@ This can be useful for comparing with similar packages such as [NFFT.jl](https:/
 
 ```julia
 using NonuniformFFTs
-using AbstractNFFTs
+using AbstractNFFTs: AbstractNFFTs, plan_nfft
 using LinearAlgebra: mul!
 
 Ns = (256, 256)  # number of Fourier modes in each direction
@@ -206,7 +204,8 @@ vp = randn(Complex{T}, Np)       # random values at points (must be complex)
 
 # Create plan for data of type Complex{T}. Note that we pass the points `xp` as
 # a first argument, which calls an AbstractNFFTs-compatible constructor.
-p = PlanNUFFT(xp, Ns)
+p = NonuniformFFTs.NFFTPlan(xp, Ns)
+# p = AbstractNFFTs.plan_nfft(xp, Ns)  # this is also possible
 
 # Getting the expected dimensions of input and output data.
 AbstractNFFTs.size_in(p)   # (256, 256)
@@ -267,9 +266,14 @@ the opposite sign convention is used for Fourier transforms.
 
 - This package is written in "pure" Julia (besides the FFTs themselves which rely on the FFTW3 library, via their Julia interface).
 
-- This package allows NUFFTs of purely real non-uniform data.
-  Moreover, transforms can be performed in for an arbitrary number of dimensions.
+- This package provides a generic and efficient GPU implementation thanks to
+  [KernelAbstractions.jl](https://github.com/JuliaGPU/KernelAbstractions.jl)
+  meaning that many kinds of GPUs are supported, including not only Nvidia GPUs but
+  also AMD ones and possibly more.
 
-- A different smoothing kernel function is used (backwards Kaiser–Bessel kernel by default).
+- This package allows NUFFTs of purely real non-uniform data.
+  Moreover, transforms can be performed on arbitrary dimensions.
+
+- A different smoothing kernel function is used (backwards Kaiser–Bessel kernel by default on CPUs; Kaiser–Bessel kernel on GPUs).
 
 - It is possible to use the same plan for type-1 and type-2 transforms, reducing memory requirements in cases where one wants to perform both.
