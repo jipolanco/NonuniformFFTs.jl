@@ -230,6 +230,10 @@ struct PlanNUFFT{
     synchronise :: Bool
 end
 
+# This represents the type of data in Fourier space.
+# It is defined like this for compatibility with AbstractNFFTs plans.
+Base.eltype(::PlanNUFFT{T}) where {T} = complex(T)
+
 function Base.show(io::IO, p::PlanNUFFT{T, N, Nc}) where {T, N, Nc}
     (; kernels, backend, σ, blocks, fftshift,) = p
     M = Kernels.half_support(first(kernels))

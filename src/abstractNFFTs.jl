@@ -6,6 +6,7 @@
 # - it doesn't allow simultaneous (directional) transforms (can be fixed within NonuniformFFTs.jl)
 
 using LinearAlgebra: LinearAlgebra, Adjoint
+using Adapt: adapt
 
 # This is a wrapper type allowing to define an interface which is compatible with
 # AbstractNFFTs.jl. It is not exported to avoid clashes with NFFT.jl.
@@ -168,4 +169,12 @@ Base.@constprop :aggressive function NFFTPlan(
     pp = NFFTPlan(p)
     AbstractNFFTs.nodes!(pp, xp)
     pp
+end
+
+function AbstractNFFTs.plan_nfft(
+        ::Type{Q}, xp::AbstractMatrix{T}, Ns::Dims{D};
+        kwargs...,
+    ) where {Q, T, D}
+    xp_q = adapt(Q, xp)  # convert array (and copy to device) if needed
+    NFFTPlan(xp_q, Ns; kwargs...)
 end

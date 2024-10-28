@@ -12,6 +12,7 @@
 using NonuniformFFTs
 using StaticArrays: SVector  # for convenience
 using KernelAbstractions: KernelAbstractions as KA
+using AbstractNFFTs: AbstractNFFTs
 using Adapt: Adapt, adapt
 using GPUArraysCore: AbstractGPUArray
 using Random
@@ -75,7 +76,7 @@ function run_plan(p::PlanNUFFT, xp_init::AbstractArray, vp_init::NTuple{Nc, Abst
         end
     end
 
-    T = eltype(p)  # this is actually defined in AbstractNFFTs; it represents the type in Fourier space (always complex)
+    T = eltype(p)  # type in Fourier space (always complex) - for compatibility with AbstractNFFTs plans
     @test T <: Complex
     dims = size(p)
     us = map(_ -> KA.allocate(backend, T, dims), vp)
@@ -106,6 +107,13 @@ function compare_with_cpu(::Type{T}, dims; Np = prod(dims), ntransforms::Val{Nc}
     params = (; m = HalfSupport(4), kernel = KaiserBesselKernel(), σ = 1.5, ntransforms, kws...)
     p_cpu = @inferred PlanNUFFT(T, dims; params..., backend = CPU())
     p_gpu = @inferred PlanNUFFT(T, dims; params..., backend = PseudoGPU())
+
+    # Test that plan_nfft interface works.
+    @testset "AbstractNFFTs.plan_nfft" begin
+        xmat = reinterpret(reshape, Tr, xp_init)
+        p_nfft = @inferred AbstractNFFTs.plan_nfft(PseudoGPUArray, xmat, dims)
+        @test p_nfft.p.backend === PseudoGPU()
+    end
 
     r_cpu = run_plan(p_cpu, xp_init, vp_init)
     r_gpu = run_plan(p_gpu, xp_init, vp_init)
