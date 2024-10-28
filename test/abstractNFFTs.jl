@@ -15,10 +15,10 @@ function compare_with_nfft(Ns; Np = 1000)
     reltol = 1e-9
     window = :kaiser_bessel
 
-    p = PlanNUFFT(xp, Ns; reltol, window,)
+    p = NonuniformFFTs.NFFTPlan(xp, Ns; reltol, window,)
     p_nfft = NFFT.NFFTPlan(xp, Ns; reltol, window,)
 
-    @test startswith(repr(p), "$(d)-dimensional PlanNUFFT with input type $(Complex{T}):")  # test pretty-printing
+    @test startswith(repr(p), "NonuniformFFTs.NFFTPlan{$T, $d} wrapping a PlanNUFFT:")  # test pretty-printing
 
     @test size_in(p) === size_in(p_nfft)
     @test size_out(p) === size_out(p_nfft)
