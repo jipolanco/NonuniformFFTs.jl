@@ -8,6 +8,7 @@ CurrentModule = NonuniformFFTs
 
 ```@docs
 PlanNUFFT
+NFFTPlan
 ```
 
 ## Setting non-uniform points
