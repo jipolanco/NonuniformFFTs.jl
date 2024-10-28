@@ -187,8 +187,8 @@ function spread_from_points!(
         let ngroups = bd.nblocks_per_dir  # this is the required number of workgroups (number of blocks in CUDA)
             block_dims_padded = @. block_dims_val + 2M - 1
             shmem_size = block_dims_padded  # dimensions of big shared memory array
-            groupsize = groupsize_shmem(ngroups, block_dims_padded, length(x⃗s))
-            ndrange = groupsize .* ngroups
+            groupsize = groupsize_spreading_gpu_shmem(batch_size_actual)
+            ndrange = gpu_shmem_ndrange_from_groupsize(groupsize, ngroups)
             kernel! = spread_from_points_shmem_kernel!(backend, groupsize, ndrange)
             kernel!(
                 us_real, gs, evalmode, xs_comp, vp_sorted, pointperm_, bd.cumulative_npoints_per_block,
@@ -202,6 +202,15 @@ function spread_from_points!(
     end
 
     us
+end
+
+# Determine workgroupsize based on the batch size Np.
+function groupsize_spreading_gpu_shmem(Np::Integer)
+    groupsize = 64
+    while groupsize < Np
+        groupsize += 32
+    end
+    groupsize
 end
 
 @kernel function spread_permute_kernel!(vp::NTuple{N}, @Const(vp_in::NTuple{N}), @Const(perm::AbstractVector)) where {N}
@@ -235,7 +244,7 @@ end
     ) where {C, D, T, Z, M, Np, block_dims, shmem_size}
 
     @uniform begin
-        groupsize = @groupsize()::Dims{D}
+        groupsize = @groupsize()
         nthreads = prod(groupsize)
 
         # Determine grid dimensions.

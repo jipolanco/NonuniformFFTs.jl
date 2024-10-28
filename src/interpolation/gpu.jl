@@ -90,8 +90,8 @@ function interpolate!(
         let ngroups = bd.nblocks_per_dir  # this is the required number of workgroups (number of blocks in CUDA)
             block_dims_padded = @. block_dims_val + 2M - 1  # dimensions of shared memory array
             shmem_size = block_dims_padded
-            groupsize = groupsize_shmem(ngroups, block_dims_padded, length(x⃗s))
-            ndrange = groupsize .* ngroups
+            groupsize = 64
+            ndrange = gpu_shmem_ndrange_from_groupsize(groupsize, ngroups)
             kernel! = interpolate_to_points_shmem_kernel!(backend, groupsize, ndrange)
             kernel!(
                 vp_sorted, gs, evalmode, xs_comp, us, pointperm_, bd.cumulative_npoints_per_block,
@@ -210,7 +210,7 @@ end
     ) where {C, D, Z <: Number, block_dims, shmem_size}
 
     @uniform begin
-        groupsize = @groupsize()::Dims{D}
+        groupsize = @groupsize()
         nthreads = prod(groupsize)
     end
 

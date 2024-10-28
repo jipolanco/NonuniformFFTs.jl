@@ -118,7 +118,8 @@ function BlockDataGPU(
         # Override input block size. We try to maximise the use of shared memory.
         # Show warning if the determined block size is too small.
         block_dims, Np = block_dims_gpu_shmem(backend, Z, Ñs, h, batch_size; warn = true)
-        @assert batch_size === Val(DEFAULT_GPU_BATCH_SIZE) || batch_size === Val(Np)
+        Np_in = get_batch_size(batch_size)
+        @assert Np_in == DEFAULT_GPU_BATCH_SIZE || Np_in ≤ Np  # the actual Np may be larger than the input one (to maximise shared memory usage)
     else
         # This is just for type stability: the type of `batch_size` below should be a
         # compile-time constant.

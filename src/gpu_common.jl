@@ -1,17 +1,3 @@
-# Group size used in shared-memory implementation of spreading and interpolation.
-# Input variables are not currently used (except for the dimension D).
-function groupsize_shmem(ngroups::NTuple{D}, shmem_size::NTuple{D}, Np) where {D}
-    # (1) Determine the total number of threads.
-    # Not sure if it's worth it to define as a function of the inputs (currently unused).
-    # From tests, the value of 64 seems to be optimal in various situations.
-    groupsize = 64  # minimum group size should be equal to the warp size (usually 32 on CUDA and 64 on AMDGPU)
-    # (2) Determine number of threads in each direction.
-    # We don't really care about the Cartesian distribution of threads, since we always
-    # parallelise over linear indices.
-    gsizes = ntuple(_ -> 1, Val(D))
-    Base.setindex(gsizes, groupsize, 1)  # = (groupsize, 1, 1, ...)
-end
-
 # Total amount of shared memory available (in bytes).
 # This might be overridden in package extensions for specific backends.
 available_static_shared_memory(backend::KA.Backend) = Int32(48) << 10  # 48 KiB (usual in CUDA)
@@ -19,6 +5,10 @@ available_static_shared_memory(backend::KA.Backend) = Int32(48) << 10  # 48 KiB 
 # Here 0 means that the batch size will be determined automatically in order to maximise
 # shared memory usage within each GPU workgroup.
 const DEFAULT_GPU_BATCH_SIZE = 0
+
+# Return ndrange parameter to be passed to KA kernels defining shared memory implementations.
+gpu_shmem_ndrange_from_groupsize(groupsize::Integer, ngroups::Tuple) =
+    Base.setindex(ngroups, groupsize * ngroups[1], 1)  # ngroups[1] -> ngroups[1] * groupsize
 
 # Determine block size if using the shared-memory implementation.
 # We try to make sure that the total block size (including 2M - 1 ghost cells in each direction)
@@ -45,9 +35,9 @@ const DEFAULT_GPU_BATCH_SIZE = 0
     # See spread_from_points_shmem_kernel! for the meaning of each variable to the right of
     # each value.
     const_shmem = sizeof(Int) * (
-        + 3  # buf_sm
-        + D  # ishifts_sm
-    )
+        + 3   # buf_sm
+        + D   # ishifts_sm
+    ) + 128   # extra 128 bytes for safety (CUDA seems to use slightly more shared memory than what we estimate, maybe due to memory alignment?)
 
     # (2) Shared memory required per point in a batch
     shmem_per_point = sizeof(T) * D * (
@@ -71,7 +61,7 @@ const DEFAULT_GPU_BATCH_SIZE = 0
     # (3) Determine local grid size based on above values
     max_shmem_localgrid = max_shmem - const_shmem - Np_min * shmem_per_point  # maximum shared memory for local grid (single block)
     max_localgrid_length = max_shmem_localgrid ÷ sizeof(Z)  # maximum number of elements in a block
-    m = floor(Int, max_localgrid_length^(1/D))  # local grid size in each direction (including ghost cells / padding)
+    m = floor(Int, _invpow(max_localgrid_length, Val(D)))  # local grid size in each direction (including ghost cells / padding)
     n = m - (2M - 1)  # exclude ghost cells
     block_dims = ntuple(_ -> n, Val(D))  # = (n, n, ...)
 
@@ -98,15 +88,24 @@ const DEFAULT_GPU_BATCH_SIZE = 0
             If possible, reduce some of these parameters, or else switch to gpu_method = :global_memory."""
     end
 
-    if Np == DEFAULT_GPU_BATCH_SIZE
-        # (4) Now determine Np according to the actual remaining shared memory
-        shmem_left = max_shmem - const_shmem - sizeof(Z) * m^D
-        Np_optimal = shmem_left ÷ shmem_per_point
-        block_dims, Np_optimal
-    else
-        block_dims, Np
-    end
+    # (4) Now determine Np according to the actual remaining shared memory.
+    # Note that, if Np was passed as input, we may increase it to maximise memory usage.
+    shmem_left = max_shmem - const_shmem - sizeof(Z) * m^D
+    Np_actual = shmem_left ÷ shmem_per_point
+
+    # Actual memory requirement
+    # shmem_for_local_grid = m^D * sizeof(Z)
+    # required_shmem = const_shmem + shmem_for_local_grid + Np_actual * shmem_per_point
+    # @show required_shmem max_shmem
+
+    block_dims, Np_actual
 end
+
+# Compute x^(1/D)
+_invpow(x, ::Val{1}) = x
+_invpow(x, ::Val{2}) = sqrt(x)
+_invpow(x, ::Val{3}) = cbrt(x)
+_invpow(x, ::Val{4}) = sqrt(sqrt(x))
 
 # This is called from the global memory (naive) implementation of spreading and interpolation kernels.
 @inline function get_inds_vals_gpu(gs::NTuple{D}, evalmode::EvaluationMode, points::NTuple{D}, Ns::NTuple{D}, j::Integer) where {D}
