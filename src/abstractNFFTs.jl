@@ -35,6 +35,10 @@ Most keyword arguments from [`PlanNUFFT`](@ref) are also accepted here.
 Moreover, for compatibility reasons, most keyword arguments from the NFFT.jl package are
 also accepted as detailed below.
 
+This type of plan can also be created via the
+[`AbstractNFFTs.plan_nfft`](https://juliamath.github.io/NFFT.jl/v0.13.5/abstract/#Plan-Interface)
+function.
+
 This constructor creates a plan which assumes complex-valued non-uniform data.
 For real-valued data, the [`PlanNUFFT`](@ref) constructor should be used instead.
 
