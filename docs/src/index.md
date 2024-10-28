@@ -244,8 +244,10 @@ This package also implements the [AbstractNFFTs.jl](https://juliamath.github.io/
 interface as an alternative API for constructing plans and evaluating transforms.
 This can be useful for comparing with similar packages such as [NFFT.jl](https://github.com/JuliaMath/NFFT.jl).
 
-In particular, a specific [`NFFTPlan`](@ref) constructor is provided which
+In particular, a specific [`NFFTPlan`](@ref NonuniformFFTs.NFFTPlan) constructor is provided which
 supports most of the parameters supported by [NFFT.jl](https://github.com/JuliaMath/NFFT.jl).
+Alternatively, once NonuniformFFTs.jl has been loaded, the [`plan_nfft`](https://juliamath.github.io/NFFT.jl/v0.13.5/api/#AbstractNFFTs.plan_nfft-Union{Tuple{D},%20Tuple{T},%20Tuple{Type{%3C:Array},%20Matrix{T},%20Tuple{Vararg{Int64,%20D}},%20Vararg{Any}}}%20where%20{T,%20D})
+function from AbstractNFFTs.jl generates the same type type of plan.
 For compatibility with NFFT.jl, the plan generated via this interface **does not
 follow the same conventions**  described [above](@ref nufft-conventions).
 
