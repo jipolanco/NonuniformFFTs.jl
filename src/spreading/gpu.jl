@@ -205,9 +205,12 @@ function spread_from_points!(
 end
 
 # Determine workgroupsize based on the batch size Np.
+# Try to have between 64 and 256 threads, such that the number of threads is ideally larger
+# than the batch size.
 function groupsize_spreading_gpu_shmem(Np::Integer)
     groupsize = 64
-    while groupsize < Np
+    c = min(Np, 256)
+    while groupsize < c
         groupsize += 32
     end
     groupsize

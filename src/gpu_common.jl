@@ -2,9 +2,9 @@
 # This might be overridden in package extensions for specific backends.
 available_static_shared_memory(backend::KA.Backend) = Int32(48) << 10  # 48 KiB (usual in CUDA)
 
-# Here 0 means that the batch size will be determined automatically in order to maximise
-# shared memory usage within each GPU workgroup.
-const DEFAULT_GPU_BATCH_SIZE = 0
+# Minimum size of a batch (in number of non-uniform points) used in the shared-memory
+# implementation of GPU spreading.
+const DEFAULT_GPU_BATCH_SIZE = 16
 
 # Return ndrange parameter to be passed to KA kernels defining shared memory implementations.
 gpu_shmem_ndrange_from_groupsize(groupsize::Integer, ngroups::Tuple) =
@@ -17,9 +17,9 @@ gpu_shmem_ndrange_from_groupsize(groupsize::Integer, ngroups::Tuple) =
 # For this to be true, the available_static_shared_memory function should also return a
 # compile-time constant (see CUDA and AMDGPU extensions for details).
 @inline function block_dims_gpu_shmem(
-        backend, ::Type{Z}, ::Dims{D}, ::HalfSupport{M}, ::Val{Np} = Val(DEFAULT_GPU_BATCH_SIZE);
+        backend, ::Type{Z}, ::Dims{D}, ::HalfSupport{M}, ::Val{Np_min} = Val(DEFAULT_GPU_BATCH_SIZE);
         warn = false,
-    ) where {Z <: Number, D, M, Np}
+    ) where {Z <: Number, D, M, Np_min}
     T = real(Z)
     # These are extra shared-memory needs in spreading kernel (see spread_from_points_shmem_kernel!).
     max_shmem = available_static_shared_memory(backend)  # hopefully this should be a compile-time constant!
@@ -48,15 +48,6 @@ gpu_shmem_ndrange_from_groupsize(groupsize::Integer, ngroups::Tuple) =
     ) + (
         sizeof(Z)         # vp_sm
     )
-
-    # Here Np is the batch size (gpu_batch_size parameter).
-    # It can be DEFAULT_GPU_BATCH_SIZE (= 0) if the user didn't specify it, in which case an "optimal" value will be
-    # chosen to maximise shared memory usage.
-    Np_min = if Np == DEFAULT_GPU_BATCH_SIZE
-        16   # minimum batch size (heuristic)
-    else
-        Np  # if Np was explicitly passed, make sure we leave enough space for the wanted batch size
-    end
 
     # (3) Determine local grid size based on above values
     max_shmem_localgrid = max_shmem - const_shmem - Np_min * shmem_per_point  # maximum shared memory for local grid (single block)
@@ -92,6 +83,7 @@ gpu_shmem_ndrange_from_groupsize(groupsize::Integer, ngroups::Tuple) =
     # Note that, if Np was passed as input, we may increase it to maximise memory usage.
     shmem_left = max_shmem - const_shmem - sizeof(Z) * m^D
     Np_actual = shmem_left ÷ shmem_per_point
+    @assert Np_actual ≥ Np_min
 
     # Actual memory requirement
     # shmem_for_local_grid = m^D * sizeof(Z)
