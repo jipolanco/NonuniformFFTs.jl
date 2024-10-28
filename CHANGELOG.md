@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Currently, `FastApproximation()` is used on CPUs and `Direct()` on GPUs,
   where it is sometimes faster.
 
+- The `AbstractNFFTs.plan_nfft` function is now implemented for full compatibility with the AbstractNFFTs.jl interface.
+
 ### Changed
 
 - **BREAKING**: Change default precision of transforms.
@@ -25,6 +27,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   This corresponds to setting `m = HalfSupport(4)` and oversampling factor `σ = 2.0`.
   Previously, the default was `m = HalfSupport(8)` and `σ = 2.0`, corresponding
   to a relative precision of the order of $10^{-14}$.
+
+- **BREAKING**: The `PlanNUFFT` constructor can no longer be used to create
+  plans compatible with AbstractNFFTs.jl / NFFT.jl.
+  Instead, a separate (and unexported) `NonuniformFFTs.NFFTPlan` type is now
+  defined which may be used for this purpose.
+  Alternatively, one can now use the `AbstractNFFTs.plan_nfft` function.
 
 - On GPUs, we now default to direct evaluation of kernel functions (e.g.
   Kaiser-Bessel) instead of polynomial approximations, as this seems to be

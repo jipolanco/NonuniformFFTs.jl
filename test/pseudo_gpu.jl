@@ -112,7 +112,10 @@ function compare_with_cpu(::Type{T}, dims; Np = prod(dims), ntransforms::Val{Nc}
     @testset "AbstractNFFTs.plan_nfft" begin
         xmat = reinterpret(reshape, Tr, xp_init)
         p_nfft = @inferred AbstractNFFTs.plan_nfft(PseudoGPUArray, xmat, dims)
-        @test p_nfft.p.backend === PseudoGPU()
+        @test p_nfft.p.backend isa PseudoGPU
+        # Test without the initial argument (type of array)
+        p_nfft_cpu = @inferred AbstractNFFTs.plan_nfft(xmat, dims)
+        @test p_nfft_cpu.p.backend isa CPU
     end
 
     r_cpu = run_plan(p_cpu, xp_init, vp_init)
