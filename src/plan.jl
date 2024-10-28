@@ -132,7 +132,7 @@ the order of ``10^{-7}`` for `Float64` or `ComplexF64` data.
 
 ## Other performance parameters
 
-These are more advanced performance parameters which may dissappear or whose behaviour may
+These are more advanced performance parameters which may disappear or whose behaviour may
 change in the future.
 
 - `sort_points = False()`: whether to internally permute the order of the non-uniform points.

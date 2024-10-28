@@ -30,6 +30,10 @@ dimension and `Np` the number of non-uniform points.
 
 The second argument is simply the size `(N₁, N₂, …)` of the uniform data arrays.
 
+Most keyword arguments from [`PlanNUFFT`](@ref) are also accepted here.
+Moreover, for compatibility reasons, most keyword arguments from the NFFT.jl package are
+also accepted as detailed below.
+
 This constructor creates a plan which assumes complex-valued non-uniform data.
 For real-valued data, the [`PlanNUFFT`](@ref) constructor should be used instead.
 
@@ -142,21 +146,24 @@ Base.@constprop :aggressive function NFFTPlan(
         fftflags = FFTW.ESTIMATE, blocking = true, sortNodes = false,
         window = default_kernel(KA.get_backend(xp)),
         fftshift = true,  # for compatibility with NFFT.jl
-        synchronise = false,
-        kwargs...,
+        m = nothing, σ = nothing, reltol = nothing,
+        kws...,  # passed to PlanNUFFT
     ) where {T <: AbstractFloat}
     # Note: the NFFT.jl package uses an odd window size, w = 2m + 1.
     # Here we use an even window size w = 2m, which should result in a slightly lower
     # accuracy for the same m.
-    m, σ, reltol = AbstractNFFTs.accuracyParams(; kwargs...)
+    kws_accuracy = filter(!isnothing, (; m, σ, reltol,))  # filter out parameters which were not passed
+    m_actual, σ_actual, reltol_actual = AbstractNFFTs.accuracyParams(; kws_accuracy...)
     backend = KA.get_backend(xp)  # e.g. use GPU backend if xp is a GPU array
     sort_points = sortNodes ? True() : False()  # this is type-unstable (unless constant propagation happens)
     block_size = blocking ? default_block_size(Ns, backend) : nothing  # also type-unstable
     kernel = window isa AbstractKernel ? window : convert_window_function(window, backend)
+    get(kws, :backend, backend) == backend || throw(ArgumentError("`backend` argument is incompatible with array type"))
     p = PlanNUFFT(
-        Complex{T}, Ns, HalfSupport(m);
-        backend, σ = T(σ), sort_points, fftshift, block_size,
-        kernel, fftw_flags = fftflags, synchronise,
+        Complex{T}, Ns, HalfSupport(m_actual);
+        backend, σ = T(σ_actual), sort_points, fftshift, block_size,
+        kernel, fftw_flags = fftflags,
+        kws...,
     )
     pp = NFFTPlan(p)
     AbstractNFFTs.nodes!(pp, xp)
