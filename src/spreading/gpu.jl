@@ -180,7 +180,8 @@ function spread_from_points!(
         Z = eltype(us[1])
         M = Kernels.half_support(gs[1])
         @assert all(g -> Kernels.half_support(g) === M, gs)  # check that they're all equal
-        block_dims_val = block_dims_gpu_shmem(backend, Z, size(us[1]), HalfSupport(M), bd.batch_size)  # this is usually a compile-time constant...
+        block_dims_val, batch_size_actual = block_dims_gpu_shmem(backend, Z, size(us[1]), HalfSupport(M), bd.batch_size)  # this is usually a compile-time constant...
+        @assert Val(batch_size_actual) == bd.batch_size
         block_dims = Val(block_dims_val)  # ...which means this doesn't require a dynamic dispatch
         @assert block_dims_val === bd.block_dims
         let ngroups = bd.nblocks_per_dir  # this is the required number of workgroups (number of blocks in CUDA)
@@ -254,6 +255,7 @@ end
     u_local = @localmem(Z, shmem_size)
     # @assert shmem_size == block_dims .+ (2M - 1)
     @assert T <: Real
+
     window_vals = @localmem(T, (2M, D, Np))
     points_sm = @localmem(T, (D, Np))  # points copied to shared memory
     inds_start = @localmem(Int, (D, Np))

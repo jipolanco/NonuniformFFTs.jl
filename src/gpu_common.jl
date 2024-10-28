@@ -14,37 +14,67 @@ end
 
 # Total amount of shared memory available (in bytes).
 # This might be overridden in package extensions for specific backends.
-available_static_shared_memory(backend::KA.Backend) = 48 << 10  # 48 KiB (usual in CUDA)
+available_static_shared_memory(backend::KA.Backend) = Int32(48) << 10  # 48 KiB (usual in CUDA)
+
+# Here 0 means that the batch size will be determined automatically in order to maximise
+# shared memory usage within each GPU workgroup.
+const DEFAULT_GPU_BATCH_SIZE = 0
 
 # Determine block size if using the shared-memory implementation.
 # We try to make sure that the total block size (including 2M - 1 ghost cells in each direction)
 # is not larger than the available shared memory. In CUDA the limit is usually 48 KiB.
 # Note that the result is a compile-time constant (on Julia 1.11.1 at least).
+# For this to be true, the available_static_shared_memory function should also return a
+# compile-time constant (see CUDA and AMDGPU extensions for details).
 @inline function block_dims_gpu_shmem(
         backend, ::Type{Z}, ::Dims{D}, ::HalfSupport{M}, ::Val{Np};
         warn = false,
     ) where {Z <: Number, D, M, Np}
     T = real(Z)
     # These are extra shared-memory needs in spreading kernel (see spread_from_points_shmem_kernel!).
-    # Here Np is the batch size (gpu_batch_size parameter).
-    base_shmem_required = sizeof(T) * (
-        2M * D * Np +  # window_vals
-        D * Np +       # points_sm
-        D * Np         # inds_start
-    ) +
-    sizeof(Z) * (
-        Np  # vp_sm
-    ) +
-    sizeof(Int) * (
-        3 +  # buf_sm
-        D    # ishifts_sm
+    max_shmem = available_static_shared_memory(backend)  # hopefully this should be a compile-time constant!
+
+    # We try to maximise use of the available shared memory. We split the total capacity as:
+    #
+    #   max_shmem ≥ const_shmem + shmem_for_local_grid + Np * shmem_per_point
+    #
+    # where const_shmem and shmem_per_point are defined based on variables defined in
+    # spread_from_points_shmem_kernel! (spreading/gpu.jl).
+
+    # (1) Constant shared memory requirement (independent of Np or local grid size)
+    # See spread_from_points_shmem_kernel! for the meaning of each variable to the right of
+    # each value.
+    const_shmem = sizeof(Int) * (
+        + 3  # buf_sm
+        + D  # ishifts_sm
     )
-    max_shmem = available_static_shared_memory(backend)
-    max_shmem_blocks = max_shmem - base_shmem_required  # maximum shared-memory for block data (local grid)
-    max_block_length = max_shmem_blocks ÷ sizeof(Z)  # maximum number of elements in a block
-    m = floor(Int, max_block_length^(1/D))  # block size in each direction (including ghost cells / padding)
+
+    # (2) Shared memory required per point in a batch
+    shmem_per_point = sizeof(T) * D * (
+        + 2M  # window_vals
+        + 1   # points_sm
+    ) + (
+        sizeof(Int) * D   # inds_start
+    ) + (
+        sizeof(Z)         # vp_sm
+    )
+
+    # Here Np is the batch size (gpu_batch_size parameter).
+    # It can be DEFAULT_GPU_BATCH_SIZE (= 0) if the user didn't specify it, in which case an "optimal" value will be
+    # chosen to maximise shared memory usage.
+    Np_min = if Np == DEFAULT_GPU_BATCH_SIZE
+        16   # minimum batch size (heuristic)
+    else
+        Np  # if Np was explicitly passed, make sure we leave enough space for the wanted batch size
+    end
+
+    # (3) Determine local grid size based on above values
+    max_shmem_localgrid = max_shmem - const_shmem - Np_min * shmem_per_point  # maximum shared memory for local grid (single block)
+    max_localgrid_length = max_shmem_localgrid ÷ sizeof(Z)  # maximum number of elements in a block
+    m = floor(Int, max_localgrid_length^(1/D))  # local grid size in each direction (including ghost cells / padding)
     n = m - (2M - 1)  # exclude ghost cells
     block_dims = ntuple(_ -> n, Val(D))  # = (n, n, ...)
+
     if n ≤ 0
         throw(ArgumentError(
             lazy"""
@@ -55,7 +85,6 @@ available_static_shared_memory(backend::KA.Backend) = 48 << 10  # 48 KiB (usual 
               - spreading batch size: Np = $Np
             If possible, reduce some of these parameters, or else switch to gpu_method = :global_memory."""
         ))
-        # TODO: warning if n is too small? (likely slower than global_memory method)
     elseif warn && n < 4  # the n < 4 limit is completely empirical
         @warn lazy"""
             GPU shared memory size might be too small for the chosen problem.
@@ -68,7 +97,15 @@ available_static_shared_memory(backend::KA.Backend) = 48 << 10  # 48 KiB (usual 
             This gives blocks of dimensions $block_dims (not including 2M - 1 = $(2M - 1) ghost cells in each direction).
             If possible, reduce some of these parameters, or else switch to gpu_method = :global_memory."""
     end
-    block_dims
+
+    if Np == DEFAULT_GPU_BATCH_SIZE
+        # (4) Now determine Np according to the actual remaining shared memory
+        shmem_left = max_shmem - const_shmem - sizeof(Z) * m^D
+        Np_optimal = shmem_left ÷ shmem_per_point
+        block_dims, Np_optimal
+    else
+        block_dims, Np
+    end
 end
 
 # This is called from the global memory (naive) implementation of spreading and interpolation kernels.
