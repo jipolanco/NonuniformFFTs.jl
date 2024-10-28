@@ -119,6 +119,10 @@ function BlockDataGPU(
         # Show warning if the determined block size is too small.
         block_dims, Np = block_dims_gpu_shmem(backend, Z, Ñs, h, batch_size; warn = true)
         @assert batch_size === Val(DEFAULT_GPU_BATCH_SIZE) || batch_size === Val(Np)
+    else
+        # This is just for type stability: the type of `batch_size` below should be a
+        # compile-time constant.
+        _, Np = block_dims_gpu_shmem(backend, Z, Ñs, h, batch_size; warn = false)
     end
     nblocks_per_dir = map(cld, Ñs, block_dims)  # basically equal to ceil(Ñ / block_dim)
     L = T(2) * π  # domain period

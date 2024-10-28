@@ -87,6 +87,12 @@ function run_plan(p::PlanNUFFT, xp_init::AbstractArray, vp_init::NTuple{Nc, Abst
     (; backend, us, wp,)
 end
 
+# Test that block_dims_gpu_shmem returns compile-time constants.
+function test_inference_block_dims_shmem(backend, ::Type{Z}, dims, m::HalfSupport) where {Z}
+    ret = NonuniformFFTs.block_dims_gpu_shmem(backend, Z, dims, m)
+    Val(ret)
+end
+
 function compare_with_cpu(::Type{T}, dims; Np = prod(dims), ntransforms::Val{Nc} = Val(1), kws...) where {T <: Number, Nc}
     # Generate some non-uniform random data on the CPU
     rng = Xoshiro(42)
@@ -95,9 +101,11 @@ function compare_with_cpu(::Type{T}, dims; Np = prod(dims), ntransforms::Val{Nc}
     xp_init = [rand(rng, SVector{N, Tr}) * Tr(2π) for _ ∈ 1:Np]  # non-uniform points in [0, 2π]ᵈ
     vp_init = ntuple(_ -> randn(rng, T, Np), ntransforms)
 
+    @inferred test_inference_block_dims_shmem(PseudoGPU(), T, dims, HalfSupport(4))
+
     params = (; m = HalfSupport(4), kernel = KaiserBesselKernel(), σ = 1.5, ntransforms, kws...)
-    p_cpu = PlanNUFFT(T, dims; params..., backend = CPU())
-    p_gpu = PlanNUFFT(T, dims; params..., backend = PseudoGPU())
+    p_cpu = @inferred PlanNUFFT(T, dims; params..., backend = CPU())
+    p_gpu = @inferred PlanNUFFT(T, dims; params..., backend = PseudoGPU())
 
     r_cpu = run_plan(p_cpu, xp_init, vp_init)
     r_gpu = run_plan(p_gpu, xp_init, vp_init)

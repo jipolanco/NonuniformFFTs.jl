@@ -27,7 +27,7 @@ const DEFAULT_GPU_BATCH_SIZE = 0
 # For this to be true, the available_static_shared_memory function should also return a
 # compile-time constant (see CUDA and AMDGPU extensions for details).
 @inline function block_dims_gpu_shmem(
-        backend, ::Type{Z}, ::Dims{D}, ::HalfSupport{M}, ::Val{Np};
+        backend, ::Type{Z}, ::Dims{D}, ::HalfSupport{M}, ::Val{Np} = Val(DEFAULT_GPU_BATCH_SIZE);
         warn = false,
     ) where {Z <: Number, D, M, Np}
     T = real(Z)
