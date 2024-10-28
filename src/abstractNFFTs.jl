@@ -151,13 +151,12 @@ Base.@constprop :aggressive function NFFTPlan(
         fftflags = FFTW.ESTIMATE, blocking = true, sortNodes = false,
         window = default_kernel(KA.get_backend(xp)),
         fftshift = true,  # for compatibility with NFFT.jl
-        m = nothing, σ = nothing, reltol = nothing,
-        kws...,  # passed to PlanNUFFT
+        kws...,
     ) where {T <: AbstractFloat}
     # Note: the NFFT.jl package uses an odd window size, w = 2m + 1.
     # Here we use an even window size w = 2m, which should result in a slightly lower
     # accuracy for the same m.
-    kws_accuracy = filter(!isnothing, (; m, σ, reltol,))  # filter out parameters which were not passed
+    kws_plan, kws_accuracy = _split_accuracy_params(; kws...)
     m_actual, σ_actual, reltol_actual = AbstractNFFTs.accuracyParams(; kws_accuracy...)
     backend = KA.get_backend(xp)  # e.g. use GPU backend if xp is a GPU array
     sort_points = sortNodes ? True() : False()  # this is type-unstable (unless constant propagation happens)
@@ -168,11 +167,18 @@ Base.@constprop :aggressive function NFFTPlan(
         Complex{T}, Ns, HalfSupport(m_actual);
         backend, σ = T(σ_actual), sort_points, fftshift, block_size,
         kernel, fftw_flags = fftflags,
-        kws...,
+        kws_plan...,
     )
     pp = NFFTPlan(p)
     AbstractNFFTs.nodes!(pp, xp)
     pp
+end
+
+function _split_accuracy_params(; kws...)
+    nt = NamedTuple(kws)
+    nt_plan = Base.structdiff(nt, NamedTuple{(:m, :σ, :reltol)})  # remove accuracy params
+    nt_accuracy = Base.structdiff(nt, nt_plan)  # only accuracy params
+    nt_plan, nt_accuracy
 end
 
 function AbstractNFFTs.plan_nfft(
