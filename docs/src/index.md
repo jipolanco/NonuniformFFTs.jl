@@ -5,7 +5,9 @@ Yet another package for computing multidimensional [non-uniform fast Fourier tra
 Like other [existing packages](#similar-packages), computation of NUFFTs on CPU
 are parallelised using threads.
 Transforms can also be performed on GPUs.
-In principle all kinds of GPU are supported.
+In principle all kinds of GPU for which
+a [KernelAbstractions.jl](https://github.com/JuliaGPU/KernelAbstractions.jl)
+backend exists are supported.
 
 ## Installation
 
@@ -273,7 +275,7 @@ vp = randn(Complex{T}, Np)       # random values at points (must be complex)
 # Create plan for data of type Complex{T}. Note that we pass the points `xp` as
 # a first argument, which calls an AbstractNFFTs-compatible constructor.
 p = NonuniformFFTs.NFFTPlan(xp, Ns)
-# p = AbstractNFFTs.plan_nfft(xp, Ns)  # this is also possible
+# p = plan_nfft(xp, Ns)  # this is also possible
 
 # Getting the expected dimensions of input and output data.
 AbstractNFFTs.size_in(p)   # (256, 256)
