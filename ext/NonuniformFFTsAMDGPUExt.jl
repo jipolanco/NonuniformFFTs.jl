@@ -18,7 +18,18 @@ using AMDGPU.Device: @device_override
 # than the BackwardsKaiserBesselKernel.
 NonuniformFFTs.default_kernel(::ROCBackend) = KaiserBesselKernel()
 
-NonuniformFFTs.available_static_shared_memory(::ROCBackend) =
-    AMDGPU.HIP.attribute(AMDGPU.device(), AMDGPU.HIP.hipDeviceAttributeMaxSharedMemoryPerBlock)
+# We want the result of this function to be a compile-time constant to avoid some type
+# instabilities, which is why we hardcode the result even though it could be obtained using
+# the AMDGPU API.
+# On AMDGPU, the static shared memory size (called LDS = Local Data Storage) is usually 64 KiB.
+# This is the case in particular of all current AMD Instinct GPUs/APUs (up to the CDNA3
+# architecture at least, i.e. MI300* models).
+# See https://rocm.docs.amd.com/en/latest/reference/gpu-arch-specs.html
+function NonuniformFFTs.available_static_shared_memory(::ROCBackend)
+    expected = Int32(64) << 10  # 64 KiB
+    actual = AMDGPU.HIP.attribute(AMDGPU.device(), AMDGPU.HIP.hipDeviceAttributeMaxSharedMemoryPerBlock)
+    expected == actual || @warn(lazy"AMDGPU device reports non-standard shared memory size: $actual bytes")
+    expected
+end
 
 end

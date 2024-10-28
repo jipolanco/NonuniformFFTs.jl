@@ -111,19 +111,28 @@ function BlockDataGPU(
         backend::KA.Backend, block_dims::Dims{D}, Ñs::Dims{D}, h::HalfSupport{M},
         sort_points::StaticBool;
         method::Symbol,
-        batch_size::Val = Val(16),  # batch size (in number of non-uniform points) used in spreading if gpu_method == :shared_memory
+        batch_size::Val = Val(DEFAULT_GPU_BATCH_SIZE),  # batch size (in number of non-uniform points) used in spreading if gpu_method == :shared_memory
     ) where {Z <: Number, D, M}
     T = real(Z)  # in case Z is complex
     if method === :shared_memory
         # Override input block size. We try to maximise the use of shared memory.
         # Show warning if the determined block size is too small.
-        block_dims = block_dims_gpu_shmem(backend, Z, Ñs, h, batch_size; warn = true)
+        block_dims, Np = block_dims_gpu_shmem(backend, Z, Ñs, h, batch_size; warn = true)
+        Np_in = get_batch_size(batch_size)
+        @assert Np_in == DEFAULT_GPU_BATCH_SIZE || Np_in ≤ Np  # the actual Np may be larger than the input one (to maximise shared memory usage)
+    else
+        # This is just for type stability: the type of `batch_size` below should be a
+        # compile-time constant.
+        _, Np = block_dims_gpu_shmem(backend, Z, Ñs, h, batch_size; warn = false)
     end
     nblocks_per_dir = map(cld, Ñs, block_dims)  # basically equal to ceil(Ñ / block_dim)
     L = T(2) * π  # domain period
     Δxs = map(N -> L / N, Ñs)  # grid step (oversampled grid)
     cumulative_npoints_per_block = KA.allocate(backend, Int, prod(nblocks_per_dir) + 1)
-    BlockDataGPU(method, Δxs, nblocks_per_dir, block_dims, cumulative_npoints_per_block, sort_points; batch_size)
+    BlockDataGPU(
+        method, Δxs, nblocks_per_dir, block_dims, cumulative_npoints_per_block, sort_points;
+        batch_size = Val(Np),
+    )
 end
 
 get_pointperm(bd::BlockDataGPU) = bd.pointperm

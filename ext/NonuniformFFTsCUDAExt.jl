@@ -18,8 +18,14 @@ using CUDA: @device_override
 # The difference is not huge though.
 NonuniformFFTs.default_kernel(::CUDABackend) = KaiserBesselKernel()
 
-# This generally returns 48KiB.
-NonuniformFFTs.available_static_shared_memory(::CUDABackend) =
-    CUDA.attribute(device(), CUDA.DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK)
+# We want the result of this function to be a compile-time constant to avoid some type
+# instabilities, which is why we hardcode the result even though it could be obtained using
+# the CUDA API.
+function NonuniformFFTs.available_static_shared_memory(::CUDABackend)
+    expected = Int32(48) << 10  # 48 KiB
+    actual = CUDA.attribute(device(), CUDA.DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK)  # generally returns 48KiB
+    expected == actual || @warn(lazy"CUDA device reports non-standard shared memory size: $actual bytes")
+    expected
+end
 
 end

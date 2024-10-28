@@ -180,14 +180,15 @@ function spread_from_points!(
         Z = eltype(us[1])
         M = Kernels.half_support(gs[1])
         @assert all(g -> Kernels.half_support(g) === M, gs)  # check that they're all equal
-        block_dims_val = block_dims_gpu_shmem(backend, Z, size(us[1]), HalfSupport(M), bd.batch_size)  # this is usually a compile-time constant...
+        block_dims_val, batch_size_actual = block_dims_gpu_shmem(backend, Z, size(us[1]), HalfSupport(M), bd.batch_size)  # this is usually a compile-time constant...
+        @assert Val(batch_size_actual) == bd.batch_size
         block_dims = Val(block_dims_val)  # ...which means this doesn't require a dynamic dispatch
         @assert block_dims_val === bd.block_dims
         let ngroups = bd.nblocks_per_dir  # this is the required number of workgroups (number of blocks in CUDA)
             block_dims_padded = @. block_dims_val + 2M - 1
             shmem_size = block_dims_padded  # dimensions of big shared memory array
-            groupsize = groupsize_shmem(ngroups, block_dims_padded, length(x⃗s))
-            ndrange = groupsize .* ngroups
+            groupsize = groupsize_spreading_gpu_shmem(batch_size_actual)
+            ndrange = gpu_shmem_ndrange_from_groupsize(groupsize, ngroups)
             kernel! = spread_from_points_shmem_kernel!(backend, groupsize, ndrange)
             kernel!(
                 us_real, gs, evalmode, xs_comp, vp_sorted, pointperm_, bd.cumulative_npoints_per_block,
@@ -201,6 +202,18 @@ function spread_from_points!(
     end
 
     us
+end
+
+# Determine workgroupsize based on the batch size Np.
+# Try to have between 64 and 256 threads, such that the number of threads is ideally larger
+# than the batch size.
+function groupsize_spreading_gpu_shmem(Np::Integer)
+    groupsize = 64
+    c = min(Np, 256)
+    while groupsize < c
+        groupsize += 32
+    end
+    groupsize
 end
 
 @kernel function spread_permute_kernel!(vp::NTuple{N}, @Const(vp_in::NTuple{N}), @Const(perm::AbstractVector)) where {N}
@@ -234,7 +247,7 @@ end
     ) where {C, D, T, Z, M, Np, block_dims, shmem_size}
 
     @uniform begin
-        groupsize = @groupsize()::Dims{D}
+        groupsize = @groupsize()
         nthreads = prod(groupsize)
 
         # Determine grid dimensions.
@@ -254,6 +267,7 @@ end
     u_local = @localmem(Z, shmem_size)
     # @assert shmem_size == block_dims .+ (2M - 1)
     @assert T <: Real
+
     window_vals = @localmem(T, (2M, D, Np))
     points_sm = @localmem(T, (D, Np))  # points copied to shared memory
     inds_start = @localmem(Int, (D, Np))

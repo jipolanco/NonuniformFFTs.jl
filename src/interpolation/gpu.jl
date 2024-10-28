@@ -83,14 +83,15 @@ function interpolate!(
         Z = eltype(us[1])
         M = Kernels.half_support(gs[1])
         @assert all(g -> Kernels.half_support(g) === M, gs)  # check that they're all equal
-        block_dims_val = block_dims_gpu_shmem(backend, Z, size(us[1]), HalfSupport(M), bd.batch_size)  # this is usually a compile-time constant...
+        block_dims_val, batch_size_actual = block_dims_gpu_shmem(backend, Z, size(us[1]), HalfSupport(M), bd.batch_size)  # this is usually a compile-time constant...
+        @assert Val(batch_size_actual) == bd.batch_size
         block_dims = Val(block_dims_val)  # ...which means this doesn't require a dynamic dispatch
         @assert block_dims_val === bd.block_dims
         let ngroups = bd.nblocks_per_dir  # this is the required number of workgroups (number of blocks in CUDA)
             block_dims_padded = @. block_dims_val + 2M - 1  # dimensions of shared memory array
             shmem_size = block_dims_padded
-            groupsize = groupsize_shmem(ngroups, block_dims_padded, length(x⃗s))
-            ndrange = groupsize .* ngroups
+            groupsize = 64
+            ndrange = gpu_shmem_ndrange_from_groupsize(groupsize, ngroups)
             kernel! = interpolate_to_points_shmem_kernel!(backend, groupsize, ndrange)
             kernel!(
                 vp_sorted, gs, evalmode, xs_comp, us, pointperm_, bd.cumulative_npoints_per_block,
@@ -209,7 +210,7 @@ end
     ) where {C, D, Z <: Number, block_dims, shmem_size}
 
     @uniform begin
-        groupsize = @groupsize()::Dims{D}
+        groupsize = @groupsize()
         nthreads = prod(groupsize)
     end
 
