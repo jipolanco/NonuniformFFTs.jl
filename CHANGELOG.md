@@ -5,6 +5,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [v0.6.1](https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.6.1) - 2024-10-29
+
+### Fixed
+
+- Fix type-2 transforms on the GPU when performing multiple transforms at once
+  (`ntransforms > 1`) and when `gpu_method = :shared_memory` (which is not currently the default).
+
 ## [v0.6.0](https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.6.0) - 2024-10-29
 
 ### Added
