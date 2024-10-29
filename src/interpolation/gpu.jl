@@ -273,6 +273,10 @@ end
             v = interpolate_from_arrays_shmem(u_local, inds_start, window_vals, prefactor)
             @inbounds vp[c][j] = v
         end
+
+        # Avoid copying data to u_local too early in the next iteration (c -> c + 1).
+        # This is mostly useful when c < C (but putting an `if` fails...).
+        @synchronize
     end
 
     nothing

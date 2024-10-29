@@ -1,10 +1,19 @@
-# Test GPU code using CPU arrays. Everything is run on the CPU.
+# Test GPU code using CPU arrays. By default everything is run on the CPU.
 #
 # We define a minimal custom array type, so that it runs the kernels the GPU would run
 # instead of using the alternative CPU branches.
 # We also tried to use JLArrays instead, but we need scalar indexing which is disallowed by
 # JLArray (since it's supposed to mimic GPU arrays). Even with allowscalar(true), kernels
 # seem to fail for other reasons.
+#
+# To test an actual GPU backend, set the environment variable JULIA_GPU_BACKEND before
+# launching this script. Possible values are:
+#  - PseudoGPU (default)
+#  - CUDA
+#  - AMDGPU
+# The required packages (e.g. CUDA.jl) will automatically be installed in the current
+# environment.
+
 
 # TODO:
 # - use new JLBackend in the latest GPUArrays
@@ -17,6 +26,10 @@ using Adapt: Adapt, adapt
 using GPUArraysCore: AbstractGPUArray
 using Random
 using Test
+
+# Allow testing on actual GPU arrays if the right environment variable is passed (and the
+# right package is installed).
+const GPU_BACKEND = get(ENV, "JULIA_GPU_BACKEND", "PseudoGPU")
 
 # ================================================================================ #
 
@@ -51,6 +64,25 @@ end
 
 # ================================================================================ #
 
+@static if GPU_BACKEND == "PseudoGPU"
+    const GPUBackend = PseudoGPU
+    const GPUArrayType = PseudoGPUArray
+elseif GPU_BACKEND == "CUDA"
+    using Pkg; Pkg.add("CUDA")
+    using CUDA
+    const GPUBackend = CUDABackend
+    const GPUArrayType = CuArray
+elseif GPU_BACKEND == "AMDGPU"
+    using Pkg; Pkg.add("AMDGPU")
+    using AMDGPU
+    const GPUBackend = ROCBackend
+    const GPUArrayType = ROCArray
+else
+    error("unknown value of JULIA_GPU_BACKEND: $GPU_BACKEND")
+end
+
+@info "GPU tests - using:" GPU_BACKEND GPUBackend GPUArrayType
+
 function run_plan(p::PlanNUFFT, xp_init::AbstractArray, vp_init::NTuple{Nc, AbstractVector}) where {Nc}
     (; backend,) = p
 
@@ -58,23 +90,6 @@ function run_plan(p::PlanNUFFT, xp_init::AbstractArray, vp_init::NTuple{Nc, Abst
     vp = adapt(backend, vp_init)
 
     set_points!(p, xp)
-
-    save_points_sorted = false # this can be useful for verifying spatial sorting graphically
-
-    if backend isa PseudoGPU && save_points_sorted
-        inds = NonuniformFFTs.get_pointperm(p.blocks)
-        if inds !== nothing
-            open("points_sorted.dat", "w") do io
-                for i ∈ inds
-                    x⃗ = xp[i]
-                    for x ∈ x⃗
-                        print(io, "\t", x)
-                    end
-                    print(io, "\n")
-                end
-            end
-        end
-    end
 
     T = eltype(p)  # type in Fourier space (always complex) - for compatibility with AbstractNFFTs plans
     @test T <: Complex
@@ -102,17 +117,17 @@ function compare_with_cpu(::Type{T}, dims; Np = prod(dims), ntransforms::Val{Nc}
     xp_init = [rand(rng, SVector{N, Tr}) * Tr(2π) for _ ∈ 1:Np]  # non-uniform points in [0, 2π]ᵈ
     vp_init = ntuple(_ -> randn(rng, T, Np), ntransforms)
 
-    @inferred test_inference_block_dims_shmem(PseudoGPU(), T, dims, HalfSupport(4))
+    @inferred test_inference_block_dims_shmem(GPUBackend(), T, dims, HalfSupport(4))
 
     params = (; m = HalfSupport(4), kernel = KaiserBesselKernel(), σ = 1.5, ntransforms, kws...)
     p_cpu = @inferred PlanNUFFT(T, dims; params..., backend = CPU())
-    p_gpu = @inferred PlanNUFFT(T, dims; params..., backend = PseudoGPU())
+    p_gpu = @inferred PlanNUFFT(T, dims; params..., backend = GPUBackend())
 
     # Test that plan_nfft interface works.
     @testset "AbstractNFFTs.plan_nfft" begin
         xmat = reinterpret(reshape, Tr, xp_init)
-        p_nfft = @inferred AbstractNFFTs.plan_nfft(PseudoGPUArray, xmat, dims)
-        @test p_nfft.p.backend isa PseudoGPU
+        p_nfft = @inferred AbstractNFFTs.plan_nfft(GPUArrayType, xmat, dims)
+        @test p_nfft.p.backend isa GPUBackend
         # Test without the initial argument (type of array)
         p_nfft_cpu = @inferred AbstractNFFTs.plan_nfft(xmat, dims)
         @test p_nfft_cpu.p.backend isa CPU
@@ -127,8 +142,8 @@ function compare_with_cpu(::Type{T}, dims; Np = prod(dims), ntransforms::Val{Nc}
         # approximation of the KB kernel, while the GPU evaluates it "exactly" from its
         # definition (based on Bessel functions for KB).
         rtol = Tr === Float64 ? 1e-7 : Tr === Float32 ? 1f-5 : nothing
-        @test r_cpu.us[c] ≈ r_gpu.us[c] rtol=rtol  # output of type-1 transform
-        @test r_cpu.wp[c] ≈ r_gpu.wp[c] rtol=rtol  # output of type-2 transform
+        @test r_cpu.us[c] ≈ Array(r_gpu.us[c]) rtol=rtol  # output of type-1 transform
+        @test r_cpu.wp[c] ≈ Array(r_gpu.wp[c]) rtol=rtol  # output of type-2 transform
     end
 
     nothing
