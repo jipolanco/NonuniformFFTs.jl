@@ -5,6 +5,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [v0.6.0](https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.6.0) - 2024-10-29
+
 ### Added
 
 - Add alternative implementation of GPU transforms based on shared-memory arrays.
