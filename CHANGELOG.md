@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Moreover, on an AMD MI210, `:shared_memory` is always faster (but significantly slower than
   the A100), as global atomic operations seem to be very slow.
 
+- Change a few defaults on AMD GPUs.
+  This is based on experiments with an AMD MI210, where the new defaults should give better performance.
+  We now default to fast polynomial approximation of kernel functions and to
+  the backwards Kaiser-Bessel kernel (as in the CPU).
+
 ## [v0.6.1](https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.6.1) - 2024-10-29
 
 ### Fixed

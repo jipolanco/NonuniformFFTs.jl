@@ -18,6 +18,10 @@ using CUDA: @device_override
 # The difference is not huge though.
 NonuniformFFTs.default_kernel(::CUDABackend) = KaiserBesselKernel()
 
+# On CUDA (A100 at least), direct evaluation is faster than the "fast" approximation using
+# piecewise polynomials.
+NonuniformFFTs.default_kernel_evalmode(::CUDABackend) = Direct()
+
 # We want the result of this function to be a compile-time constant to avoid some type
 # instabilities, which is why we hardcode the result even though it could be obtained using
 # the CUDA API.

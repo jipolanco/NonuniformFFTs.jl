@@ -50,8 +50,8 @@ export
 default_kernel(::KA.Backend) = BackwardsKaiserBesselKernel()
 default_kernel() = default_kernel(CPU())
 
-default_kernel_evalmode(::CPU) = FastApproximation()
-default_kernel_evalmode(::GPU) = Direct()  # default to direct kernel evaluation on GPUs
+# Default to direct kernel evaluation (can be overridden by specific backends like CUDA).
+default_kernel_evalmode(::KA.Backend) = FastApproximation()
 
 default_block_size(::Dims, ::CPU) = 4096  # in number of linear elements
 default_block_size(::Dims, ::GPU) = 1024  # except in 2D and 3D (see below)
