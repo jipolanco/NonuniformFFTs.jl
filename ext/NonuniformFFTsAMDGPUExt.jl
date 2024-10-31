@@ -44,4 +44,10 @@ function NonuniformFFTs.available_static_shared_memory(::ROCBackend)
     expected
 end
 
+# This seems to be significantly faster than the default in some tests (but should be further tuned...).
+NonuniformFFTs.groupsize_spreading_gpu_shmem(::ROCBackend, Np::Integer) = 256
+
+# For shared-memory interpolation, the MI210 prefers a very large group size.
+NonuniformFFTs.groupsize_interp_gpu_shmem(::ROCBackend) = 1024
+
 end

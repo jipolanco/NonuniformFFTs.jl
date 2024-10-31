@@ -32,4 +32,18 @@ function NonuniformFFTs.available_static_shared_memory(::CUDABackend)
     expected
 end
 
+# Try to have between 64 and 256 threads, such that the number of threads is ideally larger
+# than the batch size.
+# TODO: maybe the value of 128 used in AMDGPU works well here as well?
+function groupsize_spreading_gpu_shmem(::CUDABackend, Np::Integer)
+    groupsize = 64
+    c = min(Np, 256)
+    while groupsize < c
+        groupsize += 32
+    end
+    groupsize
+end
+
+NonuniformFFTs.groupsize_interp_gpu_shmem(::CUDABackend) = 64
+
 end

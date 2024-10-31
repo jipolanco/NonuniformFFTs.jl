@@ -206,17 +206,10 @@ function spread_from_points!(
     us
 end
 
-# Determine workgroupsize based on the batch size Np.
-# Try to have between 64 and 256 threads, such that the number of threads is ideally larger
-# than the batch size.
-function groupsize_spreading_gpu_shmem(Np::Integer)
-    groupsize = 64
-    c = min(Np, 256)
-    while groupsize < c
-        groupsize += 32
-    end
-    groupsize
-end
+# Determine workgroupsize possibly based on the batch size Np.
+# Note that this can be overridden by certain backends (AMDGPU and CUDA can behave quite
+# differently).
+groupsize_spreading_gpu_shmem(::GPU, Np::Integer) = 256
 
 @kernel function spread_permute_kernel!(vp::NTuple{N}, @Const(vp_in::NTuple{N}), @Const(perm::AbstractVector)) where {N}
     i = @index(Global, Linear)

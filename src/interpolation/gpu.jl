@@ -90,7 +90,7 @@ function interpolate!(
         let ngroups = bd.nblocks_per_dir  # this is the required number of workgroups (number of blocks in CUDA)
             block_dims_padded = @. block_dims_val + 2M - 1  # dimensions of shared memory array
             shmem_size = block_dims_padded
-            groupsize = 64
+            groupsize = groupsize_interp_gpu_shmem(backend)
             ndrange = gpu_shmem_ndrange_from_groupsize(groupsize, ngroups)
             kernel! = interpolate_to_points_shmem_kernel!(backend, groupsize, ndrange)
             kernel!(
@@ -111,6 +111,10 @@ function interpolate!(
 
     vp_all
 end
+ 
+# Default workgroupsize for shared-memory interpolation on GPU.
+# This can be overridden by different backends (in particular, AMDGPU seems to prefer larger groupsizes).
+groupsize_interp_gpu_shmem(::GPU) = 64
 
 @inline function interpolate_from_arrays_gpu(
         us::NTuple{C, AbstractArray{T, D}},
