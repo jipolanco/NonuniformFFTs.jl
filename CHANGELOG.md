@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Make `gpu_method = :shared_memory` the default, as it seems to be faster than
+  the `:global_memory` method for a wide range of spreading widths.
+
 - Vastly improve performance of atomic operations (affecting type-1 transforms) on AMD
   GPUs by using `@atomic :monotonic`.
 

@@ -146,9 +146,13 @@ change in the future.
 - `gpu_batch_size = Val(Np)`: minimum batch size used in type-1 transforms when `gpu_method = :shared_memory`.
   The idea is that, to avoid inefficient atomic operations on shared-memory arrays, we process
   non-uniform points in batches of `Np` points.
-  By default, `Np` is chosen so as to maximise shared memory usage within each GPU workgroup.
+  The actual value of `Np` will typically be larger so as to maximise shared memory usage
+  within each GPU workgroup.
   Note that larger `Np` also means that less shared memory space is available for local blocks,
-  meaning that the effective block size can get smaller (which is not necessarily bad for performance).
+  meaning that the effective block size can get smaller (which is not necessarily bad for performance,
+  and can actually be beneficial).
+  When tuning performance, it is helpful to print the plan (as in `println(plan)`) to see
+  the actual block and batch sizes.
 
 ## Other parameters
 
