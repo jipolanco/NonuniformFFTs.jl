@@ -189,7 +189,7 @@ function spread_from_points!(
         let ngroups = bd.nblocks_per_dir  # this is the required number of workgroups (number of blocks in CUDA)
             block_dims_padded = @. block_dims_val + 2M - 1
             shmem_size = block_dims_padded  # dimensions of big shared memory array
-            groupsize = groupsize_spreading_gpu_shmem(batch_size_actual)
+            groupsize = groupsize_spreading_gpu_shmem(backend, batch_size_actual)
             ndrange = gpu_shmem_ndrange_from_groupsize(groupsize, ngroups)
             kernel! = spread_from_points_shmem_kernel!(backend, groupsize, ndrange)
             kernel!(
