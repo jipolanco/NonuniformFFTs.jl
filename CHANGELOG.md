@@ -7,13 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Make `gpu_method = :shared_memory` the default. This seems to be much faster than the `:global_memory` method,
-  especially for small spreading widths. But even for relatively large
-  spreading widths (up to about `HalfSupport(6)`) it stays faster on a A100.
-  Moreover, on an AMD MI210, `:shared_memory` is always faster (but significantly slower than
-  the A100), as global atomic operations seem to be very slow.
+- Vastly improve performance of atomic operations (affecting type-1 transforms) on AMD
+  GPUs by using `@atomic :monotonic`.
 
-- Change a few defaults on AMD GPUs.
+- Change a few defaults on AMD GPUs to improve performance.
   This is based on experiments with an AMD MI210, where the new defaults should give better performance.
   We now default to fast polynomial approximation of kernel functions and to
   the backwards Kaiser-Bessel kernel (as in the CPU).

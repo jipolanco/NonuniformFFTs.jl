@@ -105,7 +105,9 @@ end
 end
 
 @inline function _atomic_add!(u::AbstractArray{T}, v::T, inds::Tuple) where {T <: Real}
-    @inbounds Atomix.@atomic u[inds...] += v
+    # The :monotonic is really needed to get decent performance on AMDGPU.
+    # On CUDA it doesn't seem to make a difference.
+    @inbounds Atomix.@atomic :monotonic u[inds...] += v
     nothing
 end
 
@@ -113,8 +115,8 @@ end
 # so the output must be a real array `u`.
 @inline function _atomic_add!(u::AbstractArray{T}, v::Complex{T}, inds::Tuple) where {T <: Real}
     @inbounds begin
-        Atomix.@atomic u[1, inds...] += real(v)
-        Atomix.@atomic u[2, inds...] += imag(v)
+        Atomix.@atomic :monotonic u[1, inds...] += real(v)
+        Atomix.@atomic :monotonic u[2, inds...] += imag(v)
     end
     nothing
 end
