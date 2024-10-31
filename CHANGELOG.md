@@ -5,6 +5,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Changed
+
+- Make `gpu_method = :shared_memory` the default. This seems to be much faster than the `:global_memory` method,
+  especially for small spreading widths. But even for relatively large
+  spreading widths (up to about `HalfSupport(6)`) it stays faster on a A100.
+  Moreover, on an AMD MI210, `:shared_memory` is always faster (but significantly slower than
+  the A100), as global atomic operations seem to be very slow.
+
 ## [v0.6.1](https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.6.1) - 2024-10-29
 
 ### Fixed

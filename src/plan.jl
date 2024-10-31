@@ -121,12 +121,13 @@ the order of ``10^{-7}`` for `Float64` or `ComplexF64` data.
     to each GPU workgroup) and perform most operations in the latter, which is faster and
     can help avoid some atomic operations in type-1 transforms. We try to use as much shared
     memory as is typically available on current GPUs (which is typically 48 KiB on
-    CUDA and 64 KiB on AMDGPU). But still, this method can be much faster than the
-    `:global_memory` and may become the default in the future. Note that this method
-    completely ignores the `block_size` parameter, as the actual block size is adjusted to
-    maximise shared memory usage.
+    CUDA and 64 KiB on AMDGPU). This method can be much faster than `:global_memory`,
+    especially for not too large spreading widths (up to `HalfSupport(6)` at least).
+    Note that this method completely ignores the `block_size` parameter, as the actual block
+    size is adjusted to maximise shared memory usage. When this method is enabled, one can
+    play with the `gpu_batch_size` parameter (see below) to further tune performance.
 
-  The default is `:global_memory` but this may change in the future.
+  The default is `:shared_memory` but this may change in the future.
 
 - `fftw_flags = FFTW.MEASURE`: parameters passed to the FFTW planner when `backend = CPU()`.
 
@@ -142,10 +143,12 @@ change in the future.
   This can improve performance if executing multiple transforms on the same non-uniform points.
   Note that, even when enabled, this does not modify the `points` argument passed to `set_points!`.
 
-- `gpu_batch_size = Val(Np)`: batch size used in type-1 transforms when `gpu_method = :shared_memory`.
+- `gpu_batch_size = Val(Np)`: minimum batch size used in type-1 transforms when `gpu_method = :shared_memory`.
   The idea is that, to avoid inefficient atomic operations on shared-memory arrays, we process
   non-uniform points in batches of `Np` points.
   By default, `Np` is chosen so as to maximise shared memory usage within each GPU workgroup.
+  Note that larger `Np` also means that less shared memory space is available for local blocks,
+  meaning that the effective block size can get smaller (which is not necessarily bad for performance).
 
 ## Other parameters
 
@@ -332,7 +335,7 @@ function _PlanNUFFT(
         kernel_evalmode::EvaluationMode = default_kernel_evalmode(backend),
         block_size::Union{Integer, Dims{D}, Nothing} = default_block_size(Ns, backend),
         synchronise::Bool = false,
-        gpu_method::Symbol = :global_memory,
+        gpu_method::Symbol = :shared_memory,
         gpu_batch_size::Val = Val(DEFAULT_GPU_BATCH_SIZE),  # currently only used in shared-memory GPU spreading
     ) where {T <: Number, D}
     ks = init_wavenumbers(T, Ns)
