@@ -146,8 +146,8 @@ change in the future.
 - `gpu_batch_size = Val(Np)`: minimum batch size used in type-1 transforms when `gpu_method = :shared_memory`.
   The idea is that, to avoid inefficient atomic operations on shared-memory arrays, we process
   non-uniform points in batches of `Np` points.
-  The actual value of `Np` will typically be larger so as to maximise shared memory usage
-  within each GPU workgroup.
+  The actual value of `Np` will typically be larger than the input one in order to maximise
+  shared memory usage within each GPU workgroup.
   Note that larger `Np` also means that less shared memory space is available for local blocks,
   meaning that the effective block size can get smaller (which is not necessarily bad for performance,
   and can actually be beneficial).
@@ -158,8 +158,8 @@ change in the future.
 
 - `fftshift = false`: determines the order of wavenumbers in uniform space.
   If `false` (default), the same order used by FFTW is used, with positive wavenumbers first
-  (`[0, 1, 2, …, N÷2-1]` for even-size transforms) and negative ones afterwards ([-N÷2, …, -1]).
-  Otherwise, wavenumbers are expected to be in increasing order ([-N÷2, -kmax, …, -1, 0, 1, …, N÷2-1]),
+  (`[0, 1, 2, …, N÷2-1]` for even-size transforms) and negative ones afterwards (`[-N÷2, …, -1]`).
+  Otherwise, wavenumbers are expected to be in increasing order (`[-N÷2, -kmax, …, -1, 0, 1, …, N÷2-1]`),
   which is compatible with the output in NFFT.jl and corresponds to applying the
   `AbstractFFTs.fftshift` function to the data.
   This option also corresponds to the `modeord` parameter in FINUFFT.
