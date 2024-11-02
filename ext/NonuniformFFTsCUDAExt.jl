@@ -2,6 +2,7 @@ module NonuniformFFTsCUDAExt
 
 using NonuniformFFTs
 using NonuniformFFTs.Kernels: Kernels
+using KernelAbstractions: KernelAbstractions as KA
 using CUDA
 using CUDA: @device_override
 
@@ -32,18 +33,27 @@ function NonuniformFFTs.available_static_shared_memory(::CUDABackend)
     expected
 end
 
-# Try to have between 64 and 256 threads, such that the number of threads is ideally larger
-# than the batch size.
-# TODO: maybe the value of 128 used in AMDGPU works well here as well?
-function NonuniformFFTs.groupsize_spreading_gpu_shmem(::CUDABackend, Np::Integer)
-    groupsize = 64
-    c = min(Np, 256)
-    while groupsize < c
-        groupsize += 32
+function NonuniformFFTs.launch_shmem_kernel(
+        obj::KA.Kernel{<:CUDABackend}, args::Vararg{Any, N};
+        ngroups::NTuple{D},
+    ) where {N, D}
+    # This is adapted from https://github.com/JuliaGPU/CUDA.jl/blob/master/src/CUDAKernels.jl
+    backend = KA.backend(obj)
+    config = let groupsize = 64  # this is a sort of initial guess (value is not very important)
+        workgroupsize = ntuple(d -> d == 1 ? groupsize : one(groupsize), Val(D))
+        ndrange = workgroupsize .* ngroups
+        ndrange, _, iterspace, _ = KA.launch_config(obj, ndrange, workgroupsize)
+        ctx = KA.mkcontext(obj, ndrange, iterspace)
+        kernel = @cuda launch=false always_inline=backend.always_inline obj.f(ctx, args...)
+        CUDA.launch_configuration(kernel.fun)
     end
-    groupsize
+    let groupsize = config.threads
+        # Same as above but with the updated groupsize
+        workgroupsize = ntuple(d -> d == 1 ? groupsize : one(groupsize), Val(D))
+        ndrange = workgroupsize .* ngroups
+        obj(args...; workgroupsize, ndrange)
+    end
+    nothing
 end
-
-NonuniformFFTs.groupsize_interp_gpu_shmem(::CUDABackend) = 64
 
 end
