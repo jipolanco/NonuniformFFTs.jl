@@ -35,7 +35,7 @@ end
 # Try to have between 64 and 256 threads, such that the number of threads is ideally larger
 # than the batch size.
 # TODO: maybe the value of 128 used in AMDGPU works well here as well?
-function groupsize_spreading_gpu_shmem(::CUDABackend, Np::Integer)
+function NonuniformFFTs.groupsize_spreading_gpu_shmem(::CUDABackend, Np::Integer)
     groupsize = 64
     c = min(Np, 256)
     while groupsize < c
