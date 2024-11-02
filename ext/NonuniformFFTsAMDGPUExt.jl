@@ -50,7 +50,7 @@ function NonuniformFFTs.launch_shmem_kernel(
         ngroups::NTuple{D},
     ) where {N, D}
     # This is adapted from https://github.com/JuliaGPU/AMDGPU.jl/blob/master/src/ROCKernels.jl
-    config = let groupsize = 128  # this is a sort of initial guess (value is not very important)
+    config = let groupsize = 256  # this is a sort of initial guess (value is not very important)
         workgroupsize = ntuple(d -> d == 1 ? groupsize : one(groupsize), Val(D))
         ndrange = workgroupsize .* ngroups
         ndrange, _, iterspace, _ = KA.launch_config(obj, ndrange, workgroupsize)
@@ -58,15 +58,11 @@ function NonuniformFFTs.launch_shmem_kernel(
         kernel = AMDGPU.@roc launch=false obj.f(ctx, args...)
         AMDGPU.launch_configuration(kernel)
     end
-    (; groupsize,) = config
-    let
-        # Same as above but with the updated groupsize
+    let groupsize = config.groupsize
+        # Similar to above but with the updated groupsize
         workgroupsize = ntuple(d -> d == 1 ? groupsize : one(groupsize), Val(D))
         ndrange = workgroupsize .* ngroups
-        ndrange, _, iterspace, _ = KA.launch_config(obj, ndrange, workgroupsize)
-        ctx = KA.mkcontext(obj, ndrange, iterspace)
-        kernel = AMDGPU.@roc launch=false obj.f(ctx, args...)
-        kernel(ctx, args...; groupsize = workgroupsize, gridsize = ngroups)
+        obj(args...; workgroupsize, ndrange)
     end
     nothing
 end
