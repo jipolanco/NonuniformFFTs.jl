@@ -189,12 +189,12 @@ function spread_from_points!(
         let ngroups = bd.nblocks_per_dir  # this is the required number of workgroups (number of blocks in CUDA)
             block_dims_padded = @. block_dims_val + 2M - 1
             shmem_size = block_dims_padded  # dimensions of big shared memory array
-            groupsize = groupsize_spreading_gpu_shmem(backend, batch_size_actual)
-            ndrange = gpu_shmem_ndrange_from_groupsize(groupsize, ngroups)
-            kernel! = spread_from_points_shmem_kernel!(backend, groupsize, ndrange)
-            kernel!(
+            kernel! = spread_from_points_shmem_kernel!(backend)
+            launch_shmem_kernel(
+                kernel!,
                 us_real, gs, evalmode, xs_comp, vp_sorted, pointperm_, bd.cumulative_npoints_per_block,
-                HalfSupport(M), block_dims, Val(shmem_size), bd.batch_size,
+                HalfSupport(M), block_dims, Val(shmem_size), bd.batch_size;
+                ngroups,
             )
         end
     end
@@ -205,11 +205,6 @@ function spread_from_points!(
 
     us
 end
-
-# Determine workgroupsize possibly based on the batch size Np.
-# Note that this can be overridden by certain backends (AMDGPU and CUDA can behave quite
-# differently).
-groupsize_spreading_gpu_shmem(::GPU, Np::Integer) = 256
 
 @kernel function spread_permute_kernel!(vp::NTuple{N}, @Const(vp_in::NTuple{N}), @Const(perm::AbstractVector)) where {N}
     i = @index(Global, Linear)

@@ -2,6 +2,7 @@ module NonuniformFFTsAMDGPUExt
 
 using NonuniformFFTs
 using NonuniformFFTs.Kernels: Kernels
+using KernelAbstractions: KernelAbstractions as KA
 using AMDGPU
 using AMDGPU.Device: @device_override
 
@@ -44,10 +45,30 @@ function NonuniformFFTs.available_static_shared_memory(::ROCBackend)
     expected
 end
 
-# This seems to be significantly faster than the default in some tests (but should be further tuned...).
-NonuniformFFTs.groupsize_spreading_gpu_shmem(::ROCBackend, Np::Integer) = 256
-
-# For shared-memory interpolation, the MI210 prefers a very large group size.
-NonuniformFFTs.groupsize_interp_gpu_shmem(::ROCBackend) = 1024
+function NonuniformFFTs.launch_shmem_kernel(
+        obj::KA.Kernel{<:ROCBackend}, args::Vararg{Any, N};
+        ngroups::NTuple{D},
+    ) where {N, D}
+    # This is adapted from https://github.com/JuliaGPU/AMDGPU.jl/blob/master/src/ROCKernels.jl
+    config = let groupsize = 128  # this is a sort of initial guess (value is not very important)
+        workgroupsize = ntuple(d -> d == 1 ? groupsize : one(groupsize), Val(D))
+        ndrange = workgroupsize .* ngroups
+        ndrange, _, iterspace, _ = KA.launch_config(obj, ndrange, workgroupsize)
+        ctx = KA.mkcontext(obj, ndrange, iterspace)
+        kernel = AMDGPU.@roc launch=false obj.f(ctx, args...)
+        AMDGPU.launch_configuration(kernel)
+    end
+    (; groupsize,) = config
+    let
+        # Same as above but with the updated groupsize
+        workgroupsize = ntuple(d -> d == 1 ? groupsize : one(groupsize), Val(D))
+        ndrange = workgroupsize .* ngroups
+        ndrange, _, iterspace, _ = KA.launch_config(obj, ndrange, workgroupsize)
+        ctx = KA.mkcontext(obj, ndrange, iterspace)
+        kernel = AMDGPU.@roc launch=false obj.f(ctx, args...)
+        kernel(ctx, args...; groupsize = workgroupsize, gridsize = ngroups)
+    end
+    nothing
+end
 
 end

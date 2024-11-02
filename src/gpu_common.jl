@@ -116,3 +116,23 @@ end
     i₀ = ifelse(i₀ < 0, i₀ + N, i₀)  # make sure i₀ ≥ 0
     i₀ => vals
 end
+
+# Launch shared-memory spreading or interpolation kernel.
+# The specificity of those kernels is that we want to fix the number of blocks (workgroups).
+# This is not so easy to do with KernelAbstractions where the ndrange is the main
+# "parameter" and considered as a constant. Here this is not the case, since we have
+# ndrange = workgroupsize .* ngroups where ngroups is a constant.
+# We would like to determine the optimal workgroupsize to maximise occupancy. Moreover,
+# occupancy is mainly limited by the large shared-memory (LDS) requirements of these
+# kernels.
+# This function may be overridden by specific backends (CUDA, AMDGPU) to choose an optimal
+# group size using the available occupancy API.
+function launch_shmem_kernel(
+        kernel::KA.Kernel{<:KA.Backend}, args::Vararg{Any, N};
+        ngroups::NTuple{D},  # number of workgroups in each direction
+    ) where {N, D}
+    groupsize = 128  # 128 work items per workgroup by default
+    workgroupsize = ntuple(d -> d == 1 ? groupsize : 1, Val(D))
+    ndrange = workgroupsize .* ngroups
+    kernel(args...; workgroupsize, ndrange)
+end
