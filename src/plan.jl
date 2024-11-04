@@ -114,20 +114,21 @@ the order of ``10^{-7}`` for `Float64` or `ComplexF64` data.
 - `gpu_method`: allows to select between different implementations of
   GPU transforms. Possible options are:
 
-  * `:global_memory`: directly read and write onto arrays in global memory in spreading
+  * `:global_memory` (default): directly read and write onto arrays in global memory in spreading
     (type-1) and interpolation (type-2) operations;
 
   * `:shared_memory`: copy data between global memory and shared memory (local
     to each GPU workgroup) and perform most operations in the latter, which is faster and
     can help avoid some atomic operations in type-1 transforms. We try to use as much shared
     memory as is typically available on current GPUs (which is typically 48 KiB on
-    CUDA and 64 KiB on AMDGPU). This method can be much faster than `:global_memory`,
-    especially for not too large spreading widths (up to `HalfSupport(6)` at least).
-    Note that this method completely ignores the `block_size` parameter, as the actual block
-    size is adjusted to maximise shared memory usage. When this method is enabled, one can
-    play with the `gpu_batch_size` parameter (see below) to further tune performance.
+    CUDA and 64 KiB on AMDGPU). Note that this method completely ignores the `block_size`
+    parameter, as the actual block size is adjusted to maximise shared memory usage. When
+    this method is enabled, one can play with the `gpu_batch_size` parameter (see below) to
+    further tune performance.
 
-  The default is `:shared_memory` but this may change in the future.
+  For highly dense problems (number of non-uniform points comparable to the total grid
+  size), the `:shared_memory` method can be much faster, especially when the `HalfSupport`
+  is 4 or less (accuracies up to `1e-7` for `σ = 2`).
 
 - `fftw_flags = FFTW.MEASURE`: parameters passed to the FFTW planner when `backend = CPU()`.
 
@@ -339,7 +340,7 @@ function _PlanNUFFT(
         kernel_evalmode::EvaluationMode = default_kernel_evalmode(backend),
         block_size::Union{Integer, Dims{D}, Nothing} = default_block_size(Ns, backend),
         synchronise::Bool = false,
-        gpu_method::Symbol = :shared_memory,
+        gpu_method::Symbol = :global_memory,
         gpu_batch_size::Val = Val(DEFAULT_GPU_BATCH_SIZE),  # currently only used in shared-memory GPU spreading
     ) where {T <: Number, D}
     ks = init_wavenumbers(T, Ns)

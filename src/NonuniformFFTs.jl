@@ -56,7 +56,7 @@ default_kernel_evalmode(::KA.Backend) = FastApproximation()
 default_block_size(::Dims, ::CPU) = 4096  # in number of linear elements
 default_block_size(::Dims, ::GPU) = 1024  # except in 2D and 3D (see below)
 
-# TODO: adapt this based on size of shared memory and on element type T (and padding 2M)?
+# TODO: adapt this based on size of shared memory and on element type T (and padding 2M - 1)?
 default_block_size(::Dims{2}, ::GPU) = (32, 32)
 default_block_size(::Dims{3}, ::GPU) = (16, 16, 4)  # tuned on A100 with 256³ non-oversampled grid, σ = 2 and m = HalfSupport(4)
 
