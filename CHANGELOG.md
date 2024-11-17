@@ -5,6 +5,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Changed
+
+- Avoid large GPU allocation in type-2 transforms when using the CUDA backend.
+  The allocation was due to CUDA.jl creating a copy of the input in complex-to-real FFTs
+  (see [CUDA.jl#2249](https://github.com/JuliaGPU/CUDA.jl/issues/2249)).
+
 ## [v0.6.2](https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.6.1) - 2024-11-04
 
 ### Changed

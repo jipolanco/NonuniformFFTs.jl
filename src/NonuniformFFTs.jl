@@ -271,10 +271,16 @@ end
 function _type2_fft!(data::RealNUFFTData)
     (; us, ûs, plan_bw,) = data
     for (u, û) ∈ zip(us, ûs)
-        # TODO: can we avoid big GPU allocation on CUDA.jl? (https://github.com/JuliaGPU/CUDA.jl/issues/2249)
-        mul!(u, plan_bw, û)  # perform inverse r2c FFT
+        _fft_c2r!(u, plan_bw, û)  # perform inverse r2c FFT
     end
     us
+end
+
+# Perform inverse r2c FFT.
+# This function is overridden by the CUDA extension to avoid GPU allocations.
+# See https://github.com/JuliaGPU/CUDA.jl/issues/2249
+function _fft_c2r!(u::AbstractArray{T}, plan_bw, û::AbstractArray{Complex{T}}) where {T}
+    mul!(u, plan_bw, û)
 end
 
 function _type2_fft!(data::ComplexNUFFTData)

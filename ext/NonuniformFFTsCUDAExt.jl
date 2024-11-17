@@ -3,6 +3,7 @@ module NonuniformFFTsCUDAExt
 using NonuniformFFTs
 using NonuniformFFTs.Kernels: Kernels
 using CUDA
+using CUDA.CUFFT: CUFFT
 using CUDA: @device_override
 
 # This is currently not wrapped in CUDA.jl, probably because besseli0 is not defined by
@@ -45,5 +46,18 @@ function NonuniformFFTs.groupsize_spreading_gpu_shmem(::CUDABackend, Np::Integer
 end
 
 NonuniformFFTs.groupsize_interp_gpu_shmem(::CUDABackend) = 64
+
+# Override usual `mul!` to avoid GPU allocations.
+# See https://github.com/JuliaGPU/CUDA.jl/issues/2249
+# This is adapted from https://github.com/JuliaGPU/CUDA.jl/blob/a1db081cbc3d20fa3cb28a9f419b485db03a250f/lib/cufft/fft.jl#L308-L317
+# but without the copy.
+function NonuniformFFTs._fft_c2r!(
+        y::DenseCuArray{T}, p, x::DenseCuArray{Complex{T}},
+    ) where {T}
+    # Perform plan (this may modify not only y, but also the input x)
+    CUFFT.assert_applicable(p, x, y)
+    CUFFT.unsafe_execute_trailing!(p, x, y)
+    y
+end
 
 end
