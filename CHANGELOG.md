@@ -5,6 +5,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [v0.6.5](https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.6.5) - 2024-11-18
+
+### Fixed
+
+- Fix scalar indexing error on latest AMDGPU.jl (v1.1.1).
+  Not sure exactly if it's a recent change in AMDGPU.jl, or maybe in GPUArrays.jl, which caused the error.
+
 ## [v0.6.4](https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.6.4) - 2024-11-17
 
 ### Changed

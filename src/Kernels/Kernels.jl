@@ -100,7 +100,7 @@ function init_fourier_coefficients!(g::AbstractKernelData, ks::AbstractVector)
     resize!(gk, Nk)
     @assert eachindex(gk) == eachindex(ks)
     f = evaluate_fourier_func(g)
-    map!(f, gk, ks)
+    @. gk = f(ks)
     gk
 end
 
