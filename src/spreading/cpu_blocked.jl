@@ -99,7 +99,7 @@ function spread_from_points!(
     # nblocks = length(indices)
     Base.require_one_based_indexing(buffers)
     Base.require_one_based_indexing(indices)
-    lck = ReentrantLock()
+    # lck = ReentrantLock()
 
     Threads.@threads :static for i ∈ 1:Nt
         # j_start = (i - 1) * nblocks ÷ Nt + 1
@@ -134,9 +134,9 @@ function spread_from_points!(
 
             # Add data from block to output array.
             # Note that only one thread can write at a time.
-            lock(lck) do
+            # lock(lck) do
                 add_from_block!(us_all, block, inds_split)
-            end
+            # end
         end
     end
 
@@ -182,7 +182,9 @@ function _add_from_block!(
         loop_core = quote
             n += 1
             js = @ntuple $D j
-            us[js...] += ws[n]  # us[j_1, j_2, ..., j_D] += ws[n]
+            w = ws[n]
+            # NOTE: this only works for real data!!
+            Atomix.@atomic :monotonic us[js...] += w  # us[j_1, j_2, ..., j_D] += ws[n]
         end
         ex_loop = _generate_split_loop_expr(D, :inds_wrapped, loop_core)
         quote
@@ -207,7 +209,8 @@ function _add_from_block!(
             is_tail = map(first, inds_tail)
             js_tail = map(last, inds_tail)
             for (i, j) ∈ iter_first
-                us[j, js_tail...] += ws[i, is_tail...]
+                w = ws[i, is_tail...]
+                Atomix.@atomic :monotonic us[j, js_tail...] += w
             end
         end
         us
