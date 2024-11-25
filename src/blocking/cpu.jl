@@ -68,6 +68,59 @@ function BlockDataCPU(
     )
 end
 
+# This is similar to assign_blocks_kernel! (GPU implementation), but using `to_unit_cell`
+# instead of `to_unit_cell_gpu` (which does seem to make a difference in performance).
+function assign_blocks_cpu!(
+        blockidx::AbstractVector{<:Integer},
+        cumulative_npoints_per_block::AbstractVector{<:Integer},
+        points::NTuple,
+        xp::StructVector,
+        Δxs,
+        block_dims::NTuple,
+        nblocks_per_dir::NTuple,
+        sort_points,
+        transform::F,
+    ) where {F}
+    Threads.@threads :static for I ∈ eachindex(points[1])
+        x⃗ = xp[I]
+        y⃗ = to_unit_cell(transform(Tuple(x⃗))) :: NTuple
+        n = block_index(y⃗, Δxs, block_dims, nblocks_per_dir)
+
+        # Note: here index_within_block is the value *after* incrementing (≥ 1).
+        S = eltype(cumulative_npoints_per_block)
+        index_within_block = @inbounds (Atomix.@atomic cumulative_npoints_per_block[n + 1] += one(S))::S
+        @inbounds blockidx[I] = index_within_block
+
+        # If points need to be sorted, then we fill `points` some time later (in permute_kernel!).
+        if sort_points === False()
+            for n ∈ eachindex(x⃗)
+                @inbounds points[n][I] = y⃗[n]
+            end
+        end
+    end
+    nothing
+end
+
+function sortperm_cpu!(
+        pointperm::AbstractVector,
+        cumulative_npoints_per_block,
+        blockidx,
+        xp::StructVector,
+        Δxs,
+        block_dims,
+        nblocks_per_dir,
+        transform::F,
+    ) where {F}
+    Threads.@threads :static for I ∈ eachindex(xp)
+        @inbounds x⃗ = xp[I]
+        y⃗ = to_unit_cell(transform(Tuple(x⃗))) :: NTuple
+        n = block_index(y⃗, Δxs, block_dims, nblocks_per_dir)
+        @inbounds J = cumulative_npoints_per_block[n] + blockidx[I]
+        @inbounds pointperm[J] = I
+    end
+    nothing
+end
+
 function set_points_impl!(
         backend::CPU, bd::BlockDataCPU, points::StructVector, xp, timer;
         transform::F = identity,
@@ -76,12 +129,15 @@ function set_points_impl!(
     # This technically never happens, but we might use it as a way to disable blocking.
     isempty(bd.buffers) && return set_points_impl!(backend, NullBlockData(), points, xp, timer; transform, synchronise)
 
-    (; Δxs, indices, nblocks_per_dir, cumulative_npoints_per_block, blockidx, block_dims, pointperm,) = bd
+    (;
+        Δxs, cumulative_npoints_per_block, nblocks_per_dir, block_dims,
+        blockidx, pointperm, sort_points,
+    ) = bd
+
     N = type_length(eltype(xp))  # = number of dimensions
     @assert N == length(block_dims)
 
     @timeit timer "(0) Init arrays" begin
-        to_linear_index = LinearIndices(axes(indices))  # maps Cartesian to linear index of a block
         Np = length(xp)
         resize_no_copy!(blockidx, Np)
         resize_no_copy!(pointperm, Np)
@@ -89,19 +145,16 @@ function set_points_impl!(
         fill!(cumulative_npoints_per_block, 0)
     end
 
-    @timeit timer "(1) Assign blocks" @inbounds for (i, x⃗) ∈ pairs(xp)
-        # Get index of block where point x⃗ is located.
-        y⃗ = to_unit_cell(transform(NTuple{N}(x⃗)))  # converts `x⃗` to Tuple if it's an SVector
-        if bd.sort_points === False()
-            points[i] = y⃗  # copy folded point (doesn't need to be sorted)
-        end
-        n = block_index(y⃗, Δxs, block_dims, nblocks_per_dir)
-        index_within_block = (cumulative_npoints_per_block[n + 1] += 1)  # ≥ 1
-        blockidx[i] = index_within_block
+    @timeit timer "(1) Assign blocks" let
+        points_comp = StructArrays.components(points)
+        assign_blocks_cpu!(
+            blockidx, cumulative_npoints_per_block, points_comp, xp, Δxs,
+            block_dims, nblocks_per_dir, sort_points, transform,
+        )
     end
 
     # Compute cumulative sum (we don't use cumsum! due to aliasing warning in its docs).
-    for i ∈ eachindex(IndexLinear(), cumulative_npoints_per_block)[2:end]
+    @inbounds for i ∈ eachindex(IndexLinear(), cumulative_npoints_per_block)[2:end]
         cumulative_npoints_per_block[i] += cumulative_npoints_per_block[i - 1]
     end
     @assert cumulative_npoints_per_block[begin] == 0
@@ -113,17 +166,10 @@ function set_points_impl!(
     map_blocks_to_threads!(bd.blocks_per_thread, cumulative_npoints_per_block)
 
     @timeit timer "(2) Sort" begin
-        # Note: we don't use threading since it seems to be much slower.
-        # This is very likely due to false sharing (https://en.wikipedia.org/wiki/False_sharing),
-        # since all threads modify the same data in "random" order.
-        @inbounds for i ∈ eachindex(xp)
-            # We recompute the block index associated to this point.
-            x⃗ = xp[i]
-            y⃗ = to_unit_cell(transform(NTuple{N}(x⃗)))  # converts `x⃗` to Tuple if it's an SVector
-            n = block_index(y⃗, Δxs, block_dims, nblocks_per_dir)
-            j = cumulative_npoints_per_block[n] + blockidx[i]
-            pointperm[j] = i
-        end
+        sortperm_cpu!(
+            pointperm, cumulative_npoints_per_block, blockidx, xp, Δxs,
+            block_dims, nblocks_per_dir, transform,
+        )
     end
 
     # Write sorted points into `points`.
@@ -131,7 +177,7 @@ function set_points_impl!(
     # Note: we don't use threading since it seems to be much slower.
     # This is very likely due to false sharing (https://en.wikipedia.org/wiki/False_sharing),
     # since all threads modify the same data in "random" order.
-    if bd.sort_points === True()
+    if sort_points === True()
         @timeit timer "(3) Permute points" begin
             # TODO: combine this with Sort step?
             @inbounds for j ∈ eachindex(pointperm)
