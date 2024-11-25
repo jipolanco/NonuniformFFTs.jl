@@ -80,15 +80,15 @@ function assign_blocks_cpu!(
         cumulative_npoints_per_block::AbstractVector{<:Integer},
         points::NTuple,
         xp::AbstractVector,
-        Δxs,
+        Δxs::NTuple,
         block_dims::NTuple,
         nblocks_per_dir::NTuple,
         sort_points,
         transform::F,
     ) where {F}
     Threads.@threads :static for I ∈ eachindex(points[1])
-        x⃗ = xp[I]
-        y⃗ = to_unit_cell(transform(Tuple(x⃗))) :: NTuple
+        @inbounds x⃗ = oftype(Δxs, xp[I])  # convert point to a tuple of the right type
+        y⃗ = to_unit_cell(transform(x⃗)) :: NTuple
         n = block_index(y⃗, Δxs, block_dims, nblocks_per_dir)
 
         # Note: here index_within_block is the value *after* incrementing (≥ 1).
@@ -111,14 +111,14 @@ function sortperm_cpu!(
         cumulative_npoints_per_block,
         blockidx,
         xp::AbstractVector,
-        Δxs,
+        Δxs::NTuple,
         block_dims,
         nblocks_per_dir,
         transform::F,
     ) where {F}
     Threads.@threads :static for I ∈ eachindex(xp)
-        @inbounds x⃗ = xp[I]
-        y⃗ = to_unit_cell(transform(Tuple(x⃗))) :: NTuple
+        @inbounds x⃗ = oftype(Δxs, xp[I])  # convert point to a tuple of the right type
+        y⃗ = to_unit_cell(transform(x⃗)) :: NTuple
         n = block_index(y⃗, Δxs, block_dims, nblocks_per_dir)
         @inbounds J = cumulative_npoints_per_block[n] + blockidx[I]
         @inbounds pointperm[J] = I
