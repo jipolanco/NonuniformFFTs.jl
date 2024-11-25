@@ -73,7 +73,7 @@ default_workgroupsize(::GPU, ndrange::Dims{1}) = (1024,)
 inbounds_getindex(v, i) = @inbounds v[i]
 
 include("gpu_common.jl")  # common functions for GPU kernels
-include("blocking.jl")
+include("blocking/blocking.jl")
 include("plan.jl")
 include("set_points.jl")
 
