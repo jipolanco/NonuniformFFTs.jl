@@ -5,6 +5,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [v0.6.6](https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.6.6) - 2024-11-25
+
 ### Changed
 
 - Improve parallel performance of `set_points!` with `CPU` backend.
