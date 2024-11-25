@@ -42,10 +42,15 @@ struct BlockDataCPU{
 end
 
 function BlockDataCPU(
-        ::Type{Z}, block_dims::Dims{D}, Ñs::Dims{D}, ::HalfSupport{M}, num_transforms::Val{Nc},
+        ::Type{Z}, block_dims_in::Dims{D}, Ñs::Dims{D}, ::HalfSupport{M}, num_transforms::Val{Nc},
         sort_points::StaticBool,
     ) where {Z <: Number, D, M, Nc}
     @assert Nc > 0
+    # Reduce block size if the actual dataset is too small.
+    # The block size must satisfy B ≤ N - M (this is assumed in spreading/interpolation).
+    block_dims = map(Ñs, block_dims_in) do N, B
+        min(B, N - M)
+    end
     nblocks_per_dir = map(cld, Ñs, block_dims)  # basically equal to ceil(Ñ / block_dim)
     T = real(Z)
     L = T(2) * π  # domain period
