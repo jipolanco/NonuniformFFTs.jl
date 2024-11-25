@@ -24,6 +24,19 @@ end
 type_length(::Type{T}) where {T} = length(T)  # usually for SVector
 type_length(::Type{<:NTuple{N}}) where {N} = N
 
+# Get point from vector of points, converting it to a tuple of the wanted type T.
+# The first argument is only used to determine the output type.
+# The "unsafe" is because we apply @inbounds.
+function unsafe_get_point_as_tuple(
+        ::Type{NTuple{D, T}},
+        xp::AbstractVector,
+        i::Integer,
+    ) where {D, T <: AbstractFloat}
+    ntuple(Val(D)) do d
+        @inbounds T(xp[i][d])
+    end
+end
+
 # Resize vector trying to avoid copy when N is larger than the original length.
 # In other words, we completely discard the original contents of x, which is not the
 # original behaviour of resize!. This can save us some device-to-device copies.

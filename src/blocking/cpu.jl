@@ -87,7 +87,7 @@ function assign_blocks_cpu!(
         transform::F,
     ) where {F}
     Threads.@threads :static for I ∈ eachindex(points[1])
-        @inbounds x⃗ = oftype(Δxs, xp[I])  # convert point to a tuple of the right type
+        x⃗ = unsafe_get_point_as_tuple(typeof(Δxs), xp, I)
         y⃗ = to_unit_cell(transform(x⃗)) :: NTuple
         n = block_index(y⃗, Δxs, block_dims, nblocks_per_dir)
 
@@ -117,7 +117,7 @@ function sortperm_cpu!(
         transform::F,
     ) where {F}
     Threads.@threads :static for I ∈ eachindex(xp)
-        @inbounds x⃗ = oftype(Δxs, xp[I])  # convert point to a tuple of the right type
+        x⃗ = unsafe_get_point_as_tuple(typeof(Δxs), xp, I)
         y⃗ = to_unit_cell(transform(x⃗)) :: NTuple
         n = block_index(y⃗, Δxs, block_dims, nblocks_per_dir)
         @inbounds J = cumulative_npoints_per_block[n] + blockidx[I]
