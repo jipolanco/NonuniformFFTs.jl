@@ -170,8 +170,8 @@ end
         @Const(transform::F),
     ) where {F}
     I = @index(Global, Linear)
-    @inbounds x⃗ = xp[I]
-    y⃗ = to_unit_cell_gpu(transform(Tuple(x⃗))) :: NTuple
+    x⃗ = unsafe_get_point_as_tuple(typeof(Δxs), xp, I)
+    y⃗ = to_unit_cell_gpu(transform(x⃗)) :: NTuple
     n = block_index(y⃗, Δxs, block_dims, nblocks_per_dir)
 
     # Note: here index_within_block is the value *after* incrementing (≥ 1).
@@ -200,8 +200,8 @@ end
         @Const(transform::F),
     ) where {F}
     I = @index(Global, Linear)
-    @inbounds x⃗ = xp[I]
-    y⃗ = to_unit_cell_gpu(transform(Tuple(x⃗))) :: NTuple
+    x⃗ = unsafe_get_point_as_tuple(typeof(Δxs), xp, I)
+    y⃗ = to_unit_cell_gpu(transform(x⃗)) :: NTuple
     n = block_index(y⃗, Δxs, block_dims, nblocks_per_dir)
     @inbounds J = cumulative_npoints_per_block[n] + blockidx[I]
     @inbounds pointperm[J] = I
