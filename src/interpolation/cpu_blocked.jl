@@ -92,7 +92,7 @@ end
 
 function interpolate!(
         backend::CPU,
-        bd::BlockData,
+        bd::BlockDataCPU,
         gs,
         evalmode::EvaluationMode,
         vp_all::NTuple{C, AbstractVector},

@@ -83,7 +83,7 @@ end
 
 function spread_from_points!(
         ::CPU,
-        bd::BlockData,
+        bd::BlockDataCPU,
         gs,
         evalmode::EvaluationMode,
         us_all::NTuple{C, AbstractArray},

@@ -1,5 +1,5 @@
 # CPU only
-struct BlockData{
+struct BlockDataCPU{
         T, N, Nc,
         Tr,  # = real(T)
         Buffers <: AbstractVector{<:NTuple{Nc, AbstractArray{T, N}}},
@@ -17,7 +17,7 @@ struct BlockData{
     sort_points :: SortPoints
 end
 
-function BlockData(
+function BlockDataCPU(
         ::Type{T}, block_dims::Dims{D}, Ñs::Dims{D}, ::HalfSupport{M}, num_transforms::Val{Nc},
         sort_points::StaticBool,
     ) where {T, D, M, Nc}
@@ -49,7 +49,7 @@ function BlockData(
     blockidx = Int[]
     pointperm = Int[]
     blocks_per_thread = zeros(Int, Nt + 1)
-    BlockData(
+    BlockDataCPU(
         block_dims, block_sizes, buffers, blocks_per_thread, indices,
         cumulative_npoints_per_block, blockidx, pointperm,
         sort_points,
@@ -57,7 +57,7 @@ function BlockData(
 end
 
 function set_points_impl!(
-        backend::CPU, bd::BlockData, points::StructVector, xp, timer;
+        backend::CPU, bd::BlockDataCPU, points::StructVector, xp, timer;
         transform::F = identity,
         synchronise,
     ) where {F <: Function}
