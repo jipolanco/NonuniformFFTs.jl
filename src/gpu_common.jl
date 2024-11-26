@@ -56,27 +56,29 @@ gpu_shmem_ndrange_from_groupsize(groupsize::Integer, ngroups::Tuple) =
     n = m - (2M - 1)  # exclude ghost cells
     block_dims = ntuple(_ -> n, Val(D))  # = (n, n, ...)
 
-    if n ≤ 0
-        throw(ArgumentError(
-            lazy"""
-            GPU shared memory size is too small for the chosen problem:
-              - element type: Z = $Z
-              - half-support: M = $M
-              - number of dimensions: D = $D
-              - spreading batch size: Np = $Np
-            If possible, reduce some of these parameters, or else switch to gpu_method = :global_memory."""
-        ))
-    elseif warn && n < 4  # the n < 4 limit is completely empirical
-        @warn lazy"""
-            GPU shared memory size might be too small for the chosen problem.
-            Switching to gpu_method = :global_memory will likely be faster.
-            Current parameters:
-              - element type: Z = $Z
-              - half-support: M = $M
-              - number of dimensions: D = $D
-              - spreading batch size: Np = $Np
-            This gives blocks of dimensions $block_dims (not including 2M - 1 = $(2M - 1) ghost cells in each direction).
-            If possible, reduce some of these parameters, or else switch to gpu_method = :global_memory."""
+    if warn
+        if n ≤ 0
+            throw(ArgumentError(
+                lazy"""
+                GPU shared memory size is too small for the chosen problem:
+                - element type: Z = $Z
+                - half-support: M = $M
+                - number of dimensions: D = $D
+                - minimum spreading batch size: Np = $Np_min
+                If possible, reduce some of these parameters, or else switch to gpu_method = :global_memory."""
+            ))
+        elseif n < 4  # the n < 4 limit is completely empirical
+            @warn lazy"""
+                GPU shared memory size might be too small for the chosen problem.
+                Switching to gpu_method = :global_memory will likely be faster.
+                Current parameters:
+                - element type: Z = $Z
+                - half-support: M = $M
+                - number of dimensions: D = $D
+                - minimum spreading batch size: Np = $Np_min
+                This gives blocks of dimensions $block_dims (not including 2M - 1 = $(2M - 1) ghost cells in each direction).
+                If possible, reduce some of these parameters, or else switch to gpu_method = :global_memory."""
+        end
     end
 
     # (4) Now determine Np according to the actual remaining shared memory.

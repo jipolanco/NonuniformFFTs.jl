@@ -54,7 +54,9 @@ function BlockDataGPU(
         @assert Np_in == DEFAULT_GPU_BATCH_SIZE || Np_in ≤ Np  # the actual Np may be larger than the input one (to maximise shared memory usage)
     else
         # This is just for type stability: the type of `batch_size` below should be a
-        # compile-time constant.
+        # compile-time constant. Note: the returned value of Np might be negative, but we
+        # don't really care because we don't use it. With `warn = false` we ensure that an
+        # error is not thrown.
         _, Np = block_dims_gpu_shmem(backend, Z, Ñs, h, batch_size; warn = false)
     end
     nblocks_per_dir = map(cld, Ñs, block_dims)  # basically equal to ceil(Ñ / block_dim)

@@ -5,6 +5,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [v0.6.7](https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.6.7) - 2024-11-26
+
+### Fixed
+
+- Avoid error when creating high-accuracy GPU plans.
+  This affected plans that cannot be treated using the `:shared_memory` method
+  (because they require large memory buffers), such as plans with `ComplexF64`
+  data associated to a large kernel width (e.g. `HalfSupport(8)`). Such plans
+  can still be computed using the `:global_memory` method, but this failed up to now.
+
 ## [v0.6.6](https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.6.6) - 2024-11-25
 
 ### Changed
