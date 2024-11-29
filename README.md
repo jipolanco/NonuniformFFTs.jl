@@ -279,3 +279,22 @@ the opposite sign convention is used for Fourier transforms.
 - A different smoothing kernel function is used (backwards Kaiser–Bessel kernel by default on CPUs; Kaiser–Bessel kernel on GPUs).
 
 - It is possible to use the same plan for type-1 and type-2 transforms, reducing memory requirements in cases where one wants to perform both.
+
+## Performance benchmarks
+
+NonuniformFFTs.jl can be *fast*:
+
+![](benchmarks/plots/benchmark_ComplexF64_type1.svg)
+
+On the CPU, for complex non-uniform data, it displays comparable performance to
+the [FINUFFT library](https://github.com/flatironinstitute/finufft) written in
+C++.
+On the GPU it can be faster than the CUDA-based CuFINUFFT, especially for large problem sizes.
+
+And the results above are for complex non-uniform data.
+One can obtain important [additional gains](https://jipolanco.github.io/NonuniformFFTs.jl/dev/benchmarks/#benchmarks-real) if
+one is interested in problems where non-uniform data is real-valued.
+
+See the [Performance
+benchmarks](https://jipolanco.github.io/NonuniformFFTs.jl/dev/benchmarks/)
+section of the documentation for details and more benchmarks.

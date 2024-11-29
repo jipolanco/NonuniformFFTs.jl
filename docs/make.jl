@@ -17,7 +17,7 @@ bib = CitationBibliography(joinpath(@__DIR__, "src", "refs.bib"); style = :autho
 makedocs(;
     sitename = "NonuniformFFTs",
     format = Documenter.HTML(
-        prettyurls = get(ENV, "CI", nothing) == "true",
+        prettyurls = true,
         assets = [
             "assets/citations.css",
             "assets/benchmarks.css",
