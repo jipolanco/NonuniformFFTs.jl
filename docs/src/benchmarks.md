@@ -82,11 +82,11 @@ transforms, which are not available in other libraries like FINUFFT or NFFT.jl.
 
 ### Type-1 transforms
 
-![](benchmarks/benchmark_Float64_type1.svg)
+![Benchmark of type-1 transforms of Float64 data.](benchmarks/benchmark_Float64_type1.svg)
 
 ### Type-2 transforms
 
-![](benchmarks/benchmark_Float64_type2.svg)
+![Benchmark of type-2 transforms of Float64 data.](benchmarks/benchmark_Float64_type2.svg)
 
 ## FINUFFT set-up
 
