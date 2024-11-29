@@ -5,11 +5,11 @@ using NonuniformFFTs
 # Copy benchmark results to docs/src/benchmarks/
 srcdir = joinpath(@__DIR__, "..", "benchmarks", "plots")
 dstdir = joinpath(@__DIR__, "src", "img")
+mkpath(dstdir)
 for fname ∈ readdir(srcdir)
     endswith(".svg")(fname) || continue
     srcfile = joinpath(srcdir, fname)
     dstfile = joinpath(dstdir, fname)
-    @assert isdir(dstdir)
     @info "Copying $srcfile -> $dstfile"
     cp(srcfile, dstfile; force = true)
 end
