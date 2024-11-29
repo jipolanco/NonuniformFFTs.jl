@@ -1,2 +1,2 @@
 # SVG files are copied from /benchmarks/plots, so local files shouldn't be added to git.
-*.svg
+benchmark_*.svg

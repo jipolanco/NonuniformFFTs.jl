@@ -1,4 +1,4 @@
-# Performance benchmarks
+# Benchmarks
 
 ```@contents
 Pages = ["benchmarks.md"]
@@ -65,13 +65,13 @@ at large point densities.
 ### Type-1 transforms
 
 ```@raw html
-<img width="100%" src="../benchmarks/benchmark_ComplexF64_type1.svg">
+<img width="100%" src="../img/benchmark_ComplexF64_type1.svg">
 ```
 
 ### [Type-2 transforms](@id benchmarks-complex-type2)
 
 ```@raw html
-<img width="100%" src="../benchmarks/benchmark_ComplexF64_type2.svg">
+<img width="100%" src="../img/benchmark_ComplexF64_type2.svg">
 ```
 
 ## [Real non-uniform data](@id benchmarks-real)
@@ -90,13 +90,13 @@ In the plots below, the (Cu)FINUFFT curves are exactly the same as in the
 ### Type-1 transforms
 
 ```@raw html
-<img width="100%" src="../benchmarks/benchmark_Float64_type1.svg">
+<img width="100%" src="../img/benchmark_Float64_type1.svg">
 ```
 
 ### Type-2 transforms
 
 ```@raw html
-<img width="100%" src="../benchmarks/benchmark_Float64_type2.svg">
+<img width="100%" src="../img/benchmark_Float64_type2.svg">
 ```
 
 ## FINUFFT set-up
