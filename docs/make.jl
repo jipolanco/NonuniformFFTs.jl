@@ -3,12 +3,15 @@ using DocumenterCitations
 using NonuniformFFTs
 
 # Copy benchmark results to docs/src/benchmarks/
-dstdir = joinpath(@__DIR__, "src", "benchmarks")
 srcdir = joinpath(@__DIR__, "..", "benchmarks", "plots")
-@assert isdir(dstdir)
+dstdir = joinpath(@__DIR__, "src", "img")
+mkpath(dstdir)
 for fname ∈ readdir(srcdir)
     endswith(".svg")(fname) || continue
-    cp(joinpath(srcdir, fname), joinpath(dstdir, fname); force = true)
+    srcfile = joinpath(srcdir, fname)
+    dstfile = joinpath(dstdir, fname)
+    @info "Copying $srcfile -> $dstfile"
+    cp(srcfile, dstfile; force = true)
 end
 
 # Bibliography
@@ -37,5 +40,5 @@ makedocs(;
 deploydocs(
     repo = "github.com/jipolanco/NonuniformFFTs.jl",
     forcepush = true,
-    push_preview = false,
+    push_preview = true,
 )
