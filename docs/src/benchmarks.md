@@ -64,11 +64,11 @@ at large point densities.
 
 ### Type-1 transforms
 
-![](benchmarks/benchmark_ComplexF64_type1.svg)
+![](./benchmarks/benchmark_ComplexF64_type1.svg)
 
 ### [Type-2 transforms](@id benchmarks-complex-type2)
 
-![](benchmarks/benchmark_ComplexF64_type2.svg)
+![](./benchmarks/benchmark_ComplexF64_type2.svg)
 
 ## [Real non-uniform data](@id benchmarks-real)
 
@@ -85,11 +85,11 @@ In the plots below, the (Cu)FINUFFT curves are exactly the same as in the
 
 ### Type-1 transforms
 
-![](benchmarks/benchmark_Float64_type1.svg)
+![](./benchmarks/benchmark_Float64_type1.svg)
 
 ### Type-2 transforms
 
-![](benchmarks/benchmark_Float64_type2.svg)
+![](./benchmarks/benchmark_Float64_type2.svg)
 
 ## FINUFFT set-up
 
