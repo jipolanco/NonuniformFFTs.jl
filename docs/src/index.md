@@ -345,3 +345,8 @@ the opposite sign convention is used for Fourier transforms.
 - A different smoothing kernel function is used (backwards Kaiser–Bessel kernel by default on CPUs; Kaiser–Bessel kernel on GPUs).
 
 - It is possible to use the same plan for type-1 and type-2 transforms, reducing memory requirements in cases where one wants to perform both.
+
+## Bibliography
+
+```@bibliography
+```
