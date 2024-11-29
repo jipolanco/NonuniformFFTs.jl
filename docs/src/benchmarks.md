@@ -1,4 +1,4 @@
-# Benchmarks
+# Performance benchmarks
 
 ```@contents
 Pages = ["benchmarks.md"]
@@ -64,29 +64,32 @@ at large point densities.
 
 ### Type-1 transforms
 
-![Benchmark of type-1 transforms of ComplexF64 data.](benchmarks/benchmark_ComplexF64_type1.svg)
+![](benchmarks/benchmark_ComplexF64_type1.svg)
 
 ### [Type-2 transforms](@id benchmarks-complex-type2)
 
-![Benchmark of type-2 transforms of ComplexF64 data.](benchmarks/benchmark_ComplexF64_type2.svg)
+![](benchmarks/benchmark_ComplexF64_type2.svg)
 
 ## [Real non-uniform data](@id benchmarks-real)
 
 These tests are of interest for applications where **non-uniform data is
 real-valued** (imaginary part is zero).
-This enables the use of real-to-complex (type-1) and complex-to-real (type-2)
+In NonuniformFFTs.jl, this enables the use of real-to-complex (type-1) and complex-to-real (type-2)
 FFTs and also allows to halve the amount of data processed during the spreading
 (type-1) and interpolation (type-2) procedures.
 The benchmarks showcase the important gains which can be obtained by using real-data
 transforms, which are not available in other libraries like FINUFFT or NFFT.jl.
 
+In the plots below, the (Cu)FINUFFT curves are exactly the same as in the
+[complex-data](@ref benchmarks-complex) benchmarks.
+
 ### Type-1 transforms
 
-![Benchmark of type-1 transforms of Float64 data.](benchmarks/benchmark_Float64_type1.svg)
+![](benchmarks/benchmark_Float64_type1.svg)
 
 ### Type-2 transforms
 
-![Benchmark of type-2 transforms of Float64 data.](benchmarks/benchmark_Float64_type2.svg)
+![](benchmarks/benchmark_Float64_type2.svg)
 
 ## FINUFFT set-up
 

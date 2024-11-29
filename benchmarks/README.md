@@ -1,4 +1,4 @@
-# Benchmarks
+# Performance benchmarks
 
 This directory contains scripts for executing benchmarks (`run_benchmarks.jl`)
 and generated plotting results (`plots/plot_benchmarks.jl`).
