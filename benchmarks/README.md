@@ -1,13 +1,14 @@
 # Benchmarks
 
-The benchmark consists in type-1 and type-2 NUFFTs on a uniform 3D grid of
+The benchmarks consist in type-1 and type-2 NUFFTs on a uniform 3D grid of
 fixed dimensions $M^3 = 256^3$ (excluding oversampling). We vary the number of
 non-uniform points $N$, so that the point density $ρ = N / M^3$ takes values
 between $10^{-4}$ (very few points) and $10^1$ (very dense).
-Points are randomly located in $[0, 2π)^3$.
-Moreover, the relative tolerance is fixed to $10^{-6}$.
+Points are randomly located in $[0, 2π)^3$ using a uniform distribution.
+The relative tolerance is fixed to $10^{-6}$.
 In NonuniformFFTs.jl, this can be achieved with the parameters `σ = 1.5`
-(oversampling factor) and $m = HalfSupport(4)$ (see Accuracy page in the docs).
+(oversampling factor) and $m = HalfSupport(4)$ (see [Accuracy](@ref accuracy)).
+All tests are run in double precision (`Float64` or `ComplexF64` non-uniform data).
 
 The tests were run on a cluster with an AMD EPYC 7302 CPU (32 threads) and an
 NVIDIA A100 GPU.
@@ -42,3 +43,17 @@ and for GPU plans:
 
 We also tried `gpu_method = 2` (based on shared memory) but found it to be
 considerably slower in almost all cases (in three dimensions, at the requested tolerance).
+
+## Results
+
+### Complex data
+
+![](plots/benchmark_ComplexF64_type1.svg)
+
+![](plots/benchmark_ComplexF64_type2.svg)
+
+### Real data
+
+![](plots/benchmark_Float64_type1.svg)
+
+![](plots/benchmark_Float64_type2.svg)

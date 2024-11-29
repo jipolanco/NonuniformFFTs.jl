@@ -1,4 +1,4 @@
-# Accuracy
+# [Accuracy](@id accuracy)
 
 Here we document the accuracy of the NUFFTs implemented in this package, and how it varies
 as a function of the kernel half-width ``M``, the oversampling factor ``σ`` and the choice
