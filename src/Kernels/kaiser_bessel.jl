@@ -74,13 +74,13 @@ The kernel parameters are:
 - `Δx`: the spacing of the (oversampled) grid;
 - `β`: the Kaiser–Bessel shape parameter.
 
-Here the half-kernel size in "physical" units is ``w = M * Δx``.
+Here the half-kernel size in "physical" units is ``w = M Δx``.
 This means that if we want to evaluate the kernel around a source location ``x``,
 then the evaluation points will be in ``[x - w, x + w)``.
 
-More precisely, the evaluation points will be ``x_i = x - δ + i * Δx``, where the point
+More precisely, the evaluation points will be ``x_i = x - δ + i Δx``, where the point
 ``x_0 = x - δ`` is the nearest point to the left of ``x`` which is on the grid
-(that is, ``0 ≤ δ < Δx``), and ``i ∈ \\left{-M, -M + 1, …, M - 2, M - 1 \\right}``.
+(that is, ``0 ≤ δ < Δx``), and ``i ∈ \\left\\{-M, -M + 1, …, M - 2, M - 1 \\right\\}``.
 
 ## Optimal shape parameter β
 

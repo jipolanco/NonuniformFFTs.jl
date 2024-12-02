@@ -30,7 +30,7 @@ exec_type2!
 size(::PlanNUFFT)
 ```
 
-## Available spreading kernels
+## Available kernel functions
 
 ```@docs
 KaiserBesselKernel
@@ -44,6 +44,27 @@ BSplineKernel
 ```@docs
 Direct
 FastApproximation
+```
+
+## Internals
+
+```@docs
+spread_from_point!
+ntransforms
+```
+
+### Kernel functions
+
+```@docs
+Kernels.AbstractKernel
+Kernels.AbstractKernelData
+Kernels.KaiserBesselKernelData
+Kernels.GaussianKernelData
+Kernels.BSplineKernelData
+Kernels.half_support
+Kernels.order
+Kernels.init_fourier_coefficients!
+Kernels.fourier_coefficients
 ```
 
 ## Index

@@ -49,7 +49,7 @@ makedocs(;
         "API.md",
     ],
     plugins = [bib],
-    warnonly = [:missing_docs],  # TODO fix this?
+    # warnonly = [:missing_docs],
 )
 
 deploydocs(
