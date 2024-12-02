@@ -1,10 +1,12 @@
 using Documenter
+using Documenter.HTMLWriter: HTMLAsset
 using DocumenterCitations
+using Downloads: Downloads
 using NonuniformFFTs
 
 # Copy benchmark results to docs/src/benchmarks/
-srcdir = joinpath(@__DIR__, "..", "benchmarks", "plots")
-dstdir = joinpath(@__DIR__, "src", "img")
+srcdir = relpath(joinpath(@__DIR__, "..", "benchmarks", "plots"))
+dstdir = relpath(joinpath(@__DIR__, "src", "img"))
 mkpath(dstdir)
 for fname ∈ readdir(srcdir)
     endswith(".svg")(fname) || continue
@@ -17,14 +19,27 @@ end
 # Bibliography
 bib = CitationBibliography(joinpath(@__DIR__, "src", "refs.bib"); style = :authoryear)
 
+assets = [
+    asset("assets/citations.css"; islocal = true),
+    asset("assets/benchmarks.css"; islocal = true),
+]
+
+# Try to download latest version of simpleanalytics script.
+try
+    script = "assets/sa.js"
+    dst = joinpath(@__DIR__, "src", script)
+    Downloads.download("https://scripts.simpleanalyticscdn.com/latest.js", dst)
+    attributes = Dict(:async => "", Symbol("data-collect-dnt") => "true")
+    push!(assets, asset(script; attributes, islocal = true))
+catch e
+    @warn "Failed downloading asset" e
+end
+
 makedocs(;
     sitename = "NonuniformFFTs",
-    format = Documenter.HTML(
+    format = Documenter.HTML(;
         prettyurls = true,
-        assets = [
-            "assets/citations.css",
-            "assets/benchmarks.css",
-        ],
+        assets,
     ),
     modules = [NonuniformFFTs],
     pages = [
