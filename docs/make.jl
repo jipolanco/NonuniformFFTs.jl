@@ -1,5 +1,4 @@
 using Documenter
-using Documenter.HTMLWriter: HTMLAsset
 using DocumenterCitations
 using Downloads: Downloads
 using NonuniformFFTs
@@ -44,6 +43,7 @@ makedocs(;
     modules = [NonuniformFFTs],
     pages = [
         "index.md",
+        "examples.md",
         "accuracy.md",
         "benchmarks.md",
         "API.md",

@@ -44,9 +44,9 @@ The default one (**filled circles**) corresponds to setting
 `gpu_method = :global_memory` in [`PlanNUFFT`](@ref).
 This method is slightly faster than CuFINUFFT at low point densities, but
 slightly slower at large ones.
-However, at large densities it is actually faster to use the non-default
-`gpu_method = :shared_memory` option (**open circles**, labelled "SM" in the figures).
 
+In fact, at large densities it actually faster to use the non-default
+`gpu_method = :shared_memory` option (**open circles**, labelled "SM" in the figures).
 The `:shared_memory` method performs some operations on GPU [shared
 memory](https://developer.nvidia.com/blog/using-shared-memory-cuda-cc/) (also called [local data share](https://rocm.docs.amd.com/projects/HIP/en/latest/understand/hardware_implementation.html#local-data-share)), which is small but much faster than the GPU's global memory.
 During spreading (type-1 transforms), this approach allows to reduce the number
@@ -56,13 +56,12 @@ a few differences.
 In particular, we completely avoid atomic operations on shared memory, which
 seems to speed up things quite a bit and might explain the important gains
 with respect to the CuFINUFFT implementation.[^1]
-Another difference is that we also provide a shared-memory implementation of type-2 transforms
+We also provide a shared-memory implementation of type-2 transforms
 (interpolation).
 As seen [below](@ref benchmarks-complex-type2), this can enable some minor gains
 at large point densities.
 
-[^1]: In fact the CuFINUFFT shared-memory implementation is surprisingly slow
-    for the considered problem. It might perform better for two-dimensional or low-accuracy problems.
+[^1]: The CuFINUFFT shared-memory implementation might perform better (relative to the global-memory method) for two-dimensional or low-accuracy problems.
 
 ### Type-1 transforms
 
