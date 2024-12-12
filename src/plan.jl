@@ -345,10 +345,17 @@ function _PlanNUFFT(
     ) where {T <: Number, D}
     ks = init_wavenumbers(T, Ns)
     # Determine dimensions of oversampled grid.
-    Ñs = map(Ns) do N
+    Ñs = ntuple(Val(D)) do d
         # We try to make sure that each dimension is a product of powers of small primes,
-        # which is good for FFT performance.
-        Ñ = nextprod((2, 3, 5), floor(Int, σ_wanted * N))
+        # which is good for FFT performance. Moreover, for real-data transforms (rfft),
+        # "it is generally beneficial for the last dimension of an r2c/c2r transform
+        # to be even" (from the FFTW docs). In our case the "last" dimension is actually the
+        # first. This is true for FFTW; not sure about other libraries (including GPU ones).
+        if T <: Real && d == 1
+            Ñ = 2 * nextprod((2, 3, 5), floor(Int, σ_wanted * ((Ns[d] + 1) ÷ 2)))  # make sure it's even
+        else
+            Ñ = nextprod((2, 3, 5), floor(Int, σ_wanted * Ns[d]))
+        end
         check_nufft_size(Ñ, h)
         Ñ
     end
