@@ -50,9 +50,6 @@ The type-2 transform can be interpreted as an interpolation of a Fourier series 
 
 If the points are uniformly distributed in ``[0, 2π)``, i.e. ``x_j = 2π (j - 1) / M``, then these
 definitions exactly correspond to the [forward and backward DFTs](http://fftw.org/fftw3_doc/The-1d-Discrete-Fourier-Transform-_0028DFT_0029.html) computed by FFTW.
-Note in particular that the type-1 transform is not normalised.
-In applications, one usually wants to normalise the obtained Fourier
-coefficients by the size ``N`` of the transform (see examples below).
 
 ### Ordering of data in frequency space
 
