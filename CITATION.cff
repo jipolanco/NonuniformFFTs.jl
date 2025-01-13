@@ -1,0 +1,11 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+authors:
+- family-names: "Polanco"
+  given-names: "Juan Ignacio"
+  orcid: "https://orcid.org/0000-0001-7705-753X"
+title: "NonuniformFFTs.jl"
+version: v0.6.7
+doi: 10.5281/zenodo.14637606
+date-released: 2024-11-26
+url: "https://github.com/jipolanco/NonuniformFFTs.jl"
