@@ -331,7 +331,8 @@ end
             @inbounds for p in 1:batch_size
                 local istart = ntuple(d -> @inbounds(inds_start[d, p]), Val(D))
                 local v = vp_sm[p]
-                spread_onto_array_shmem_threads!(u_local, istart, window_vals, v, p; threadidx, nthreads)
+                window_vals_p = @view window_vals[:, :, p]
+                spread_onto_array_shmem_threads!(u_local, istart, window_vals_p, v; threadidx, nthreads)
                 @synchronize  # make sure threads don't write concurrently to the same place (since we don't use atomics)
             end
         end
@@ -359,8 +360,8 @@ end
 @inline function spread_onto_array_shmem_threads!(
         u_local::AbstractArray{Z, D},
         inds_start::NTuple{D, Integer},
-        window_vals::AbstractArray{T, 3},  # static-size shared-memory array (2M, D, Np)
-        v::Z, p::Integer;
+        window_vals::AbstractArray{T, 2},  # size (2M, D)
+        v::Z;
         threadidx, nthreads,
     ) where {T, D, Z}
     inds = CartesianIndices(ntuple(_ -> axes(window_vals, 1), Val(D)))  # = (1:2M, 1:2M, ...)
@@ -370,7 +371,7 @@ end
         js = Tuple(I) .+ inds_start
         gprod = one(Tr)
         for d ∈ 1:D
-            gprod *= window_vals[I[d], d, p]
+            gprod *= window_vals[I[d], d]
         end
         w = v * gprod
         u_local[js...] += w

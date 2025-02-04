@@ -35,14 +35,13 @@ gpu_shmem_ndrange_from_groupsize(groupsize::Integer, ngroups::Tuple) =
     # See spread_from_points_shmem_kernel! for the meaning of each variable to the right of
     # each value.
     const_shmem = sizeof(Int) * (
-        + 3   # buf_sm
+        + 2   # buf_sm
         + D   # ishifts_sm
     ) + 128   # extra 128 bytes for safety (CUDA seems to use slightly more shared memory than what we estimate, maybe due to memory alignment?)
 
     # (2) Shared memory required per point in a batch
     shmem_per_point = sizeof(T) * D * (
         + 2M  # window_vals
-        + 1   # points_sm
     ) + (
         sizeof(Int) * D   # inds_start
     ) + (
