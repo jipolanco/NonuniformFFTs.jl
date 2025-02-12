@@ -264,23 +264,20 @@ end
     @assert T <: Real
 
     window_vals = @localmem(T, (2M, D, Np))
-    points_sm = @localmem(T, (D, Np))  # points copied to shared memory
     inds_start = @localmem(Int, (D, Np))
     vp_sm = @localmem(Z, Np)  # input values copied to shared memory
 
     # Buffer for indices and lengths.
     # This is needed in CPU version (used in tests), to avoid variables from being
     # "forgotten" after a @synchronize barrier.
-    buf_sm = @localmem(Int, 3)
+    buf_sm = @localmem(Int, 2)
     ishifts_sm = @localmem(Int, D)  # shift between local and global array in each direction
 
-    if threadidx == 1
-        # This block (workgroup) will take care of non-uniform points (a + 1):b
-        @inbounds buf_sm[1] = cumulative_npoints_per_block[block_n]       # = a
-        @inbounds buf_sm[2] = cumulative_npoints_per_block[block_n + 1]   # = b
-        @inbounds for d ∈ 1:D
-            ishifts_sm[d] = (block_index[d] - 1) * block_dims[d] + 1
-        end
+    # This block (workgroup) will take care of non-uniform points (a + 1):b
+    @inbounds buf_sm[1] = cumulative_npoints_per_block[block_n]       # = a
+    @inbounds buf_sm[2] = cumulative_npoints_per_block[block_n + 1]   # = b
+    @inbounds for d ∈ 1:D
+        ishifts_sm[d] = (block_index[d] - 1) * block_dims[d] + 1
     end
 
     # Interpolate components one by one (to avoid using too much memory)
@@ -303,33 +300,21 @@ end
 
         # The first batch deals with points (a + 1):min(a + Np, b)
         @inbounds for batch_begin in buf_sm[1]:Np:(buf_sm[2] - 1)
-            batch_size = min(Np, buf_sm[2] - batch_begin)  # current batch size
-            buf_sm[3] = batch_size
+            @uniform batch_size = min(Np, buf_sm[2] - batch_begin)  # current batch size
 
-            # (1) Iterate over points in the batch.
-            # Each active thread writes to shared memory.
-            @inbounds for p in threadidx:nthreads:batch_size
-                # Spread from point j
-                i = batch_begin + p  # index of non-uniform point
-                j = if pointperm === nothing
+            # (1) Evaluate window functions around each non-uniform point.
+            inds = CartesianIndices((1:batch_size, 1:D))  # parallelise over dimensions + points
+            @inbounds for n in threadidx:nthreads:length(inds)
+                p, d = Tuple(inds[n])
+                local i = batch_begin + p  # index of non-uniform point
+                local j = if pointperm === nothing
                     i
                 else
                     @inbounds pointperm[i]
                 end
-                for d ∈ 1:D
-                    points_sm[d, p] = points[d][j]
-                end
-                vp_sm[p] = vp[c][j]
-            end
-
-            @synchronize
-
-            # (2) Evaluate window functions around each non-uniform point.
-            inds = CartesianIndices((1:buf_sm[3], 1:D))  # parallelise over dimensions + points
-            @inbounds for n in threadidx:nthreads:length(inds)
-                p, d = Tuple(inds[n])
                 g = gs[d]
-                x = points_sm[d, p]
+                x = points[d][j]
+                vp_sm[p] = vp[c][j]
                 gdata = Kernels.evaluate_kernel(evalmode, g, x)
                 ishift = ishifts_sm[d]
                 inds_start[d, p] = gdata.i - ishift
@@ -341,17 +326,16 @@ end
 
             @synchronize  # make sure all threads have the same shared data
 
-            # (3) All threads spread together onto shared memory, avoiding all collisions
+            # (2) All threads spread together onto shared memory, avoiding all collisions
             # and thus not requiring atomic operations.
-            @inbounds for p in 1:buf_sm[3]
+            @inbounds for p in 1:batch_size
                 local istart = ntuple(d -> @inbounds(inds_start[d, p]), Val(D))
                 local v = vp_sm[p]
-                spread_onto_array_shmem_threads!(u_local, istart, window_vals, v, p; threadidx, nthreads)
+                window_vals_p = @view window_vals[:, :, p]
+                spread_onto_array_shmem_threads!(u_local, istart, window_vals_p, v; threadidx, nthreads)
                 @synchronize  # make sure threads don't write concurrently to the same place (since we don't use atomics)
             end
         end
-
-        @synchronize  # make sure we have finished writing to shared memory
 
         # Add values from shared memory onto global memory.
         @inbounds if buf_sm[1] < buf_sm[2]  # skip this step if there were actually no points in this block (if a == b)
@@ -374,8 +358,8 @@ end
 @inline function spread_onto_array_shmem_threads!(
         u_local::AbstractArray{Z, D},
         inds_start::NTuple{D, Integer},
-        window_vals::AbstractArray{T, 3},  # static-size shared-memory array (2M, D, Np)
-        v::Z, p::Integer;
+        window_vals::AbstractArray{T, 2},  # size (2M, D)
+        v::Z;
         threadidx, nthreads,
     ) where {T, D, Z}
     inds = CartesianIndices(ntuple(_ -> axes(window_vals, 1), Val(D)))  # = (1:2M, 1:2M, ...)
@@ -385,7 +369,7 @@ end
         js = Tuple(I) .+ inds_start
         gprod = one(Tr)
         for d ∈ 1:D
-            gprod *= window_vals[I[d], d, p]
+            gprod *= window_vals[I[d], d]
         end
         w = v * gprod
         u_local[js...] += w

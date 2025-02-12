@@ -149,7 +149,7 @@ function compare_with_cpu(::Type{T}, dims; Np = prod(dims), ntransforms::Val{Nc}
     nothing
 end
 
-@testset "GPU implementation (using CPU)" begin
+@testset "GPU implementation (using $GPU_BACKEND backend)" begin
     dims = (35, 64, 40)
     @testset "T = $T" for T ∈ (Float32, ComplexF32)
         compare_with_cpu(T, dims)
