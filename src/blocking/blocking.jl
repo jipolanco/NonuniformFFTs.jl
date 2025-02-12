@@ -17,9 +17,17 @@ function to_unit_cell(x::Real)
     x
 end
 
-# This is a bit faster on GPUs, probably because it's guaranteed to be branchless.
+# This is faster on GPUs, probably because it's guaranteed to be branchless.
 @inline to_unit_cell_gpu(x⃗::Tuple) = map(to_unit_cell_gpu, x⃗)
-@inline to_unit_cell_gpu(x::Real) = mod2pi(x)
+
+@inline function to_unit_cell_gpu(x::Real)
+    twopi = oftype(x, 2) * π
+    r = rem(x, twopi)  # note: rem(x, y) translates to fmodf/fmod on CUDA (see https://github.com/JuliaGPU/CUDA.jl/blob/4067511b2b472be9fb30164d1ed23caa354c1fcb/src/device/intrinsics/math.jl#L370)
+    # This is adapted from Julia's mod implementation (also based on rem), but trying to
+    # avoid branches (not sure it improves much).
+    r = ifelse(iszero(r), copysign(r, twopi), r)  # replaces -0.0 -> +0.0
+    ifelse(r < 0, twopi + r, r)
+end
 
 type_length(::Type{T}) where {T} = length(T)  # usually for SVector
 type_length(::Type{<:NTuple{N}}) where {N} = N
