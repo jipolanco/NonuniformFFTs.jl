@@ -5,6 +5,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [v0.6.8] - 2025-02-12
+
+### Added
+
+- Minor GPU performance improvements.
+
 ## [v0.6.7](https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.6.7) - 2024-11-26
 
 ### Fixed
