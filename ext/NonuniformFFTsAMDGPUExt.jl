@@ -26,6 +26,12 @@ using AMDGPU.Device: @device_override
 # @device_override Kernels._besseli0(x::Float64) = ccall("extern __ocml_i0_f64", llvmcall, Cdouble, (Cdouble,), x)
 # @device_override Kernels._besseli0(x::Float32) = ccall("extern __ocml_i0_f32", llvmcall, Cfloat, (Cfloat,), x)
 
+# This should enable minor performance gains in set_points!.
+# This is not needed in the CUDA extension as CUDA.jl already overrides `rem` to call CUDA functions.
+# TODO: add this to AMDGPU.jl
+@device_override Base.rem(x::Float32, y::Float32) = ccall("extern __ocml_fmod_f32", llvmcall, Cfloat, (Cfloat, Cfloat), x, y)
+@device_override Base.rem(x::Float64, y::Float64) = ccall("extern __ocml_fmod_f64", llvmcall, Cdouble, (Cdouble, Cdouble), x, y)
+
 NonuniformFFTs.default_kernel(::ROCBackend) = BackwardsKaiserBesselKernel()
 
 NonuniformFFTs.default_kernel_evalmode(::ROCBackend) = FastApproximation()
