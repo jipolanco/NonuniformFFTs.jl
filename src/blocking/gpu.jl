@@ -164,7 +164,7 @@ end
 
 @kernel function assign_blocks_kernel!(
         blockidx::AbstractVector{<:Integer},
-        cumulative_npoints_per_block::AbstractVector{<:Integer},
+        cumulative_npoints_per_block::AbstractVector{IntType},
         points::NTuple,
         @Const(xp),
         @Const(Δxs),
@@ -172,8 +172,7 @@ end
         @Const(nblocks_per_dir::NTuple),
         @Const(sort_points),
         @Const(transform::F),
-    ) where {F}
-    IntType = eltype(cumulative_npoints_per_block)
+    ) where {IntType, F}
     I::IntType = @index(Global, Linear)
     x⃗ = unsafe_get_point_as_tuple(typeof(Δxs), xp, I)
     y⃗ = to_unit_cell_gpu(transform(x⃗)) :: NTuple
