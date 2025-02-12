@@ -35,12 +35,13 @@ type_length(::Type{<:NTuple{N}}) where {N} = N
 # Get point from vector of points, converting it to a tuple of the wanted type T.
 # The first argument is only used to determine the output type.
 # The "unsafe" is because we apply @inbounds.
-function unsafe_get_point_as_tuple(
+@inline function unsafe_get_point_as_tuple(
         ::Type{NTuple{D, T}},
         xp::AbstractVector,
         i::Integer,
     ) where {D, T <: AbstractFloat}
     ntuple(Val(D)) do d
+        @inline
         @inbounds T(xp[i][d])
     end
 end

@@ -59,12 +59,13 @@ function BlockDataGPU(
         # error is not thrown.
         _, Np = block_dims_gpu_shmem(backend, Z, Ñs, h, batch_size; warn = false)
     end
-    nblocks_per_dir = map(cld, Ñs, block_dims)  # basically equal to ceil(Ñ / block_dim)
+    IntType = Int  # Int32 doesn't seem to be faster
+    nblocks_per_dir = IntType.(map(cld, Ñs, block_dims))  # basically equal to ceil(Ñ / block_dim)
     L = T(2) * π  # domain period
     Δxs = map(N -> L / N, Ñs)  # grid step (oversampled grid)
-    cumulative_npoints_per_block = KA.allocate(backend, Int, prod(nblocks_per_dir) + 1)
+    cumulative_npoints_per_block = KA.allocate(backend, IntType, prod(nblocks_per_dir) + 1)
     BlockDataGPU(
-        method, Δxs, nblocks_per_dir, block_dims, cumulative_npoints_per_block, sort_points;
+        method, Δxs, nblocks_per_dir, IntType.(block_dims), cumulative_npoints_per_block, sort_points;
         batch_size = Val(Np),
     )
 end
@@ -147,17 +148,18 @@ end
 @inline function block_index(
         x⃗::NTuple{N,T}, Δxs::NTuple{N,T}, block_dims::NTuple{N,Integer}, nblocks_per_dir::NTuple{N},
     ) where {N, T <: AbstractFloat}
-    is = ntuple(Val(N)) do n
+    IntType = eltype(block_dims)
+    is = ntuple(Val(N)) do d
         @inline
         # Note: we could directly use the block size Δx_block = Δx * block_dims, but this
         # may lead to inconsistency with interpolation and spreading kernels (leading to
         # errors) due to numerical accuracy issues. So we first obtain the index on the
         # Δx grid, then we translate that to a block index by dividing by the block
         # dimensions (= how many Δx's in a single block).
-        i, r = Kernels.point_to_cell(x⃗[n], Δxs[n])  # index of grid cell where point is located
-        cld(i, block_dims[n])  # index of block where point is located
+        i, r = Kernels.point_to_cell(x⃗[d], Δxs[d])  # index of grid cell where point is located (i ≥ 1)
+        cld(IntType(i), block_dims[d])  # index of block where point is located
     end
-    @inbounds LinearIndices(nblocks_per_dir)[is...]
+    @inbounds IntType(LinearIndices(nblocks_per_dir)[is...])
 end
 
 @kernel function assign_blocks_kernel!(
@@ -171,14 +173,14 @@ end
         @Const(sort_points),
         @Const(transform::F),
     ) where {F}
-    I = @index(Global, Linear)
+    IntType = eltype(cumulative_npoints_per_block)
+    I::IntType = @index(Global, Linear)
     x⃗ = unsafe_get_point_as_tuple(typeof(Δxs), xp, I)
     y⃗ = to_unit_cell_gpu(transform(x⃗)) :: NTuple
-    n = block_index(y⃗, Δxs, block_dims, nblocks_per_dir)
+    n = block_index(y⃗, Δxs, block_dims, nblocks_per_dir)::IntType
 
     # Note: here index_within_block is the value *after* incrementing (≥ 1).
-    S = eltype(cumulative_npoints_per_block)
-    index_within_block = @inbounds (Atomix.@atomic cumulative_npoints_per_block[n + 1] += one(S))::S
+    index_within_block = @inbounds (Atomix.@atomic cumulative_npoints_per_block[n + 1] += one(IntType))::IntType
     @inbounds blockidx[I] = index_within_block
 
     # If points need to be sorted, then we fill `points` some time later (in permute_kernel!).
