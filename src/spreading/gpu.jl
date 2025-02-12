@@ -337,8 +337,6 @@ end
             end
         end
 
-        @synchronize  # make sure we have finished writing to shared memory
-
         # Add values from shared memory onto global memory.
         @inbounds if buf_sm[1] < buf_sm[2]  # skip this step if there were actually no points in this block (if a == b)
             add_from_local_to_global_memory!(
