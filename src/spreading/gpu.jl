@@ -300,7 +300,7 @@ end
 
         # The first batch deals with points (a + 1):min(a + Np, b)
         @inbounds for batch_begin in buf_sm[1]:Np:(buf_sm[2] - 1)
-            batch_size = min(Np, buf_sm[2] - batch_begin)  # current batch size
+            @uniform batch_size = min(Np, buf_sm[2] - batch_begin)  # current batch size
 
             # (1) Evaluate window functions around each non-uniform point.
             inds = CartesianIndices((1:batch_size, 1:D))  # parallelise over dimensions + points
