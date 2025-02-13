@@ -3,7 +3,7 @@
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## [Unreleased]
 
 ## [v0.6.8] - 2025-02-12
 
@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Minor GPU performance improvements.
 
-## [v0.6.7](https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.6.7) - 2024-11-26
+## [v0.6.7] - 2024-11-26
 
 ### Fixed
 
@@ -21,20 +21,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   data associated to a large kernel width (e.g. `HalfSupport(8)`). Such plans
   can still be computed using the `:global_memory` method, but this failed up to now.
 
-## [v0.6.6](https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.6.6) - 2024-11-25
+## [v0.6.6] - 2024-11-25
 
 ### Changed
 
 - Improve parallel performance of `set_points!` with `CPU` backend.
 
-## [v0.6.5](https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.6.5) - 2024-11-18
+## [v0.6.5] - 2024-11-18
 
 ### Fixed
 
 - Fix scalar indexing error on latest AMDGPU.jl (v1.1.1).
   Not sure exactly if it's a recent change in AMDGPU.jl, or maybe in GPUArrays.jl, which caused the error.
 
-## [v0.6.4](https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.6.4) - 2024-11-17
+## [v0.6.4] - 2024-11-17
 
 ### Changed
 
@@ -42,7 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The allocation was due to CUDA.jl creating a copy of the input in complex-to-real FFTs
   (see [CUDA.jl#2249](https://github.com/JuliaGPU/CUDA.jl/issues/2249)).
 
-## [v0.6.2](https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.6.2) - 2024-11-04
+## [v0.6.2] - 2024-11-04
 
 ### Changed
 
@@ -54,14 +54,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   We now default to fast polynomial approximation of kernel functions and to
   the backwards Kaiser-Bessel kernel (as in the CPU).
 
-## [v0.6.1](https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.6.1) - 2024-10-29
+## [v0.6.1] - 2024-10-29
 
 ### Fixed
 
 - Fix type-2 transforms on the GPU when performing multiple transforms at once
   (`ntransforms > 1`) and when `gpu_method = :shared_memory` (which is not currently the default).
 
-## [v0.6.0](https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.6.0) - 2024-10-29
+## [v0.6.0] - 2024-10-29
 
 ### Added
 
@@ -100,21 +100,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The direct evaluation of the KB kernel (based on Bessel functions) seems to be a bit faster than backwards KB, both on CUDA and AMDGPU.
   Accuracy doesn't change much since both kernels have similar precisions.
 
-## [v0.5.6](https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.5.6) - 2024-10-17
+## [v0.5.6] - 2024-10-17
 
 ### Changed
 
 - Minor optimisations and refactoring to GPU kernels.
   Spreading and interpolation operations are slightly faster than before.
 
-## [v0.5.5](https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.5.5) - 2024-10-04
+## [v0.5.5] - 2024-10-04
 
 ### Fixed
 
 - Transforms now work on AMD GPUs ([#33](https://github.com/jipolanco/NonuniformFFTs.jl/pull/33)).
   This only required minor modifications to some KA kernels.
 
-## [v0.5.4](https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.5.4) - 2024-09-25
+## [v0.5.4] - 2024-09-25
 
 ### Changed
 
@@ -123,7 +123,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Enabling synchronisation is useful for getting accurate timings (in `p.timer`) but
   may result in decreased performance.
 
-## [v0.5.3](https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.5.3) - 2024-09-24
+## [v0.5.3] - 2024-09-24
 
 ### Changed
 
@@ -133,33 +133,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Plans: `block_size` argument can now be a tuple (block size along each separate dimension).
 
-## [v0.5.2](https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.5.2) - 2024-09-23
+## [v0.5.2] - 2024-09-23
 
 ### Changed
 
 - Avoid recompilation of GPU kernels when number of non-uniform points changes.
 
-## [v0.5.1](https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.5.1) - 2024-09-20
+## [v0.5.1] - 2024-09-20
 
 ### Fixed
 
 - Fix transforms of real non-uniform data on CUDA.jl.
 
-## [v0.5.0](https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.5.0) - 2024-09-20
+## [v0.5.0] - 2024-09-20
 
 ### Added
 
 - Add preliminary GPU support.
 
-## [v0.4.1](https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.4.1) - 2024-09-14
+## [v0.4.1] - 2024-09-14
 
 ### Fixed
 
 - AbstractNFFTs interface: fix 1D transforms.
 
-## [v0.4.0](https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.4.0) - 2024-09-13
+## [v0.4.0] - 2024-09-13
 
 ### Added
 
 - Implement [AbstractNFFTs](https://juliamath.github.io/NFFT.jl/stable/abstract/)
   interface for easier comparison with other NUFFT packages.
+
+  [unreleased]: https://github.com/jipolanco/NonuniformFFTs.jl/compare/v0.6.8...HEAD
+  [v0.6.8]: https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.6.8
+  [v0.6.7]: https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.6.7
+  [v0.6.6]: https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.6.6
+  [v0.6.5]: https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.6.5
+  [v0.6.4]: https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.6.4
+  [v0.6.2]: https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.6.2
+  [v0.6.1]: https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.6.1
+  [v0.6.0]: https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.6.0
+  [v0.5.6]: https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.5.6
+  [v0.5.5]: https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.5.5
+  [v0.5.4]: https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.5.4
+  [v0.5.3]: https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.5.3
+  [v0.5.2]: https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.5.2
+  [v0.5.1]: https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.5.1
+  [v0.5.0]: https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.5.0
+  [v0.4.1]: https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.4.1
+  [v0.4.0]: https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.4.0
