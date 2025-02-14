@@ -19,8 +19,9 @@ will be "folded" to that domain.
 """
 function set_points! end
 
-function set_points!(p::PlanNUFFT{T, N}, xp::NTuple{N, AbstractVector}; kwargs...) where {T, N}
+function set_points!(p::PlanNUFFT{Z, N}, xp::NTuple{N, AbstractVector{T}}; kwargs...) where {Z, N, T}
     (; points, synchronise,) = p
+    T === real(Z) || throw(ArgumentError(lazy"input points must have the same accuracy as the created plan (got $T points for a $Z plan)"))
     timer = get_timer_nowarn(p)
     @timeit timer "Set points" set_points_impl!(p.backend, p.blocks, points, xp, timer; synchronise, kwargs...)
     p

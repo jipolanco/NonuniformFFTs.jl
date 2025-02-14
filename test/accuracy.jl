@@ -107,12 +107,13 @@ function test_nufft_type1_1d(
 
     # Generate some non-uniform random data
     rng = Random.Xoshiro(42)
-    xp = rand(rng, Tr, Np) .* 2π  # non-uniform points in [0, 2π]
-    vp = randn(rng, T, Np)        # random values at points
+    twopi = Tr(2) * π
+    xp = rand(rng, Tr, Np) .* twopi  # non-uniform points in [0, 2π]
+    vp = randn(rng, T, Np)           # random values at points
 
     for i ∈ eachindex(xp)
         δ = rand(rng, (-1, 0, 1))
-        xp[i] += δ * 2π  # allow points outside of main unit cell
+        xp[i] += δ * twopi  # allow points outside of main unit cell
     end
 
     # Compute "exact" non-uniform transform
@@ -167,11 +168,12 @@ function test_nufft_type2_1d(
     # Generate some uniform random data + non-uniform points
     rng = Random.Xoshiro(42)
     ûs = randn(rng, Complex{Tr}, length(ks))
-    xp = rand(rng, Tr, Np) .* 2π  # non-uniform points in [0, 2π]
+    twopi = Tr(2) * π
+    xp = rand(rng, Tr, Np) * twopi  # non-uniform points in [0, 2π]
 
     for i ∈ eachindex(xp)
         δ = rand(rng, (-1, 0, 1))
-        xp[i] += δ * 2π  # allow points outside of main unit cell
+        xp[i] += δ * twopi  # allow points outside of main unit cell
     end
 
     # Compute "exact" type-2 transform (interpolation)

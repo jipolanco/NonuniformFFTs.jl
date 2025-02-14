@@ -120,8 +120,8 @@ end
 end
 
 """
-    exec_type1!(ûs::AbstractArray{<:Complex}, p::PlanNUFFT, vp::AbstractVector{<:Number})
-    exec_type1!(ûs::NTuple{N, AbstractArray{<:Complex}}, p::PlanNUFFT, vp::NTuple{N, AbstractVector{<:Number}})
+    exec_type1!(ûs::AbstractArray{Z}, p::PlanNUFFT{T}, vp::AbstractVector{T})
+    exec_type1!(ûs::NTuple{N,AbstractArray{Z}}, p::PlanNUFFT{T}, vp::NTuple{N,AbstractVector{T}})
 
 Perform type-1 NUFFT (from non-uniform points to uniform grid).
 
@@ -133,13 +133,18 @@ One first needs to set the non-uniform points using [`set_points!`](@ref).
 To perform multiple transforms at once, both `vp` and `ûs` should be a tuple of arrays (second variant above).
 Note that this requires a plan initialised with `ntransforms = Val(N)` (see [`PlanNUFFT`](@ref)).
 
+The input types must satisfy `Z = complex(T)`. This means:
+- `Z = Complex{T}` for real-data transforms (where `T <: Real`);
+- `Z = T` for complex-data transforms (where `T <: Complex`).
+
 See also [`exec_type2!`](@ref).
 """
 function exec_type1! end
 
-function exec_type1!(ûs_k::NTuple{C, AbstractArray{<:Complex}}, p::PlanNUFFT, vp::NTuple{C}) where {C}
+function exec_type1!(ûs_k::NTuple{C, AbstractArray{Z}}, p::PlanNUFFT{T}, vp::NTuple{C, AbstractVector{T}}) where {T, Z, C}
     (; backend, points, kernels, data, blocks, index_map,) = p
     (; us,) = data
+    Z === complex(T) || throw(ArgumentError(lazy"uniform data must have the same accuracy as the created plan (got $Z values for a $T plan)"))
     timer = get_timer_nowarn(p)
 
     @timeit timer "Execute type 1" begin
@@ -199,8 +204,8 @@ function _type1_fft!(data::ComplexNUFFTData)
 end
 
 """
-    exec_type2!(vp::AbstractVector{<:Number}, p::PlanNUFFT, ûs::AbstractArray{<:Complex})
-    exec_type2!(vp::NTuple{N, AbstractVector{<:Number}}, p::PlanNUFFT, ûs::NTuple{N, AbstractArray{<:Complex}})
+    exec_type2!(vp::AbstractVector{T}, p::PlanNUFFT{T}, ûs::AbstractArray{Z})
+    exec_type2!(vp::NTuple{N,AbstractVector{T}}, p::PlanNUFFT{T}, ûs::NTuple{N,AbstractArray{Z}})
 
 Perform type-2 NUFFT (from uniform grid to non-uniform points).
 
@@ -212,13 +217,18 @@ One first needs to set the non-uniform points using [`set_points!`](@ref).
 To perform multiple transforms at once, both `vp` and `ûs` should be a tuple of arrays (second variant above).
 Note that this requires a plan initialised with `ntransforms = Val(N)` (see [`PlanNUFFT`](@ref)).
 
+The input types must satisfy `Z = complex(T)`. This means:
+- `Z = Complex{T}` for real-data transforms (where `T <: Real`);
+- `Z = T` for complex-data transforms (where `T <: Complex`).
+
 See also [`exec_type1!`](@ref).
 """
 function exec_type2! end
 
-function exec_type2!(vp::NTuple{C, AbstractVector}, p::PlanNUFFT, ûs_k::NTuple{C, AbstractArray{<:Complex}}) where {C}
+function exec_type2!(vp::NTuple{C, AbstractVector{T}}, p::PlanNUFFT{T}, ûs_k::NTuple{C, AbstractArray{Z}}) where {T, Z, C}
     (; backend, points, kernels, data, blocks, index_map,) = p
     (; us,) = data
+    Z === complex(T) || throw(ArgumentError(lazy"uniform data must have the same accuracy as the created plan (got $Z values for a $T plan)"))
     timer = get_timer_nowarn(p)
 
     @timeit timer "Execute type 2" begin
