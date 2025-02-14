@@ -83,13 +83,14 @@ end
 
 function spread_from_points!(
         ::CPU,
+        transform_fold::F,
         bd::BlockDataCPU,
         gs,
         evalmode::EvaluationMode,
         us_all::NTuple{C, AbstractArray},
         xp::NTuple{D, AbstractVector},
         vp_all::NTuple{C, AbstractVector},
-    ) where {C, D}
+    ) where {F <: Function, C, D}
     (; block_dims, pointperm, buffers, indices,) = bd
     Ms = map(Kernels.half_support, gs)
     for us ∈ us_all
@@ -123,7 +124,7 @@ function spread_from_points!(
                 else
                     l  # if points have not been permuted
                 end
-                x⃗ = map(xp -> @inbounds(xp[point_idx]), xp)
+                x⃗ = map(xp -> transform_fold(@inbounds(xp[point_idx])), xp)
                 vs = map(vp -> @inbounds(vp[l]), vp_all)  # values at the non-uniform point x⃗
                 spread_from_point_blocked!(gs, evalmode, block, x⃗, vs, Tuple(I₀))
             end

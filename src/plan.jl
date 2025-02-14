@@ -240,7 +240,7 @@ struct PlanNUFFT{
     index_map :: IndexMap
     timer   :: Timer
     synchronise :: Bool
-    point_transform :: PointTransform  # this is currently internal (used for the AbstractNFFTs interface)
+    point_transform_fold :: PointTransform  # folds points onto the [0, 2π) box (+ optional transforms)
 end
 
 # This represents the type of data in Fourier space.
@@ -340,6 +340,16 @@ get_block_dims(::Dims{N}, bdims::NTuple{N}) where {N} = bdims
 maybe_synchronise(backend::KA.Backend, synchronise::Bool) = synchronise && KA.synchronize(backend)  # this doesn't do anything on the CPU
 maybe_synchronise(p::PlanNUFFT) = maybe_synchronise(p.backend, p.synchronise)
 
+# Generate a function that will be used to transform a point and bring it to the [0, 2π) box.
+# Note that point_transform is usually identity (so basically free) and is only used by the
+# AbstractNFFTs interface to switch between NUFFT conventions.
+function generate_point_transform_fold_function(point_transform::F, backend) where {F <: Function}
+    @inline function (x)
+        y = @inline point_transform(x)  # apply optional transform (usually transform === identity, so this is free)
+        @inline to_unit_cell(backend, y)  # fold onto [0, 2π) box
+    end
+end
+
 # This constructor is generally not called directly.
 function _PlanNUFFT(
         ::Type{Z}, kernel::AbstractKernel, h::HalfSupport, σ_wanted, Ns::Dims{D},
@@ -410,9 +420,10 @@ function _PlanNUFFT(
         indmap = KA.allocate(backend, eltype(inds), length(k))
         non_oversampled_indices!(indmap, k, inds; fftshift)
     end
+    point_transform_fold = generate_point_transform_fold_function(point_transform, backend)
     PlanNUFFT(
         kernel_data, backend, kernel_evalmode, σ, points_ref, nufft_data, blocks,
-        fftshift, index_map, timer, synchronise, point_transform,
+        fftshift, index_map, timer, synchronise, point_transform_fold,
     )
 end
 

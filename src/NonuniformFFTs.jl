@@ -111,14 +111,6 @@ function check_nufft_nonuniform_data(p::PlanNUFFT, vp_all::NTuple{C, AbstractVec
     nothing
 end
 
-# Generate a function that will be used to transform a point.
-function transform_fold_function(transform::F, backend) where {F <: Function}
-    @inline function (x)
-        y = @inline transform(x)  # apply optional transform (usually transform === identity, so this is free)
-        @inline to_unit_cell(backend, y)  # fold onto [0, 2π) box
-    end
-end
-
 @kernel function fill_with_zeros_kernel!(us::NTuple)
     I = @index(Global, Linear)
     for u ∈ us
@@ -168,8 +160,7 @@ function exec_type1!(ûs_k::NTuple{C, AbstractArray{Z}}, p::PlanNUFFT{T}, vp::N
         end
 
         @timeit timer "(1) Spreading" begin
-            transform_fold = transform_fold_function(p.point_transform, backend)
-            spread_from_points!(backend, transform_fold, blocks, kernels, p.kernel_evalmode, us, points, vp)
+            spread_from_points!(backend, p.point_transform_fold, blocks, kernels, p.kernel_evalmode, us, points, vp)
             maybe_synchronise(p)
         end
 
@@ -274,8 +265,7 @@ function exec_type2!(vp::NTuple{C, AbstractVector{T}}, p::PlanNUFFT{T}, ûs_k::
         end
 
         @timeit timer "(3) Interpolation" begin
-            transform_fold = transform_fold_function(p.point_transform, backend)
-            interpolate!(backend, transform_fold, blocks, kernels, p.kernel_evalmode, vp, us, points)
+            interpolate!(backend, p.point_transform_fold, blocks, kernels, p.kernel_evalmode, vp, us, points)
             maybe_synchronise(p)
         end
     end

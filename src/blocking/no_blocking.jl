@@ -17,11 +17,12 @@ gpu_method(::NullBlockData) = :global_memory
 end
 
 function set_points_impl!(
-        backend, ::NullBlockData, points_ref::Ref, xp::NTuple{N}, timer;
-        synchronise, transform::F = identity,
-    ) where {F <: Function, N}
+        backend, point_transform_fold::F, ::NullBlockData, points_ref::Ref, timer;
+        synchronise,
+    ) where {F <: Function}
+    xp = points_ref[]
     Np = length(xp[1])
     all(x -> length(x) == Np, xp) || throw(DimensionMismatch("input points must have the same length along all dimensions"))
-    points_ref[] = xp  # copy "pointer"
+    # Nothing to do!
     nothing
 end

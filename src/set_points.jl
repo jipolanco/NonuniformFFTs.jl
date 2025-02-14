@@ -23,7 +23,7 @@ will be "folded" to that domain.
 !!! note "Modifying the points arrays"
 
     As one may expect, this package does not modify the input points, as doing this would be surprising.
-    However, to avoid allocations, it keeps a reference to the point data when performing the transforms.
+    However, to avoid allocations and copies, it keeps a reference to the point data when performing the transforms.
     This means that one should **not** modify the passed arrays between a call to `set_points!` and [`exec_type1!`](@ref)
     or [`exec_type2!`](@ref), as this can lead to wrong results or much worse.
 
@@ -34,10 +34,11 @@ function set_points!(p::PlanNUFFT{Z, N}, xp::NTuple{N, AbstractVector{T}}; kwarg
     (; points_ref, synchronise,) = p
     T === real(Z) || throw(ArgumentError(lazy"input points must have the same accuracy as the created plan (got $T points for a $Z plan)"))
     @assert eltype(points_ref) == typeof(xp)
+    points_ref[] = xp  # copy "pointer"
     timer = get_timer_nowarn(p)
     @timeit timer "Set points" set_points_impl!(
-        p.backend, p.blocks, points_ref, xp, timer;
-        synchronise, transform = p.point_transform, kwargs...,
+        p.backend, p.point_transform_fold, p.blocks, points_ref, timer;
+        synchronise, kwargs...,
     )
     return p
 end

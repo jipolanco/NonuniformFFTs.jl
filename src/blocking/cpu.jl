@@ -78,15 +78,13 @@ end
 function assign_blocks_cpu!(
         blockidx::AbstractVector{<:Integer},
         cumulative_npoints_per_block::AbstractVector{<:Integer},
-        points::NTuple{N},
         xp::NTuple{N},
         Δxs::NTuple{N},
         block_dims::NTuple{N},
         nblocks_per_dir::NTuple{N},
-        sort_points,
         transform_fold::F,
     ) where {N, F}
-    Threads.@threads :static for I ∈ eachindex(points...)
+    Threads.@threads :static for I ∈ eachindex(xp...)
         y⃗ = unsafe_get_point(transform_fold, xp, I)
         n = block_index(y⃗, Δxs, block_dims, nblocks_per_dir)
 
@@ -94,13 +92,6 @@ function assign_blocks_cpu!(
         S = eltype(cumulative_npoints_per_block)
         index_within_block = @inbounds (Atomix.@atomic cumulative_npoints_per_block[n + 1] += one(S))::S
         @inbounds blockidx[I] = index_within_block
-
-        # If points need to be sorted, then we fill `points` some time later (in permute_kernel!).
-        if sort_points === False()
-            for n ∈ 1:N
-                @inbounds points[n][I] = y⃗[n]
-            end
-        end
     end
     nothing
 end
@@ -125,18 +116,19 @@ function sortperm_cpu!(
 end
 
 function set_points_impl!(
-        backend::CPU, bd::BlockDataCPU, points::NTuple{N, AbstractVector}, xp::NTuple{N, AbstractVector}, timer;
-        transform::F = identity,
+        backend::CPU, point_transform_fold::F, bd::BlockDataCPU, points_ref::Ref, timer;
         synchronise,
-    ) where {F <: Function, N}
+    ) where {F <: Function}
     # This technically never happens, but we might use it as a way to disable blocking.
-    isempty(bd.buffers) && return set_points_impl!(backend, NullBlockData(), points, xp, timer; transform, synchronise)
+    isempty(bd.buffers) && return set_points_impl!(backend, point_transform_fold, NullBlockData(), points_ref, timer; synchronise)
 
     (;
         Δxs, cumulative_npoints_per_block, nblocks_per_dir, block_dims,
         blockidx, pointperm, sort_points,
     ) = bd
 
+    xp = points_ref[]
+    N = length(xp)  # number of dimensions
     Np = length(xp[1])
     all(x -> length(x) == Np, xp) || throw(DimensionMismatch("input points must have the same length along all dimensions"))
 
@@ -145,16 +137,13 @@ function set_points_impl!(
     @timeit timer "(0) Init arrays" begin
         resize_no_copy!(blockidx, Np)
         resize_no_copy!(pointperm, Np)
-        resize_no_copy!(points, Np)
         fill!(cumulative_npoints_per_block, 0)
     end
 
-    transform_fold = to_unit_cell_cpu ∘ transform  # apply optional transform, then fold onto [0, 2π) box
-
     @timeit timer "(1) Assign blocks" let
         assign_blocks_cpu!(
-            blockidx, cumulative_npoints_per_block, points, xp, Δxs,
-            block_dims, nblocks_per_dir, sort_points, transform_fold,
+            blockidx, cumulative_npoints_per_block, xp, Δxs,
+            block_dims, nblocks_per_dir, point_transform_fold,
         )
     end
 
@@ -173,22 +162,25 @@ function set_points_impl!(
     @timeit timer "(2) Sort" begin
         sortperm_cpu!(
             pointperm, cumulative_npoints_per_block, blockidx, xp, Δxs,
-            block_dims, nblocks_per_dir, transform_fold,
+            block_dims, nblocks_per_dir, point_transform_fold,
         )
     end
 
     # Write sorted points into `points`.
+    # We need to allocate a new array to hold the result.
     # (This should rather be called "permute" instead of "sort"...)
     # Note: we don't use threading since it seems to be much slower.
     # This is very likely due to false sharing (https://en.wikipedia.org/wiki/False_sharing),
     # since all threads modify the same data in "random" order.
     if sort_points === True()
+        points_ref[] = map(similar, xp)  # allocate new array
+        points = points_ref[]
         @timeit timer "(3) Permute points" begin
             # TODO: combine this with Sort step?
             @inbounds for j ∈ eachindex(pointperm)
                 i = pointperm[j]
                 for n in 1:N
-                    points[n][j] = unsafe_get_point(transform_fold, xp[n], i)
+                    points[n][j] = @inbounds xp[n][i]  # note: we could apply the transform here and not at each NUFFT
                 end
             end
         end
