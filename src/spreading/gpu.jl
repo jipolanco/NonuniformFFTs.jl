@@ -132,14 +132,12 @@ function spread_from_points!(
         gs,
         evalmode::EvaluationMode,
         us::NTuple{C, AbstractGPUArray},
-        x⃗s::StructVector,
+        xp::NTuple{D, AbstractGPUVector},
         vp_all::NTuple{C, AbstractGPUVector},
-    ) where {C}
+    ) where {C, D}
     # Note: the dimensions of arrays have already been checked via check_nufft_nonuniform_data.
-    Base.require_one_based_indexing(x⃗s)  # this is to make sure that all indices match
+    foreach(Base.require_one_based_indexing, xp)  # this is to make sure that all indices match
     foreach(Base.require_one_based_indexing, vp_all)
-
-    xs_comp = StructArrays.components(x⃗s)
 
     # Reinterpret `us` as real arrays, in case they are complex.
     # This is to avoid current issues with atomic operations on complex data
@@ -150,12 +148,13 @@ function spread_from_points!(
     sort_points = get_sort_points(bd)::StaticBool  # False in the case of NullBlockData
 
     if pointperm !== nothing
-        @assert eachindex(pointperm) == eachindex(x⃗s)
+        @assert eachindex(pointperm) == eachindex(xp[1])
     end
 
     # We use dynamically sized kernels to avoid recompilation, since number of points may
     # change from one call to another.
-    ndrange_points = size(x⃗s)  # iterate through points
+    ndrange_points = size(xp[1])  # iterate through points
+    @assert all(x -> size(x) == ndrange_points, xp)
     groupsize_points = default_workgroupsize(backend, ndrange_points)
 
     if sort_points === True()
@@ -175,7 +174,7 @@ function spread_from_points!(
     if method === :global_memory
         let ndrange = ndrange_points, groupsize = groupsize_points
             kernel! = spread_from_point_naive_kernel!(backend, groupsize)
-            kernel!(us_real, gs, evalmode, xs_comp, vp_sorted, pointperm_; ndrange)
+            kernel!(us_real, gs, evalmode, xp, vp_sorted, pointperm_; ndrange)
         end
     elseif method === :shared_memory
         @assert bd isa BlockDataGPU
@@ -193,7 +192,7 @@ function spread_from_points!(
             ndrange = gpu_shmem_ndrange_from_groupsize(groupsize, ngroups)
             kernel! = spread_from_points_shmem_kernel!(backend, groupsize, ndrange)
             kernel!(
-                us_real, gs, evalmode, xs_comp, vp_sorted, pointperm_, bd.cumulative_npoints_per_block,
+                us_real, gs, evalmode, xp, vp_sorted, pointperm_, bd.cumulative_npoints_per_block,
                 HalfSupport(M), block_dims, Val(shmem_size), bd.batch_size,
             )
         end

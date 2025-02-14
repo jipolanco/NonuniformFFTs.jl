@@ -41,13 +41,12 @@ function interpolate!(
         evalmode::EvaluationMode,
         vp_all::NTuple{C, AbstractVector},
         us::NTuple{C, AbstractArray},
-        x⃗s::AbstractVector,
+        xp::NTuple{D, AbstractVector},
     ) where {C, D}
     # Note: the dimensions of arrays have already been checked via check_nufft_nonuniform_data.
-    Base.require_one_based_indexing(x⃗s)  # this is to make sure that all indices match
+    foreach(Base.require_one_based_indexing, xp)  # this is to make sure that all indices match
     foreach(Base.require_one_based_indexing, vp_all)
 
-    xs_comp = StructArrays.components(x⃗s)
     Δxs = map(Kernels.gridstep, gs)
     prefactor = prod(Δxs)  # interpolations need to be multiplied by the volume of a grid cell
 
@@ -55,7 +54,7 @@ function interpolate!(
     sort_points = get_sort_points(bd)::StaticBool  # False in the case of NullBlockData
 
     if pointperm !== nothing
-        @assert eachindex(pointperm) == eachindex(x⃗s)
+        @assert eachindex(pointperm) == eachindex(xp[1])
     end
 
     if sort_points === True()
@@ -68,7 +67,8 @@ function interpolate!(
 
     # We use dynamically sized kernels to avoid recompilation, since number of points may
     # change from one call to another.
-    ndrange_points = size(x⃗s)  # iterate through points
+    ndrange_points = size(xp[1])  # iterate through points
+    @assert all(x -> size(x) == ndrange_points, xp)
     groupsize_points = default_workgroupsize(backend, ndrange_points)
 
     method = gpu_method(bd)
@@ -76,7 +76,7 @@ function interpolate!(
     if method === :global_memory
         let ndrange = ndrange_points, groupsize = groupsize_points
             kernel! = interpolate_to_point_naive_kernel!(backend, groupsize)
-            kernel!(vp_sorted, gs, evalmode, xs_comp, us, pointperm_, prefactor; ndrange)
+            kernel!(vp_sorted, gs, evalmode, xp, us, pointperm_, prefactor; ndrange)
         end
     elseif method === :shared_memory
         @assert bd isa BlockDataGPU
@@ -94,7 +94,7 @@ function interpolate!(
             ndrange = gpu_shmem_ndrange_from_groupsize(groupsize, ngroups)
             kernel! = interpolate_to_points_shmem_kernel!(backend, groupsize, ndrange)
             kernel!(
-                vp_sorted, gs, evalmode, xs_comp, us, pointperm_, bd.cumulative_npoints_per_block,
+                vp_sorted, gs, evalmode, xp, us, pointperm_, bd.cumulative_npoints_per_block,
                 prefactor,
                 block_dims, Val(shmem_size),
             )

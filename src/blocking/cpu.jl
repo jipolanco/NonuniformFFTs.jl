@@ -84,10 +84,10 @@ function assign_blocks_cpu!(
         block_dims::NTuple{N},
         nblocks_per_dir::NTuple{N},
         sort_points,
-        transform::F,
+        transform_fold::F,
     ) where {N, F}
     Threads.@threads :static for I ∈ eachindex(points...)
-        y⃗ = unsafe_get_point(to_unit_cell ∘ transform, xp, I)
+        y⃗ = unsafe_get_point(transform_fold, xp, I)
         n = block_index(y⃗, Δxs, block_dims, nblocks_per_dir)
 
         # Note: here index_within_block is the value *after* incrementing (≥ 1).
@@ -113,10 +113,10 @@ function sortperm_cpu!(
         Δxs::NTuple{N},
         block_dims,
         nblocks_per_dir,
-        transform::F,
+        transform_fold::F,
     ) where {N, F}
     Threads.@threads :static for I ∈ eachindex(xp...)
-        y⃗ = unsafe_get_point(to_unit_cell ∘ transform, xp, I)
+        y⃗ = unsafe_get_point(transform_fold, xp, I)
         n = block_index(y⃗, Δxs, block_dims, nblocks_per_dir)
         @inbounds J = cumulative_npoints_per_block[n] + blockidx[I]
         @inbounds pointperm[J] = I
@@ -149,10 +149,12 @@ function set_points_impl!(
         fill!(cumulative_npoints_per_block, 0)
     end
 
+    transform_fold = to_unit_cell_gpu ∘ transform  # apply optional transform, then fold onto [0, 2π) box
+
     @timeit timer "(1) Assign blocks" let
         assign_blocks_cpu!(
             blockidx, cumulative_npoints_per_block, points, xp, Δxs,
-            block_dims, nblocks_per_dir, sort_points, transform,
+            block_dims, nblocks_per_dir, sort_points, transform_fold,
         )
     end
 
@@ -171,7 +173,7 @@ function set_points_impl!(
     @timeit timer "(2) Sort" begin
         sortperm_cpu!(
             pointperm, cumulative_npoints_per_block, blockidx, xp, Δxs,
-            block_dims, nblocks_per_dir, transform,
+            block_dims, nblocks_per_dir, transform_fold,
         )
     end
 
@@ -186,7 +188,7 @@ function set_points_impl!(
             @inbounds for j ∈ eachindex(pointperm)
                 i = pointperm[j]
                 for n in 1:N
-                    points[n][j] = unsafe_get_point(to_unit_cell ∘ transform, xp[n], i)
+                    points[n][j] = unsafe_get_point(transform_fold, xp[n], i)
                 end
             end
         end

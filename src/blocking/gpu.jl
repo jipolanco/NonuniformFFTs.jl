@@ -73,9 +73,9 @@ end
 get_pointperm(bd::BlockDataGPU) = bd.pointperm
 
 function set_points_impl!(
-        backend::GPU, bd::BlockDataGPU, points::StructVector, xp, timer;
+        backend::GPU, bd::BlockDataGPU, points::NTuple{N, AbstractVector}, xp::NTuple{N, AbstractVector}, timer;
         transform::F = identity, synchronise,
-    ) where {F <: Function}
+    ) where {F <: Function, N}
     (;
         Δxs, cumulative_npoints_per_block, nblocks_per_dir, block_dims,
         blockidx, pointperm, sort_points,
@@ -85,7 +85,10 @@ function set_points_impl!(
     length(points) ≤ npoints_max || error(lazy"number of points exceeds maximum allowed: $npoints_max")
 
     @assert length(cumulative_npoints_per_block) == prod(nblocks_per_dir) + 1
-    Np = length(xp)
+    Np = length(xp[1])
+    all(x -> length(x) == Np, xp) || throw(DimensionMismatch("input points must have the same length along all dimensions"))
+
+    @assert N == length(block_dims)  # number of dimensions
 
     @timeit timer "(0) Init arrays" begin
         resize_no_copy!(blockidx, Np)
@@ -95,18 +98,15 @@ function set_points_impl!(
         maybe_synchronise(backend, synchronise)
     end
 
-    # We avoid passing a StructVector to the kernel, so we pass `points` as a tuple of
-    # vectors. The kernel might fail if `xp` is also a StructVector, which is not imposed
-    # nor disallowed.
-    points_comp = StructArrays.components(points)
+    transform_fold = to_unit_cell_gpu ∘ transform  # apply optional transform, then fold onto [0, 2π) box
 
-    ndrange = size(points)
+    ndrange = size(points[1])
     workgroupsize = default_workgroupsize(backend, ndrange)
     @timeit timer "(1) Assign blocks" let
         local kernel! = assign_blocks_kernel!(backend, workgroupsize)
         kernel!(
-            blockidx, cumulative_npoints_per_block, points_comp, xp, Δxs,
-            block_dims, nblocks_per_dir, sort_points, transform;
+            blockidx, cumulative_npoints_per_block, points, xp, Δxs,
+            block_dims, nblocks_per_dir, sort_points, transform_fold;
             ndrange,
         )
         maybe_synchronise(backend, synchronise)
@@ -125,7 +125,7 @@ function set_points_impl!(
         local kernel! = sortperm_kernel!(backend, workgroupsize)
         kernel!(
             pointperm, cumulative_npoints_per_block, blockidx, xp, Δxs,
-            block_dims, nblocks_per_dir, transform;
+            block_dims, nblocks_per_dir, transform_fold;
             ndrange,
         )
         maybe_synchronise(backend, synchronise)
@@ -136,7 +136,7 @@ function set_points_impl!(
         # TODO: combine this with Sort step?
         @timeit timer "(4) Permute points" let
             local kernel! = permute_kernel!(backend, workgroupsize)
-            kernel!(points_comp, xp, pointperm, transform; ndrange)
+            kernel!(points, xp, pointperm, transform_fold; ndrange)
             maybe_synchronise(backend, synchronise)
         end
     end
@@ -165,17 +165,16 @@ end
 @kernel function assign_blocks_kernel!(
         blockidx::AbstractVector{<:Integer},
         cumulative_npoints_per_block::AbstractVector{IntType},
-        points::NTuple,
+        points::NTuple{D},
         @Const(xp),
         @Const(Δxs),
         @Const(block_dims::NTuple),
         @Const(nblocks_per_dir::NTuple),
         @Const(sort_points),
-        @Const(transform::F),
-    ) where {IntType, F}
+        @Const(transform_fold::F),
+    ) where {IntType, F, D}
     I::IntType = @index(Global, Linear)
-    x⃗ = unsafe_get_point_as_tuple(typeof(Δxs), xp, I)
-    y⃗ = to_unit_cell_gpu(transform(x⃗)) :: NTuple
+    y⃗ = unsafe_get_point(transform_fold, xp, I)
     n = block_index(y⃗, Δxs, block_dims, nblocks_per_dir)::IntType
 
     # Note: here index_within_block is the value *after* incrementing (≥ 1).
@@ -184,7 +183,7 @@ end
 
     # If points need to be sorted, then we fill `points` some time later (in permute_kernel!).
     if sort_points === False()
-        for n ∈ eachindex(x⃗)
+        for n ∈ 1:D
             @inbounds points[n][I] = y⃗[n]
         end
     end
@@ -200,11 +199,10 @@ end
         @Const(Δxs),
         @Const(block_dims),
         @Const(nblocks_per_dir),
-        @Const(transform::F),
+        @Const(transform_fold::F),
     ) where {F}
     I = @index(Global, Linear)
-    x⃗ = unsafe_get_point_as_tuple(typeof(Δxs), xp, I)
-    y⃗ = to_unit_cell_gpu(transform(x⃗)) :: NTuple
+    y⃗ = unsafe_get_point(transform_fold, xp, I)
     n = block_index(y⃗, Δxs, block_dims, nblocks_per_dir)
     @inbounds J = cumulative_npoints_per_block[n] + blockidx[I]
     @inbounds pointperm[J] = I
@@ -212,17 +210,15 @@ end
 end
 
 @kernel function permute_kernel!(
-        points::NTuple,
-        @Const(xp::AbstractVector),
-        @Const(perm::AbstractVector{<:Integer}),
-        @Const(transform::F),
-    ) where {F}
-    i = @index(Global, Linear)
-    j = @inbounds perm[i]
-    x⃗ = @inbounds xp[j]
-    y⃗ = to_unit_cell_gpu(transform(Tuple(x⃗))) :: NTuple
-    for n ∈ eachindex(x⃗)
-        @inbounds points[n][i] = y⃗[n]
+        points::NTuple{D},
+        @Const(xp::NTuple{D}),
+        @Const(pointperm::AbstractVector{<:Integer}),
+        @Const(transform_fold::F),
+    ) where {F, D}
+    j = @index(Global, Linear)
+    i = @inbounds pointperm[j]
+    for n in 1:D
+        @inbounds points[n][j] = unsafe_get_point(transform_fold, xp[n], i)
     end
     nothing
 end

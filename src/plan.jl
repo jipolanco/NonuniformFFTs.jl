@@ -67,7 +67,9 @@ Construct a plan for performing non-uniform FFTs (NUFFTs).
 The created plan contains all data needed to perform NUFFTs for non-uniform data of type `T`
 (`ComplexF64` by default) and uniform data with dimensions `dims`.
 
-# Optional keyword arguments
+# Extended help
+
+## Optional keyword arguments
 
 - `ntransforms = Val(1)`: the number of simultaneous transforms to perform.
   This is useful if one wants to transform multiple scalar quantities at the same
@@ -76,7 +78,7 @@ The created plan contains all data needed to perform NUFFTs for non-uniform data
 - `backend::KernelAbstractions.Backend = CPU()`: corresponds to the device type where
   everything will be executed. This could be e.g. `CUDABackend()` if CUDA.jl is loaded.
 
-## NUFFT parameters
+### NUFFT parameters
 
 The following parameters control transform accuracy. The default values give a relative accuracy of
 the order of ``10^{-7}`` for `Float64` or `ComplexF64` data.
@@ -89,7 +91,7 @@ the order of ``10^{-7}`` for `Float64` or `ComplexF64` data.
 
 - `kernel::AbstractKernel = BackwardsKaiserBesselKernel()`: convolution kernel used for NUFFTs.
 
-## Main performance parameters
+### Main performance parameters
 
 - `kernel_evalmode`: method used for kernel evaluation.
   The default is [`FastApproximation`](@ref) on CPU, which will attempt to use a fast
@@ -132,7 +134,7 @@ the order of ``10^{-7}`` for `Float64` or `ComplexF64` data.
 
 - `fftw_flags = FFTW.MEASURE`: parameters passed to the FFTW planner when `backend = CPU()`.
 
-## Other performance parameters
+### Other performance parameters
 
 These are more advanced performance parameters which may disappear or whose behaviour may
 change in the future.
@@ -155,7 +157,7 @@ change in the future.
   When tuning performance, it is helpful to print the plan (as in `println(plan)`) to see
   the actual block and batch sizes.
 
-## Other parameters
+### Other parameters
 
 - `fftshift = false`: determines the order of wavenumbers in uniform space.
   If `false` (default), the same order used by FFTW is used, with positive wavenumbers first
@@ -176,7 +178,7 @@ change in the future.
   Enabling this is needed for accurate timings in `p.timer` when computing on a GPU, but may
   result in reduced performance.
 
-# FFT size and performance
+## FFT size and performance
 
 For performance reasons, when doing FFTs one usually wants the size of the input along each
 dimension to be a power of 2 (ideally), or the product of powers of small prime numbers (2,
@@ -198,7 +200,7 @@ that can be written as the product of powers of 2, 3 and 5
 (see [`nextprod`](https://docs.julialang.org/en/v1/base/math/#Base.nextprod)).
 Most often, the result will be greater than or equal to ``σN``.
 
-# Using real non-uniform data
+## Using real non-uniform data
 
 In some applications, the non-uniform data to be transformed is purely real.
 In this case, one may pass `Float64` or `Float32` as the first argument.

@@ -41,6 +41,7 @@ function set_points!(p::PlanNUFFT, xp::AbstractVector; kwargs...)
 end
 
 # Kept for backwards compatibility
+# TODO: move to an extension?
 set_points!(p::PlanNUFFT, xp::StructVector; kwargs...) = set_points(p, StructArrays.components(xp); kwargs...)
 
 # Matrix as input. This version will also create a copy to switch to (xs, ys, ...) format.
