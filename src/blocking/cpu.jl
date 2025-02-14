@@ -78,17 +78,16 @@ end
 function assign_blocks_cpu!(
         blockidx::AbstractVector{<:Integer},
         cumulative_npoints_per_block::AbstractVector{<:Integer},
-        points::NTuple,
-        xp::AbstractVector,
-        Δxs::NTuple,
-        block_dims::NTuple,
-        nblocks_per_dir::NTuple,
+        points::NTuple{N},
+        xp::NTuple{N},
+        Δxs::NTuple{N},
+        block_dims::NTuple{N},
+        nblocks_per_dir::NTuple{N},
         sort_points,
         transform::F,
-    ) where {F}
-    Threads.@threads :static for I ∈ eachindex(points[1])
-        x⃗ = unsafe_get_point_as_tuple(typeof(Δxs), xp, I)
-        y⃗ = to_unit_cell(transform(x⃗)) :: NTuple
+    ) where {N, F}
+    Threads.@threads :static for I ∈ eachindex(points...)
+        y⃗ = unsafe_get_point(to_unit_cell ∘ transform, xp, I)
         n = block_index(y⃗, Δxs, block_dims, nblocks_per_dir)
 
         # Note: here index_within_block is the value *after* incrementing (≥ 1).
@@ -98,7 +97,7 @@ function assign_blocks_cpu!(
 
         # If points need to be sorted, then we fill `points` some time later (in permute_kernel!).
         if sort_points === False()
-            for n ∈ eachindex(x⃗)
+            for n ∈ 1:N
                 @inbounds points[n][I] = y⃗[n]
             end
         end
@@ -110,15 +109,14 @@ function sortperm_cpu!(
         pointperm::AbstractVector,
         cumulative_npoints_per_block,
         blockidx,
-        xp::AbstractVector,
-        Δxs::NTuple,
+        xp::NTuple{N},
+        Δxs::NTuple{N},
         block_dims,
         nblocks_per_dir,
         transform::F,
-    ) where {F}
-    Threads.@threads :static for I ∈ eachindex(xp)
-        x⃗ = unsafe_get_point_as_tuple(typeof(Δxs), xp, I)
-        y⃗ = to_unit_cell(transform(x⃗)) :: NTuple
+    ) where {N, F}
+    Threads.@threads :static for I ∈ eachindex(xp...)
+        y⃗ = unsafe_get_point(to_unit_cell ∘ transform, xp, I)
         n = block_index(y⃗, Δxs, block_dims, nblocks_per_dir)
         @inbounds J = cumulative_npoints_per_block[n] + blockidx[I]
         @inbounds pointperm[J] = I
@@ -127,10 +125,10 @@ function sortperm_cpu!(
 end
 
 function set_points_impl!(
-        backend::CPU, bd::BlockDataCPU, points::StructVector, xp, timer;
+        backend::CPU, bd::BlockDataCPU, points::NTuple{N, AbstractVector}, xp::NTuple{N, AbstractVector}, timer;
         transform::F = identity,
         synchronise,
-    ) where {F <: Function}
+    ) where {F <: Function, N}
     # This technically never happens, but we might use it as a way to disable blocking.
     isempty(bd.buffers) && return set_points_impl!(backend, NullBlockData(), points, xp, timer; transform, synchronise)
 
@@ -139,11 +137,12 @@ function set_points_impl!(
         blockidx, pointperm, sort_points,
     ) = bd
 
-    N = type_length(eltype(xp))  # = number of dimensions
-    @assert N == length(block_dims)
+    Np = length(xp[1])
+    all(x -> length(x) == Np, xp) || throw(DimensionMismatch("input points must have the same length along all dimensions"))
+
+    @assert N == length(block_dims)  # number of dimensions
 
     @timeit timer "(0) Init arrays" begin
-        Np = length(xp)
         resize_no_copy!(blockidx, Np)
         resize_no_copy!(pointperm, Np)
         resize_no_copy!(points, Np)
@@ -151,9 +150,8 @@ function set_points_impl!(
     end
 
     @timeit timer "(1) Assign blocks" let
-        points_comp = StructArrays.components(points)
         assign_blocks_cpu!(
-            blockidx, cumulative_npoints_per_block, points_comp, xp, Δxs,
+            blockidx, cumulative_npoints_per_block, points, xp, Δxs,
             block_dims, nblocks_per_dir, sort_points, transform,
         )
     end
@@ -187,9 +185,9 @@ function set_points_impl!(
             # TODO: combine this with Sort step?
             @inbounds for j ∈ eachindex(pointperm)
                 i = pointperm[j]
-                x⃗ = xp[i]
-                y⃗ = to_unit_cell(transform(NTuple{N}(x⃗)))  # converts `x⃗` to Tuple if it's an SVector
-                points[j] = y⃗
+                for n in 1:N
+                    points[n][j] = unsafe_get_point(to_unit_cell ∘ transform, xp[n], i)
+                end
             end
         end
     end

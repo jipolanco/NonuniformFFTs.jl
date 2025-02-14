@@ -219,7 +219,7 @@ struct PlanNUFFT{
         T <: AbstractFloat,  # this is real(Z)
         Kernels <: NTuple{N, AbstractKernelData{<:AbstractKernel, M, T}},
         KernelEvalMode <: EvaluationMode,
-        Points <: StructVector{NTuple{N, Treal}},
+        Points <: NTuple{N, AbstractVector{T}},  # (xs[:], ys[:], ...)
         Data <: AbstractNUFFTData{Z, N, Nc},
         Blocks <: AbstractBlockData,
         IndexMap <: NTuple{N, AbstractVector{Int}},
@@ -377,7 +377,7 @@ function _PlanNUFFT(
     else
         foreach(init_fourier_coefficients!, kernel_data, ks)
     end
-    points = StructVector(ntuple(_ -> KA.allocate(backend, T, 0), Val(D)))  # empty vector of points
+    points = ntuple(_ -> KA.allocate(backend, T, 0), Val(D))  # empty vector of points
     if block_size === nothing
         blocks = NullBlockData()  # disable blocking (→ can't use multithreading when spreading)
         backend isa CPU && FFTW.set_num_threads(1)   # also disable FFTW threading (avoids allocations)

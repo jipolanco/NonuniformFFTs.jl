@@ -103,7 +103,7 @@ end
 function check_nufft_nonuniform_data(p::PlanNUFFT, vp_all::NTuple{C, AbstractVector}) where {C}
     Nc = ntransforms(p)
     C == Nc || throw(DimensionMismatch(lazy"wrong amount of data vectors (expected a tuple of $Nc vectors)"))
-    Np = length(p.points)
+    Np = length(p.points[1])
     for vp ∈ vp_all
         Nv = length(vp)
         Nv == Np || throw(DimensionMismatch(lazy"wrong length of data vector (it should match the number of points $Np, got length $Nv)"))

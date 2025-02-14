@@ -5,13 +5,13 @@ function interpolate!(
         evalmode::EvaluationMode,
         vp_all::NTuple{C, AbstractVector},
         us::NTuple{C, AbstractArray},
-        x⃗s::AbstractVector,
-    ) where {C}
+        x⃗s::NTuple{N, AbstractVector},
+    ) where {C, N}
     # Note: the dimensions of arrays have already been checked via check_nufft_nonuniform_data.
-    Base.require_one_based_indexing(x⃗s)  # this is to make sure that all indices match
+    foreach(Base.require_one_based_indexing, x⃗s)  # this is to make sure that all indices match
     foreach(Base.require_one_based_indexing, vp_all)
-    for i ∈ eachindex(x⃗s)  # iterate over all points
-        x⃗ = @inbounds x⃗s[i]
+    for i ∈ eachindex(x⃗s[1], vp_all[1])  # iterate over all points
+        x⃗ = map(xp -> @inbounds(xp[i]), x⃗s)
         vs = interpolate(gs, evalmode, us, x⃗) :: NTuple{C}  # non-uniform values at point x⃗
         for (vp, v) ∈ zip(vp_all, vs)
             @inbounds vp[i] = v

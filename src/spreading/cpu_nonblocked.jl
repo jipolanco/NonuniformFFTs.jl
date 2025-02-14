@@ -44,14 +44,14 @@ function spread_from_points!(
         gs,
         evalmode::EvaluationMode,
         us_all::NTuple{C, AbstractArray},
-        x⃗s::AbstractVector,
+        x⃗s::NTuple{N, AbstractVector},
         vp_all::NTuple{C, AbstractVector},
-    ) where {C}
+    ) where {C, N}
     # Note: the dimensions of arrays have already been checked via check_nufft_nonuniform_data.
-    Base.require_one_based_indexing(x⃗s)  # this is to make sure that all indices match
+    foreach(Base.require_one_based_indexing, x⃗s)  # this is to make sure that all indices match
     foreach(Base.require_one_based_indexing, vp_all)
-    for i ∈ eachindex(x⃗s)  # iterate over all points
-        x⃗ = @inbounds x⃗s[i]
+    for i ∈ eachindex(x⃗s[1], vp_all[1])  # iterate over all points
+        x⃗ = map(xp -> @inbounds(xp[i]), x⃗s)
         vs = map(vp -> @inbounds(vp[i]), vp_all)  # non-uniform values at point x⃗
         spread_from_point!(gs, evalmode, us_all, x⃗, vs)
     end

@@ -96,9 +96,9 @@ function interpolate!(
         gs,
         evalmode::EvaluationMode,
         vp_all::NTuple{C, AbstractVector},
-        us::NTuple{C, AbstractArray},
-        x⃗s::AbstractArray,
-    ) where {C}
+        us_all::NTuple{C, AbstractArray},
+        xp::NTuple{D, AbstractVector},
+    ) where {C, D}
     (; block_dims, pointperm, buffers, indices,) = bd
     Ms = map(Kernels.half_support, gs)
     Nt = length(buffers)  # usually equal to the number of threads
@@ -121,18 +121,19 @@ function interpolate!(
             I₀ = indices[j]
             Ia = I₀ + oneunit(I₀) - CartesianIndex(Ms)
             Ib = I₀ + CartesianIndex(block_dims) + CartesianIndex(Ms)
-            inds_split = split_periodic(Ia, Ib, size(first(us)))
-            copy_to_block!(block, us, inds_split)
+            inds_split = split_periodic(Ia, Ib, size(first(us_all)))
+            copy_to_block!(block, us_all, inds_split)
 
             # Iterate over all points in the current block
             for k ∈ (a + 1):b
                 l = pointperm[k]
                 # @assert bd.blockidx[l] == j  # check that point is really in the current block
-                if bd.sort_points === True()
-                    x⃗ = x⃗s[k]  # if points have been permuted (may be slightly faster here, but requires permutation in set_points!)
+                point_idx = if bd.sort_points === True()
+                    k  # if points have been permuted (may be slightly faster here, but requires permutation in set_points!)
                 else
-                    x⃗ = x⃗s[l]  # if points have not been permuted
+                    l  # if points have not been permuted
                 end
+                x⃗ = map(xp -> @inbounds(xp[point_idx]), xp)
                 vs = interpolate_blocked(gs, evalmode, block, x⃗, Tuple(I₀)) :: NTuple{C}  # non-uniform values at point x⃗
                 for (vp, v) ∈ zip(vp_all, vs)
                     @inbounds vp[l] = v
