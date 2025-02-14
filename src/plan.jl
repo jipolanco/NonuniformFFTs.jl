@@ -227,6 +227,7 @@ struct PlanNUFFT{
         Blocks <: AbstractBlockData,
         IndexMap <: NTuple{N, AbstractVector{Int}},
         Timer <: TimerOutput,
+        PointTransform <: Function,
     }
     kernels :: Kernels
     backend :: Backend  # CPU, GPU, ...
@@ -239,6 +240,7 @@ struct PlanNUFFT{
     index_map :: IndexMap
     timer   :: Timer
     synchronise :: Bool
+    point_transform :: PointTransform  # this is currently internal (used for the AbstractNFFTs interface)
 end
 
 # This represents the type of data in Fourier space.
@@ -352,7 +354,8 @@ function _PlanNUFFT(
         synchronise::Bool = false,
         gpu_method::Symbol = :global_memory,
         gpu_batch_size::Val = Val(DEFAULT_GPU_BATCH_SIZE),  # currently only used in shared-memory GPU spreading
-    ) where {Z <: Number, D}
+        point_transform::F = identity,
+    ) where {Z <: Number, D, F <: Function}
     ks = init_wavenumbers(Z, Ns)
     # Determine dimensions of oversampled grid.
     Ñs = ntuple(Val(D)) do d
@@ -409,7 +412,7 @@ function _PlanNUFFT(
     end
     PlanNUFFT(
         kernel_data, backend, kernel_evalmode, σ, points_ref, nufft_data, blocks,
-        fftshift, index_map, timer, synchronise,
+        fftshift, index_map, timer, synchronise, point_transform,
     )
 end
 

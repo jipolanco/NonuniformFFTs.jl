@@ -14,8 +14,19 @@ In multiple dimensions, `points` may be passed as:
 
 The first format should be preferred if one wants to avoid extra allocations.
 
+For convenience (and backwards compatibility), one can also pass a `StructVector` from the
+StructArrays.jl package, which is equivalent to the first option above.
+
 The points are allowed to be outside of the periodic cell ``[0, 2π)^d``, in which case they
 will be "folded" to that domain.
+
+!!! note "Modifying the points arrays"
+
+    As one may expect, this package does not modify the input points, as doing this would be surprising.
+    However, to avoid allocations, it keeps a reference to the point data when performing the transforms.
+    This means that one should **not** modify the passed arrays between a call to `set_points!` and [`exec_type1!`](@ref)
+    or [`exec_type2!`](@ref), as this can lead to wrong results or much worse.
+
 """
 function set_points! end
 
@@ -23,8 +34,11 @@ function set_points!(p::PlanNUFFT{Z, N}, xp::NTuple{N, AbstractVector{T}}; kwarg
     (; points, synchronise,) = p
     T === real(Z) || throw(ArgumentError(lazy"input points must have the same accuracy as the created plan (got $T points for a $Z plan)"))
     timer = get_timer_nowarn(p)
-    @timeit timer "Set points" set_points_impl!(p.backend, p.blocks, points, xp, timer; synchronise, kwargs...)
-    p
+    @timeit timer "Set points" set_points_impl!(
+        p.backend, p.blocks, points, xp, timer;
+        synchronise, transform = p.point_transform, kwargs...,
+    )
+    return p
 end
 
 # 1D case
