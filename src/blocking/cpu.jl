@@ -73,7 +73,7 @@ function BlockDataCPU(
     )
 end
 
-# This is similar to assign_blocks_kernel! (GPU implementation), but using `to_unit_cell`
+# This is similar to assign_blocks_kernel! (GPU implementation), but using `to_unit_cell_cpu`
 # instead of `to_unit_cell_gpu` (which does seem to make a difference in performance).
 function assign_blocks_cpu!(
         blockidx::AbstractVector{<:Integer},
@@ -149,7 +149,7 @@ function set_points_impl!(
         fill!(cumulative_npoints_per_block, 0)
     end
 
-    transform_fold = to_unit_cell_gpu ∘ transform  # apply optional transform, then fold onto [0, 2π) box
+    transform_fold = to_unit_cell_cpu ∘ transform  # apply optional transform, then fold onto [0, 2π) box
 
     @timeit timer "(1) Assign blocks" let
         assign_blocks_cpu!(

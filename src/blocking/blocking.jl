@@ -3,10 +3,13 @@ abstract type AbstractBlockData end
 get_block_dims(bd::AbstractBlockData) = bd.block_dims
 get_sort_points(bd::AbstractBlockData) = bd.sort_points
 
-# "Folds" location onto unit cell [0, 2π]ᵈ.
-to_unit_cell(x⃗::Tuple) = map(to_unit_cell, x⃗)
+@inline to_unit_cell(::CPU, x) = to_unit_cell_cpu(x)
+@inline to_unit_cell(::GPU, x) = to_unit_cell_gpu(x)
 
-function to_unit_cell(x::Real)
+# "Folds" location onto unit cell [0, 2π]ᵈ.
+to_unit_cell_cpu(x⃗::Tuple) = map(to_unit_cell_cpu, x⃗)
+
+function to_unit_cell_cpu(x::Real)
     L = oftype(x, 2π)
     while x < 0
         x += L

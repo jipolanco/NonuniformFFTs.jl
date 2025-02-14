@@ -31,11 +31,12 @@ will be "folded" to that domain.
 function set_points! end
 
 function set_points!(p::PlanNUFFT{Z, N}, xp::NTuple{N, AbstractVector{T}}; kwargs...) where {Z, N, T}
-    (; points, synchronise,) = p
+    (; points_ref, synchronise,) = p
     T === real(Z) || throw(ArgumentError(lazy"input points must have the same accuracy as the created plan (got $T points for a $Z plan)"))
+    @assert eltype(points_ref) == typeof(xp)
     timer = get_timer_nowarn(p)
     @timeit timer "Set points" set_points_impl!(
-        p.backend, p.blocks, points, xp, timer;
+        p.backend, p.blocks, points_ref, xp, timer;
         synchronise, transform = p.point_transform, kwargs...,
     )
     return p
