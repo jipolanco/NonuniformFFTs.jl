@@ -9,7 +9,8 @@ using StaticArrays: MVector
         @Const(us::NTuple{C}),
         @Const(pointperm),
         @Const(prefactor::Real),    # = volume of a grid cell = prod(Δxs)
-    ) where {C, D}
+        @Const(transform_fold::F),
+    ) where {C, D, F <: Function}
     i = @index(Global, Linear)
 
     j = if pointperm === nothing
@@ -23,7 +24,7 @@ using StaticArrays: MVector
     # don't perform atomic operations. This is why the code is simpler here.
     Ns = size(first(us))  # grid dimensions
 
-    indvals = get_inds_vals_gpu(gs, evalmode, points, Ns, j)
+    indvals = get_inds_vals_gpu(transform_fold, gs, evalmode, points, Ns, j)
 
     v⃗ = interpolate_from_arrays_gpu(us, indvals, Ns, prefactor)
 
@@ -36,13 +37,14 @@ end
 
 function interpolate!(
         backend::GPU,
+        transform_fold::F,
         bd::Union{BlockDataGPU, NullBlockData},
         gs::NTuple{D},
         evalmode::EvaluationMode,
         vp_all::NTuple{C, AbstractVector},
         us::NTuple{C, AbstractArray},
         xp::NTuple{D, AbstractVector},
-    ) where {C, D}
+    ) where {F <: Function, C, D}
     # Note: the dimensions of arrays have already been checked via check_nufft_nonuniform_data.
     foreach(Base.require_one_based_indexing, xp)  # this is to make sure that all indices match
     foreach(Base.require_one_based_indexing, vp_all)
@@ -76,7 +78,7 @@ function interpolate!(
     if method === :global_memory
         let ndrange = ndrange_points, groupsize = groupsize_points
             kernel! = interpolate_to_point_naive_kernel!(backend, groupsize)
-            kernel!(vp_sorted, gs, evalmode, xp, us, pointperm_, prefactor; ndrange)
+            kernel!(vp_sorted, gs, evalmode, xp, us, pointperm_, prefactor, transform_fold; ndrange)
         end
     elseif method === :shared_memory
         @assert bd isa BlockDataGPU
@@ -96,7 +98,7 @@ function interpolate!(
             kernel!(
                 vp_sorted, gs, evalmode, xp, us, pointperm_, bd.cumulative_npoints_per_block,
                 prefactor,
-                block_dims, Val(shmem_size),
+                block_dims, Val(shmem_size), transform_fold,
             )
         end
     end
@@ -211,7 +213,8 @@ end
         @Const(prefactor::Real),    # = volume of a grid cell = prod(Δxs)
         ::Val{block_dims},
         ::Val{shmem_size},  # this is a bit redundant, but seems to be required for CPU backends (used in tests)
-    ) where {C, D, Z <: Number, block_dims, shmem_size}
+        @Const(transform_fold::F),
+    ) where {C, D, Z <: Number, block_dims, shmem_size, F <: Function}
 
     @uniform begin
         groupsize = @groupsize()
@@ -263,7 +266,7 @@ end
             # TODO: can we do this just once for all components? (if C > 1)
             indvals = ntuple(Val(D)) do d
                 @inline
-                x = @inbounds points[d][j]
+                x = transform_fold(@inbounds points[d][j])
                 gdata = Kernels.evaluate_kernel(evalmode, gs[d], x)
                 local i₀ = gdata.i - ishifts_sm[d]
                 local vals = gdata.values    # kernel values

@@ -173,10 +173,10 @@ function set_points_impl!(
     # This is very likely due to false sharing (https://en.wikipedia.org/wiki/False_sharing),
     # since all threads modify the same data in "random" order.
     if sort_points === True()
-        points_ref[] = map(similar, xp)  # allocate new array
-        points = points_ref[]
-        @timeit timer "(3) Permute points" begin
+        @timeit timer "(3) Permute points" let
             # TODO: combine this with Sort step?
+            points_ref[] = map(similar, xp)  # allocate new array
+            points = points_ref[]
             @inbounds for j ∈ eachindex(pointperm)
                 i = pointperm[j]
                 for n in 1:N

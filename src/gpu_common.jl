@@ -101,15 +101,15 @@ _invpow(x, ::Val{3}) = cbrt(x)
 _invpow(x, ::Val{4}) = sqrt(sqrt(x))
 
 # This is called from the global memory (naive) implementation of spreading and interpolation kernels.
-@inline function get_inds_vals_gpu(gs::NTuple{D}, evalmode::EvaluationMode, points::NTuple{D}, Ns::NTuple{D}, j::Integer) where {D}
+@inline function get_inds_vals_gpu(f::F, gs::NTuple{D}, evalmode::EvaluationMode, points::NTuple{D}, Ns::NTuple{D}, j::Integer) where {F, D}
     ntuple(Val(D)) do n
         @inline
-        get_inds_vals_gpu(gs[n], evalmode, points[n], Ns[n], j)
+        get_inds_vals_gpu(f, gs[n], evalmode, points[n], Ns[n], j)
     end
 end
 
-@inline function get_inds_vals_gpu(g::AbstractKernelData, evalmode::EvaluationMode, points::AbstractVector, N::Integer, j::Integer)
-    x = @inbounds points[j]
+@inline function get_inds_vals_gpu(f::F, g::AbstractKernelData, evalmode::EvaluationMode, points::AbstractVector, N::Integer, j::Integer) where {F}
+    x = f(@inbounds points[j])  # this will typically fold points to [0, 2π) box
     gdata = Kernels.evaluate_kernel(evalmode, g, x)
     vals = gdata.values    # kernel values
     M = Kernels.half_support(g)

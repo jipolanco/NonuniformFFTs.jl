@@ -73,40 +73,39 @@ end
 get_pointperm(bd::BlockDataGPU) = bd.pointperm
 
 function set_points_impl!(
-        backend::GPU, bd::BlockDataGPU, points::NTuple{N, AbstractVector}, xp::NTuple{N, AbstractVector}, timer;
-        transform::F = identity, synchronise,
-    ) where {F <: Function, N}
+        backend::GPU, point_transform_fold::F, bd::BlockDataGPU, points_ref::Ref, timer;
+        synchronise,
+    ) where {F <: Function}
     (;
         Δxs, cumulative_npoints_per_block, nblocks_per_dir, block_dims,
         blockidx, pointperm, sort_points,
     ) = bd
 
-    npoints_max = typemax(eltype(bd.pointperm))
-    length(points) ≤ npoints_max || error(lazy"number of points exceeds maximum allowed: $npoints_max")
-
+    xp = points_ref[]
+    N = length(xp)  # number of dimensions
     @assert length(cumulative_npoints_per_block) == prod(nblocks_per_dir) + 1
     Np = length(xp[1])
     all(x -> length(x) == Np, xp) || throw(DimensionMismatch("input points must have the same length along all dimensions"))
 
     @assert N == length(block_dims)  # number of dimensions
 
+    npoints_max = typemax(eltype(bd.pointperm))
+    length(xp) ≤ npoints_max || error(lazy"number of points exceeds maximum allowed: $npoints_max")
+
     @timeit timer "(0) Init arrays" begin
         resize_no_copy!(blockidx, Np)
         resize_no_copy!(pointperm, Np)
-        resize_no_copy!(points, Np)
         fill!(cumulative_npoints_per_block, 0)
         maybe_synchronise(backend, synchronise)
     end
 
-    transform_fold = to_unit_cell_gpu ∘ transform  # apply optional transform, then fold onto [0, 2π) box
-
-    ndrange = size(points[1])
+    ndrange = size(xp[1])
     workgroupsize = default_workgroupsize(backend, ndrange)
     @timeit timer "(1) Assign blocks" let
         local kernel! = assign_blocks_kernel!(backend, workgroupsize)
         kernel!(
-            blockidx, cumulative_npoints_per_block, points, xp, Δxs,
-            block_dims, nblocks_per_dir, sort_points, transform_fold;
+            blockidx, cumulative_npoints_per_block, xp, Δxs,
+            block_dims, nblocks_per_dir, point_transform_fold;
             ndrange,
         )
         maybe_synchronise(backend, synchronise)
@@ -125,18 +124,21 @@ function set_points_impl!(
         local kernel! = sortperm_kernel!(backend, workgroupsize)
         kernel!(
             pointperm, cumulative_npoints_per_block, blockidx, xp, Δxs,
-            block_dims, nblocks_per_dir, transform_fold;
+            block_dims, nblocks_per_dir, point_transform_fold;
             ndrange,
         )
         maybe_synchronise(backend, synchronise)
     end
 
     # `pointperm` now contains the permutation needed to sort points
+    # We need to allocate a new array to hold the result.
     if sort_points === True()
         # TODO: combine this with Sort step?
         @timeit timer "(4) Permute points" let
+            points_ref[] = map(similar, xp)  # allocate new array
+            points = points_ref[]
             local kernel! = permute_kernel!(backend, workgroupsize)
-            kernel!(points, xp, pointperm, transform_fold; ndrange)
+            kernel!(points, xp, pointperm, point_transform_fold; ndrange)
             maybe_synchronise(backend, synchronise)
         end
     end
@@ -165,14 +167,12 @@ end
 @kernel function assign_blocks_kernel!(
         blockidx::AbstractVector{<:Integer},
         cumulative_npoints_per_block::AbstractVector{IntType},
-        points::NTuple{D},
         @Const(xp),
         @Const(Δxs),
         @Const(block_dims::NTuple),
         @Const(nblocks_per_dir::NTuple),
-        @Const(sort_points),
         @Const(transform_fold::F),
-    ) where {IntType, F, D}
+    ) where {IntType, F}
     I::IntType = @index(Global, Linear)
     y⃗ = unsafe_get_point(transform_fold, xp, I)
     n = block_index(y⃗, Δxs, block_dims, nblocks_per_dir)::IntType
@@ -180,13 +180,6 @@ end
     # Note: here index_within_block is the value *after* incrementing (≥ 1).
     index_within_block = @inbounds (Atomix.@atomic cumulative_npoints_per_block[n + 1] += one(IntType))::IntType
     @inbounds blockidx[I] = index_within_block
-
-    # If points need to be sorted, then we fill `points` some time later (in permute_kernel!).
-    if sort_points === False()
-        for n ∈ 1:D
-            @inbounds points[n][I] = y⃗[n]
-        end
-    end
 
     nothing
 end
