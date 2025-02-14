@@ -53,7 +53,7 @@ function set_points!(p::PlanNUFFT, xp::AbstractMatrix{T}; kwargs...) where {T}
     if N == 1
         xp_vec = vec(xp)
     else
-        xp_vec = ntuple(d -> xp[d, :], Val(N))
+        xp_vec = ntuple(d -> xp[d, :], Val(N))  # creates copies!
     end
     set_points!(p, xp_vec; kwargs...)
 end

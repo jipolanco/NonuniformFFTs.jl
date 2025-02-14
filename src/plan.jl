@@ -141,10 +141,11 @@ change in the future.
 
 - `sort_points = False()`: whether to internally permute the order of the non-uniform points.
   This can be enabled by passing `sort_points = True()`.
-  Ignored when `block_size = nothing` (which disables spatial sorting).
-  In this case, more time will be spent in [`set_points!`](@ref) and less time on the actual transforms.
+  This will generally require extra allocations since the input points need to be copied onto a new container.
+  If this is enabled, more time will be spent in [`set_points!`](@ref) and less time on the actual transforms.
   This can improve performance if executing multiple transforms on the same non-uniform points.
   Note that, even when enabled, this does not modify the `points` argument passed to `set_points!`.
+  This option is ignored when `block_size = nothing` (which disables spatial sorting).
 
 - `gpu_batch_size = Val(Np)`: minimum batch size used in type-1 transforms when `gpu_method = :shared_memory`.
   The idea is that, to avoid inefficient atomic operations on shared-memory arrays, we process
@@ -221,7 +222,7 @@ struct PlanNUFFT{
         T <: AbstractFloat,  # this is real(Z)
         Kernels <: NTuple{N, AbstractKernelData{<:AbstractKernel, M, T}},
         KernelEvalMode <: EvaluationMode,
-        Points <: NTuple{N, AbstractVector{T}},  # (xs[:], ys[:], ...)
+        PointsRef <: Ref{<:NTuple{N, AbstractVector{T}}},  # (xs[:], ys[:], ...)
         Data <: AbstractNUFFTData{Z, N, Nc},
         Blocks <: AbstractBlockData,
         IndexMap <: NTuple{N, AbstractVector{Int}},
@@ -231,7 +232,7 @@ struct PlanNUFFT{
     backend :: Backend  # CPU, GPU, ...
     kernel_evalmode :: KernelEvalMode
     σ       :: T       # oversampling factor (≥ 1)
-    points  :: Points  # non-uniform points (real values)
+    points_ref  :: PointsRef  # "pointer" to non-uniform points (real values)
     data    :: Data
     blocks  :: Blocks
     fftshift  :: Bool
@@ -289,6 +290,8 @@ end
 @inline function Base.getproperty(p::PlanNUFFT, name::Symbol)
     if name === :timer
         get_timer(p)
+    elseif name === :points
+        get_points(p)  # = p.points_ref[]
     else
         getfield(p, name)
     end
@@ -380,6 +383,7 @@ function _PlanNUFFT(
         foreach(init_fourier_coefficients!, kernel_data, ks)
     end
     points = ntuple(_ -> KA.allocate(backend, T, 0), Val(D))  # empty vector of points
+    points_ref = Ref(points)
     if block_size === nothing
         blocks = NullBlockData()  # disable blocking (→ can't use multithreading when spreading)
         backend isa CPU && FFTW.set_num_threads(1)   # also disable FFTW threading (avoids allocations)
@@ -400,10 +404,12 @@ function _PlanNUFFT(
         non_oversampled_indices!(indmap, k, inds; fftshift)
     end
     PlanNUFFT(
-        kernel_data, backend, kernel_evalmode, σ, points, nufft_data, blocks,
+        kernel_data, backend, kernel_evalmode, σ, points_ref, nufft_data, blocks,
         fftshift, index_map, timer, synchronise,
     )
 end
+
+@inline get_points(p::PlanNUFFT) = p.points_ref[]
 
 function check_nufft_size(Ñ, ::HalfSupport{M}) where M
     if Ñ < 2 * M
