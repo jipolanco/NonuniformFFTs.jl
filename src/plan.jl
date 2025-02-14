@@ -287,6 +287,10 @@ function get_timer(p::PlanNUFFT)
     get_timer_nowarn(p)
 end
 
+function Base.propertynames(p::PlanNUFFT, private::Bool = false)
+    (fieldnames(typeof(p))..., :points)
+end
+
 @inline function Base.getproperty(p::PlanNUFFT, name::Symbol)
     if name === :timer
         get_timer(p)
