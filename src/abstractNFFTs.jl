@@ -78,7 +78,7 @@ function Base.show(io::IO, p::NFFTPlan{T, N}) where {T, N}
 end
 
 AbstractNFFTs.size_in(p::NFFTPlan) = size(p.p)  # array dimensions in uniform space
-AbstractNFFTs.size_out(p::NFFTPlan) = (length(p.p.points),)
+AbstractNFFTs.size_out(p::NFFTPlan) = (length(p.p.points[1]),)
 
 # Uniform to non-uniform
 function LinearAlgebra.mul!(

@@ -170,8 +170,8 @@ function exec_type1!(ûs_k::NTuple{C, AbstractArray{Z}}, p::PlanNUFFT{T}, vp::N
         end
 
         @timeit timer "(3) Deconvolution" begin
-            T = real(eltype(first(us)))
-            normfactor::T = prod(N -> 2π / N, size(first(us)))  # FFT normalisation factor
+            R = real(T)
+            normfactor::R = prod(N -> 2π / N, size(first(us)))  # FFT normalisation factor
             ϕ̂s = map(fourier_coefficients, kernels)
             copy_deconvolve_to_non_oversampled!(backend, ûs_k, ûs, index_map, ϕ̂s, normfactor)  # truncate to original grid + normalise
             maybe_synchronise(p)
