@@ -71,10 +71,6 @@ function set_points!(p::PlanNUFFT, xp::AbstractVector; kwargs...)
     set_points!(p, xp_tup; kwargs...)
 end
 
-# Kept for backwards compatibility
-# TODO: move to an extension?
-set_points!(p::PlanNUFFT, xp::StructVector; kwargs...) = set_points(p, StructArrays.components(xp); kwargs...)
-
 # Matrix as input. This version will also create a copy to switch to (xs, ys, ...) format.
 # TODO: support this format only for NFFTPlan? (AbstractNFFTs interface)
 function set_points!(p::PlanNUFFT, xp::AbstractMatrix{T}; kwargs...) where {T}

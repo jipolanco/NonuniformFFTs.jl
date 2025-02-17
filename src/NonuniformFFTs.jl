@@ -3,7 +3,6 @@ module NonuniformFFTs
 using AbstractFFTs: AbstractFFTs
 using AbstractNFFTs: AbstractNFFTs, AbstractNFFTPlan
 using GPUArraysCore: AbstractGPUArray, AbstractGPUVector
-using StructArrays: StructArrays, StructVector
 using AbstractFFTs: AbstractFFTs
 using KernelAbstractions: KernelAbstractions as KA, CPU, GPU, @kernel, @index, @Const,
     @groupsize, @localmem, @synchronize, @uniform
