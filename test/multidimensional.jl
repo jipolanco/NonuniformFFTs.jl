@@ -2,6 +2,7 @@ using Test
 using Random: Random
 using AbstractFFTs: fftfreq, rfftfreq
 using StaticArrays: SVector
+using StructArrays: StructVector
 using LinearAlgebra: ⋅
 using NonuniformFFTs
 
@@ -92,9 +93,13 @@ function test_nufft_type2(
     rng = Random.Xoshiro(42)
     ûs = randn(rng, Complex{Tr}, map(length, ks))
     d = length(Ns)
+
+    # Test points specified using a StructVector of SVector's.
+    # (This tests the StructArrays package extension.)
+    xp = @inferred StructVector{SVector{d, Tr}}(undef, Np)
     xp = rand(rng, SVector{d, Tr}, Np)  # non-uniform points in [0, 1]ᵈ
     for i ∈ eachindex(xp)
-        xp[i] = xp[i] .* 2π  # rescale points to [0, 2π]ᵈ
+        xp[i] = rand(rng, eltype(xp)) .* 2π
     end
 
     # Compute "exact" type-2 transform (interpolation)

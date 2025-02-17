@@ -3,10 +3,13 @@ abstract type AbstractBlockData end
 get_block_dims(bd::AbstractBlockData) = bd.block_dims
 get_sort_points(bd::AbstractBlockData) = bd.sort_points
 
-# "Folds" location onto unit cell [0, 2π]ᵈ.
-to_unit_cell(x⃗::Tuple) = map(to_unit_cell, x⃗)
+@inline to_unit_cell(::CPU, x) = to_unit_cell_cpu(x)
+@inline to_unit_cell(::GPU, x) = to_unit_cell_gpu(x)
 
-function to_unit_cell(x::Real)
+# "Folds" location onto unit cell [0, 2π]ᵈ.
+to_unit_cell_cpu(x⃗::Tuple) = map(to_unit_cell_cpu, x⃗)
+
+function to_unit_cell_cpu(x::Real)
     L = oftype(x, 2π)
     while x < 0
         x += L
@@ -32,28 +35,30 @@ end
 type_length(::Type{T}) where {T} = length(T)  # usually for SVector
 type_length(::Type{<:NTuple{N}}) where {N} = N
 
-# Get point from vector of points, converting it to a tuple of the wanted type T.
-# The first argument is only used to determine the output type.
-# The "unsafe" is because we apply @inbounds.
-@inline function unsafe_get_point_as_tuple(
-        ::Type{NTuple{D, T}},
-        xp::AbstractVector,
-        i::Integer,
-    ) where {D, T <: AbstractFloat}
+# Returns point from vector of points, possibly modified by a transform function.
+# The "unsafe" is because we apply @inbounds, assuming `i` is a valid point index.
+@inline function unsafe_get_point(transform::F, xp::NTuple{D}, i::Integer) where {F, D}
     ntuple(Val(D)) do d
         @inline
-        @inbounds T(xp[i][d])
+        unsafe_get_point(transform, xp[d], i)
     end
+end
+
+@inline function unsafe_get_point(transform::F, xs::AbstractVector, i::Integer) where {F}
+    x = @inbounds xs[i]
+    @inline transform(x)
 end
 
 # Resize vector trying to avoid copy when N is larger than the original length.
 # In other words, we completely discard the original contents of x, which is not the
 # original behaviour of resize!. This can save us some device-to-device copies.
-function resize_no_copy!(x, N)
+function resize_no_copy!(x::AbstractVector, N)
     resize!(x, 0)
     resize!(x, N)
     x
 end
+
+resize_no_copy!(xs::NTuple, N) = map(x -> resize_no_copy!(x, N), xs)
 
 include("no_blocking.jl")
 include("cpu.jl")

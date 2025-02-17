@@ -3,7 +3,6 @@ module NonuniformFFTs
 using AbstractFFTs: AbstractFFTs
 using AbstractNFFTs: AbstractNFFTs, AbstractNFFTPlan
 using GPUArraysCore: AbstractGPUArray, AbstractGPUVector
-using StructArrays: StructArrays, StructVector
 using AbstractFFTs: AbstractFFTs
 using KernelAbstractions: KernelAbstractions as KA, CPU, GPU, @kernel, @index, @Const,
     @groupsize, @localmem, @synchronize, @uniform
@@ -103,7 +102,7 @@ end
 function check_nufft_nonuniform_data(p::PlanNUFFT, vp_all::NTuple{C, AbstractVector}) where {C}
     Nc = ntransforms(p)
     C == Nc || throw(DimensionMismatch(lazy"wrong amount of data vectors (expected a tuple of $Nc vectors)"))
-    Np = length(p.points)
+    Np = length(p.points[1])
     for vp ∈ vp_all
         Nv = length(vp)
         Nv == Np || throw(DimensionMismatch(lazy"wrong length of data vector (it should match the number of points $Np, got length $Nv)"))
@@ -120,8 +119,8 @@ end
 end
 
 """
-    exec_type1!(ûs::AbstractArray{<:Complex}, p::PlanNUFFT, vp::AbstractVector{<:Number})
-    exec_type1!(ûs::NTuple{N, AbstractArray{<:Complex}}, p::PlanNUFFT, vp::NTuple{N, AbstractVector{<:Number}})
+    exec_type1!(ûs::AbstractArray{Z}, p::PlanNUFFT{T}, vp::AbstractVector{T})
+    exec_type1!(ûs::NTuple{N,AbstractArray{Z}}, p::PlanNUFFT{T}, vp::NTuple{N,AbstractVector{T}})
 
 Perform type-1 NUFFT (from non-uniform points to uniform grid).
 
@@ -133,13 +132,18 @@ One first needs to set the non-uniform points using [`set_points!`](@ref).
 To perform multiple transforms at once, both `vp` and `ûs` should be a tuple of arrays (second variant above).
 Note that this requires a plan initialised with `ntransforms = Val(N)` (see [`PlanNUFFT`](@ref)).
 
+The input types must satisfy `Z = complex(T)`. This means:
+- `Z = Complex{T}` for real-data transforms (where `T <: Real`);
+- `Z = T` for complex-data transforms (where `T <: Complex`).
+
 See also [`exec_type2!`](@ref).
 """
 function exec_type1! end
 
-function exec_type1!(ûs_k::NTuple{C, AbstractArray{<:Complex}}, p::PlanNUFFT, vp::NTuple{C}) where {C}
+function exec_type1!(ûs_k::NTuple{C, AbstractArray{Z}}, p::PlanNUFFT{T}, vp::NTuple{C, AbstractVector{T}}) where {T, Z, C}
     (; backend, points, kernels, data, blocks, index_map,) = p
     (; us,) = data
+    Z === complex(T) || throw(ArgumentError(lazy"uniform data must have the same accuracy as the created plan (got $Z values for a $T plan)"))
     timer = get_timer_nowarn(p)
 
     @timeit timer "Execute type 1" begin
@@ -155,7 +159,7 @@ function exec_type1!(ûs_k::NTuple{C, AbstractArray{<:Complex}}, p::PlanNUFFT, 
         end
 
         @timeit timer "(1) Spreading" begin
-            spread_from_points!(backend, blocks, kernels, p.kernel_evalmode, us, points, vp)
+            spread_from_points!(backend, p.point_transform_fold, blocks, kernels, p.kernel_evalmode, us, points, vp)
             maybe_synchronise(p)
         end
 
@@ -165,8 +169,8 @@ function exec_type1!(ûs_k::NTuple{C, AbstractArray{<:Complex}}, p::PlanNUFFT, 
         end
 
         @timeit timer "(3) Deconvolution" begin
-            T = real(eltype(first(us)))
-            normfactor::T = prod(N -> 2π / N, size(first(us)))  # FFT normalisation factor
+            R = real(T)
+            normfactor::R = prod(N -> 2π / N, size(first(us)))  # FFT normalisation factor
             ϕ̂s = map(fourier_coefficients, kernels)
             copy_deconvolve_to_non_oversampled!(backend, ûs_k, ûs, index_map, ϕ̂s, normfactor)  # truncate to original grid + normalise
             maybe_synchronise(p)
@@ -199,8 +203,8 @@ function _type1_fft!(data::ComplexNUFFTData)
 end
 
 """
-    exec_type2!(vp::AbstractVector{<:Number}, p::PlanNUFFT, ûs::AbstractArray{<:Complex})
-    exec_type2!(vp::NTuple{N, AbstractVector{<:Number}}, p::PlanNUFFT, ûs::NTuple{N, AbstractArray{<:Complex}})
+    exec_type2!(vp::AbstractVector{T}, p::PlanNUFFT{T}, ûs::AbstractArray{Z})
+    exec_type2!(vp::NTuple{N,AbstractVector{T}}, p::PlanNUFFT{T}, ûs::NTuple{N,AbstractArray{Z}})
 
 Perform type-2 NUFFT (from uniform grid to non-uniform points).
 
@@ -212,13 +216,18 @@ One first needs to set the non-uniform points using [`set_points!`](@ref).
 To perform multiple transforms at once, both `vp` and `ûs` should be a tuple of arrays (second variant above).
 Note that this requires a plan initialised with `ntransforms = Val(N)` (see [`PlanNUFFT`](@ref)).
 
+The input types must satisfy `Z = complex(T)`. This means:
+- `Z = Complex{T}` for real-data transforms (where `T <: Real`);
+- `Z = T` for complex-data transforms (where `T <: Complex`).
+
 See also [`exec_type1!`](@ref).
 """
 function exec_type2! end
 
-function exec_type2!(vp::NTuple{C, AbstractVector}, p::PlanNUFFT, ûs_k::NTuple{C, AbstractArray{<:Complex}}) where {C}
+function exec_type2!(vp::NTuple{C, AbstractVector{T}}, p::PlanNUFFT{T}, ûs_k::NTuple{C, AbstractArray{Z}}) where {T, Z, C}
     (; backend, points, kernels, data, blocks, index_map,) = p
     (; us,) = data
+    Z === complex(T) || throw(ArgumentError(lazy"uniform data must have the same accuracy as the created plan (got $Z values for a $T plan)"))
     timer = get_timer_nowarn(p)
 
     @timeit timer "Execute type 2" begin
@@ -255,7 +264,7 @@ function exec_type2!(vp::NTuple{C, AbstractVector}, p::PlanNUFFT, ûs_k::NTuple
         end
 
         @timeit timer "(3) Interpolation" begin
-            interpolate!(backend, blocks, kernels, p.kernel_evalmode, vp, us, points)
+            interpolate!(backend, p.point_transform_fold, blocks, kernels, p.kernel_evalmode, vp, us, points)
             maybe_synchronise(p)
         end
     end

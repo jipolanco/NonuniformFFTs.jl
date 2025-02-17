@@ -67,7 +67,9 @@ Construct a plan for performing non-uniform FFTs (NUFFTs).
 The created plan contains all data needed to perform NUFFTs for non-uniform data of type `T`
 (`ComplexF64` by default) and uniform data with dimensions `dims`.
 
-# Optional keyword arguments
+# Extended help
+
+## Optional keyword arguments
 
 - `ntransforms = Val(1)`: the number of simultaneous transforms to perform.
   This is useful if one wants to transform multiple scalar quantities at the same
@@ -76,7 +78,7 @@ The created plan contains all data needed to perform NUFFTs for non-uniform data
 - `backend::KernelAbstractions.Backend = CPU()`: corresponds to the device type where
   everything will be executed. This could be e.g. `CUDABackend()` if CUDA.jl is loaded.
 
-## NUFFT parameters
+### NUFFT parameters
 
 The following parameters control transform accuracy. The default values give a relative accuracy of
 the order of ``10^{-7}`` for `Float64` or `ComplexF64` data.
@@ -89,7 +91,7 @@ the order of ``10^{-7}`` for `Float64` or `ComplexF64` data.
 
 - `kernel::AbstractKernel = BackwardsKaiserBesselKernel()`: convolution kernel used for NUFFTs.
 
-## Main performance parameters
+### Main performance parameters
 
 - `kernel_evalmode`: method used for kernel evaluation.
   The default is [`FastApproximation`](@ref) on CPU, which will attempt to use a fast
@@ -132,17 +134,18 @@ the order of ``10^{-7}`` for `Float64` or `ComplexF64` data.
 
 - `fftw_flags = FFTW.MEASURE`: parameters passed to the FFTW planner when `backend = CPU()`.
 
-## Other performance parameters
+### Other performance parameters
 
 These are more advanced performance parameters which may disappear or whose behaviour may
 change in the future.
 
 - `sort_points = False()`: whether to internally permute the order of the non-uniform points.
   This can be enabled by passing `sort_points = True()`.
-  Ignored when `block_size = nothing` (which disables spatial sorting).
-  In this case, more time will be spent in [`set_points!`](@ref) and less time on the actual transforms.
+  This will generally require extra allocations since the input points need to be copied onto a new container.
+  If this is enabled, more time will be spent in [`set_points!`](@ref) and less time on the actual transforms.
   This can improve performance if executing multiple transforms on the same non-uniform points.
   Note that, even when enabled, this does not modify the `points` argument passed to `set_points!`.
+  This option is ignored when `block_size = nothing` (which disables spatial sorting).
 
 - `gpu_batch_size = Val(Np)`: minimum batch size used in type-1 transforms when `gpu_method = :shared_memory`.
   The idea is that, to avoid inefficient atomic operations on shared-memory arrays, we process
@@ -155,7 +158,7 @@ change in the future.
   When tuning performance, it is helpful to print the plan (as in `println(plan)`) to see
   the actual block and batch sizes.
 
-## Other parameters
+### Other parameters
 
 - `fftshift = false`: determines the order of wavenumbers in uniform space.
   If `false` (default), the same order used by FFTW is used, with positive wavenumbers first
@@ -176,7 +179,7 @@ change in the future.
   Enabling this is needed for accurate timings in `p.timer` when computing on a GPU, but may
   result in reduced performance.
 
-# FFT size and performance
+## FFT size and performance
 
 For performance reasons, when doing FFTs one usually wants the size of the input along each
 dimension to be a power of 2 (ideally), or the product of powers of small prime numbers (2,
@@ -198,7 +201,7 @@ that can be written as the product of powers of 2, 3 and 5
 (see [`nextprod`](https://docs.julialang.org/en/v1/base/math/#Base.nextprod)).
 Most often, the result will be greater than or equal to ``σN``.
 
-# Using real non-uniform data
+## Using real non-uniform data
 
 In some applications, the non-uniform data to be transformed is purely real.
 In this case, one may pass `Float64` or `Float32` as the first argument.
@@ -211,41 +214,44 @@ For convenience, one can call [`size(::PlanNUFFT)`](@ref) on the constructed pla
 advance the dimensions of the uniform data arrays.
 """
 struct PlanNUFFT{
-        T <: Number,  # non-uniform data type (can be real or complex)
+        Z <: Number,  # non-uniform data type (can be real or complex)
         N,   # number of dimensions
         Nc,  # number of "components" (simultaneous transforms)
         M,   # kernel half-width
         Backend <: KA.Backend,
-        Treal <: AbstractFloat,  # this is real(T)
-        Kernels <: NTuple{N, AbstractKernelData{<:AbstractKernel, M, Treal}},
+        T <: AbstractFloat,  # this is real(Z)
+        Kernels <: NTuple{N, AbstractKernelData{<:AbstractKernel, M, T}},
         KernelEvalMode <: EvaluationMode,
-        Points <: StructVector{NTuple{N, Treal}},
-        Data <: AbstractNUFFTData{T, N, Nc},
+        PointsRef <: Ref{<:NTuple{N, AbstractVector{T}}},  # (xs[:], ys[:], ...)
+        Data <: AbstractNUFFTData{Z, N, Nc},
         Blocks <: AbstractBlockData,
         IndexMap <: NTuple{N, AbstractVector{Int}},
         Timer <: TimerOutput,
+        PointTransform <: Function,
     }
     kernels :: Kernels
     backend :: Backend  # CPU, GPU, ...
     kernel_evalmode :: KernelEvalMode
-    σ       :: Treal   # oversampling factor (≥ 1)
-    points  :: Points  # non-uniform points (real values)
+    σ       :: T       # oversampling factor (≥ 1)
+    points_ref  :: PointsRef  # "pointer" to non-uniform points (real values)
     data    :: Data
     blocks  :: Blocks
     fftshift  :: Bool
     index_map :: IndexMap
     timer   :: Timer
     synchronise :: Bool
+    point_transform_fold :: PointTransform  # folds points onto the [0, 2π) box (+ optional transforms)
 end
 
 # This represents the type of data in Fourier space.
-# It is defined like this for compatibility with AbstractNFFTs plans.
-Base.eltype(::PlanNUFFT{T}) where {T} = complex(T)
+# This is compatible with the behaviour of `size(::PlanNUFFT)`, which returns the uniform
+# array size in Fourier space.
+Base.eltype(::PlanNUFFT{Z}) where {Z} = complex(Z)
 
-function Base.show(io::IO, p::PlanNUFFT{T, N, Nc}) where {T, N, Nc}
+function Base.show(io::IO, p::PlanNUFFT{Z, N, Nc}) where {Z, N, Nc}
     (; kernels, backend, σ, blocks, fftshift,) = p
     M = Kernels.half_support(first(kernels))
-    print(io, "$N-dimensional PlanNUFFT with input type $T:")
+    print(io, "$N-dimensional PlanNUFFT with input type $Z:")
     print(io, "\n  - backend: ", typeof(backend))
     print(io, "\n  - kernel: ", first(kernels))  # should be the same output in all directions
     print(io, "\n  - kernel evaluation mode: ", p.kernel_evalmode)  # should be the same output in all directions
@@ -283,9 +289,15 @@ function get_timer(p::PlanNUFFT)
     get_timer_nowarn(p)
 end
 
+function Base.propertynames(p::PlanNUFFT, private::Bool = false)
+    (fieldnames(typeof(p))..., :points)
+end
+
 @inline function Base.getproperty(p::PlanNUFFT, name::Symbol)
     if name === :timer
         get_timer(p)
+    elseif name === :points
+        get_points(p)  # = p.points_ref[]
     else
         getfield(p, name)
     end
@@ -300,14 +312,14 @@ This corresponds to the number of Fourier modes in each direction (in the non-ov
 """
 Base.size(p::PlanNUFFT) = map(length, p.data.ks)
 
-Base.ndims(::PlanNUFFT{T, N}) where {T, N} = N
+Base.ndims(::PlanNUFFT{Z, N}) where {Z, N} = N
 
 """
     ntransforms(p::PlanNUFFT) -> Int
 
 Return the number of datasets which are simultaneously transformed by a plan.
 """
-ntransforms(::PlanNUFFT{T, N, Nc}) where {T, N, Nc} = Nc
+ntransforms(::PlanNUFFT{Z, N, Nc}) where {Z, N, Nc} = Nc
 
 function get_block_dims(Ñs::Dims, bsize::Int)
     d = length(Ñs)
@@ -328,9 +340,19 @@ get_block_dims(::Dims{N}, bdims::NTuple{N}) where {N} = bdims
 maybe_synchronise(backend::KA.Backend, synchronise::Bool) = synchronise && KA.synchronize(backend)  # this doesn't do anything on the CPU
 maybe_synchronise(p::PlanNUFFT) = maybe_synchronise(p.backend, p.synchronise)
 
+# Generate a function that will be used to transform a point and bring it to the [0, 2π) box.
+# Note that point_transform is usually identity (so basically free) and is only used by the
+# AbstractNFFTs interface to switch between NUFFT conventions.
+function generate_point_transform_fold_function(point_transform::F, backend) where {F <: Function}
+    @inline function (x)
+        y = @inline point_transform(x)  # apply optional transform (usually transform === identity, so this is free)
+        @inline to_unit_cell(backend, y)  # fold onto [0, 2π) box
+    end
+end
+
 # This constructor is generally not called directly.
 function _PlanNUFFT(
-        ::Type{T}, kernel::AbstractKernel, h::HalfSupport, σ_wanted, Ns::Dims{D},
+        ::Type{Z}, kernel::AbstractKernel, h::HalfSupport, σ_wanted, Ns::Dims{D},
         num_transforms::Val;
         timer = TimerOutput(),
         fftw_flags = FFTW.MEASURE,
@@ -342,8 +364,9 @@ function _PlanNUFFT(
         synchronise::Bool = false,
         gpu_method::Symbol = :global_memory,
         gpu_batch_size::Val = Val(DEFAULT_GPU_BATCH_SIZE),  # currently only used in shared-memory GPU spreading
-    ) where {T <: Number, D}
-    ks = init_wavenumbers(T, Ns)
+        point_transform::F = identity,
+    ) where {Z <: Number, D, F <: Function}
+    ks = init_wavenumbers(Z, Ns)
     # Determine dimensions of oversampled grid.
     Ñs = ntuple(Val(D)) do d
         # We try to make sure that each dimension is a product of powers of small primes,
@@ -351,7 +374,7 @@ function _PlanNUFFT(
         # "it is generally beneficial for the last dimension of an r2c/c2r transform
         # to be even" (from the FFTW docs). In our case the "last" dimension is actually the
         # first. This is true for FFTW; not sure about other libraries (including GPU ones).
-        if T <: Real && d == 1
+        if Z <: Real && d == 1
             Ñ = 2 * nextprod((2, 3, 5), floor(Int, σ_wanted * ((Ns[d] + 1) ÷ 2)))  # make sure it's even
         else
             Ñ = nextprod((2, 3, 5), floor(Int, σ_wanted * Ns[d]))
@@ -359,11 +382,11 @@ function _PlanNUFFT(
         check_nufft_size(Ñ, h)
         Ñ
     end
-    Tr = real(T)
-    σ::Tr = maximum(Ñs ./ Ns)  # actual oversampling factor
+    T = real(Z)
+    σ::T = maximum(Ñs ./ Ns)  # actual oversampling factor
     kernel_data = map(Ns, Ñs) do N, Ñ
         @inline
-        L = Tr(2π)  # assume 2π period
+        L = T(2π)  # assume 2π period
         Δx̃ = L / Ñ
         Kernels.optimal_kernel(kernel, h, Δx̃, Ñ / N; backend)
     end
@@ -376,31 +399,35 @@ function _PlanNUFFT(
     else
         foreach(init_fourier_coefficients!, kernel_data, ks)
     end
-    points = StructVector(ntuple(_ -> KA.allocate(backend, Tr, 0), Val(D)))  # empty vector of points
+    points = ntuple(_ -> KA.allocate(backend, T, 0), Val(D))  # empty vector of points
+    points_ref = Ref(points)
     if block_size === nothing
         blocks = NullBlockData()  # disable blocking (→ can't use multithreading when spreading)
         backend isa CPU && FFTW.set_num_threads(1)   # also disable FFTW threading (avoids allocations)
     else
         block_dims = get_block_dims(Ñs, block_size)
         if backend isa GPU
-            blocks = BlockDataGPU(T, backend, block_dims, Ñs, h, sort_points; method = gpu_method, batch_size = gpu_batch_size,)
+            blocks = BlockDataGPU(Z, backend, block_dims, Ñs, h, sort_points; method = gpu_method, batch_size = gpu_batch_size,)
         else
-            blocks = BlockDataCPU(T, block_dims, Ñs, h, num_transforms, sort_points)
+            blocks = BlockDataCPU(Z, block_dims, Ñs, h, num_transforms, sort_points)
             FFTW.set_num_threads(Threads.nthreads())
         end
     end
     plan_kwargs = backend isa CPU ? (flags = fftw_flags,) : (;)
-    nufft_data = init_plan_data(T, backend, Ñs, ks, num_transforms; plan_kwargs)
+    nufft_data = init_plan_data(Z, backend, Ñs, ks, num_transforms; plan_kwargs)
     ûs = first(output_field(nufft_data)) :: AbstractArray{<:Complex}
     index_map = map(ks, axes(ûs)) do k, inds
         indmap = KA.allocate(backend, eltype(inds), length(k))
         non_oversampled_indices!(indmap, k, inds; fftshift)
     end
+    point_transform_fold = generate_point_transform_fold_function(point_transform, backend)
     PlanNUFFT(
-        kernel_data, backend, kernel_evalmode, σ, points, nufft_data, blocks,
-        fftshift, index_map, timer, synchronise,
+        kernel_data, backend, kernel_evalmode, σ, points_ref, nufft_data, blocks,
+        fftshift, index_map, timer, synchronise, point_transform_fold,
     )
 end
+
+@inline get_points(p::PlanNUFFT) = p.points_ref[]
 
 function check_nufft_size(Ñ, ::HalfSupport{M}) where M
     if Ñ < 2 * M
@@ -426,31 +453,31 @@ init_wavenumbers(::Type{Complex{T}}, Ns::Dims) where {T <: AbstractFloat} = map(
 end
 
 function PlanNUFFT(
-        ::Type{T}, Ns::Dims, h::HalfSupport;
+        ::Type{Z}, Ns::Dims, h::HalfSupport;
         ntransforms = Val(1),
         backend = CPU(),
         kernel::AbstractKernel = default_kernel(backend),
-        σ::Real = real(T)(2), kws...,
-    ) where {T <: Number}
-    R = real(T)
-    _PlanNUFFT(T, kernel, h, R(σ), Ns, to_static(ntransforms); backend, kws...)
+        σ::Real = real(Z)(2), kws...,
+    ) where {Z <: Number}
+    R = real(Z)
+    _PlanNUFFT(Z, kernel, h, R(σ), Ns, to_static(ntransforms); backend, kws...)
 end
 
 @inline to_static(ntrans::Val) = ntrans
 @inline to_static(ntrans::Int) = Val(ntrans)
 
 # This constructor relies on constant propagation to make the output fully inferred.
-Base.@constprop :aggressive function PlanNUFFT(::Type{T}, Ns::Dims; m = 4, kws...) where {T <: Number}
+Base.@constprop :aggressive function PlanNUFFT(::Type{Z}, Ns::Dims; m = 4, kws...) where {Z <: Number}
     h = to_halfsupport(m)
-    PlanNUFFT(T, Ns, h; kws...)
+    PlanNUFFT(Z, Ns, h; kws...)
 end
 
 @inline to_halfsupport(m::Integer) = HalfSupport(m)
 @inline to_halfsupport(m::HalfSupport) = m
 
 # 1D case
-function PlanNUFFT(::Type{T}, N::Integer, args...; kws...) where {T <: Number}
-    PlanNUFFT(T, (N,), args...; kws...)
+function PlanNUFFT(::Type{Z}, N::Integer, args...; kws...) where {Z <: Number}
+    PlanNUFFT(Z, (N,), args...; kws...)
 end
 
 # Alternative constructor: use ComplexF64 data by default.

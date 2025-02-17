@@ -78,7 +78,7 @@ function Base.show(io::IO, p::NFFTPlan{T, N}) where {T, N}
 end
 
 AbstractNFFTs.size_in(p::NFFTPlan) = size(p.p)  # array dimensions in uniform space
-AbstractNFFTs.size_out(p::NFFTPlan) = (length(p.p.points),)
+AbstractNFFTs.size_out(p::NFFTPlan) = (length(p.p.points[1]),)
 
 # Uniform to non-uniform
 function LinearAlgebra.mul!(
@@ -115,7 +115,7 @@ end
 # Note: the `transform` argument is an internal of set_points! and is not documented.
 # It takes either an NTuple (a point location x⃗) or a scalar (coordinate xᵢ) as input.
 function AbstractNFFTs.nodes!(p::NFFTPlan, xp::AbstractMatrix{T}) where {T <: AbstractFloat}
-    set_points!(p.p, xp; transform = _transform_point_convention)
+    set_points!(p.p, xp)
 end
 
 # This is to avoid ambiguity issues, since AbstractNFFTs defines nodes! for Matrix instead
@@ -170,6 +170,7 @@ Base.@constprop :aggressive function NFFTPlan(
         Complex{T}, Ns, HalfSupport(m_actual);
         backend, σ = T(σ_actual), sort_points, fftshift, block_size,
         kernel, fftw_flags = fftflags,
+        point_transform = _transform_point_convention,
         kws_plan...,
     )
     pp = NFFTPlan(p)

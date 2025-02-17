@@ -5,6 +5,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Plans no longer store a _copy_ of the non-uniform point locations. Instead,
+  they now store a "pointer" to the points passed by the user to `set_points!`
+  (unless the points were passed in an incompatible format, such as a vector of
+  `SVector`s, in which case a copy is made). This should reduce memory
+  requirements as well as improve `set_points!` performance by avoiding discontiguous
+  memory writes.
+
+  This is slightly breaking because _points should no longer be modified_ by the
+  user between calls to `set_points!` and `exec_type*!`. This was previously allowed
+  since we made a copy in `set_points!`. Note that this is basically the same
+  behaviour of FINUFFT.
+
 ## [v0.6.8] - 2025-02-12
 
 ### Added

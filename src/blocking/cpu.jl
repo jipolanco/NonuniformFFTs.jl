@@ -73,35 +73,25 @@ function BlockDataCPU(
     )
 end
 
-# This is similar to assign_blocks_kernel! (GPU implementation), but using `to_unit_cell`
+# This is similar to assign_blocks_kernel! (GPU implementation), but using `to_unit_cell_cpu`
 # instead of `to_unit_cell_gpu` (which does seem to make a difference in performance).
 function assign_blocks_cpu!(
         blockidx::AbstractVector{<:Integer},
         cumulative_npoints_per_block::AbstractVector{<:Integer},
-        points::NTuple,
-        xp::AbstractVector,
-        Δxs::NTuple,
-        block_dims::NTuple,
-        nblocks_per_dir::NTuple,
-        sort_points,
-        transform::F,
-    ) where {F}
-    Threads.@threads :static for I ∈ eachindex(points[1])
-        x⃗ = unsafe_get_point_as_tuple(typeof(Δxs), xp, I)
-        y⃗ = to_unit_cell(transform(x⃗)) :: NTuple
+        xp::NTuple{N},
+        Δxs::NTuple{N},
+        block_dims::NTuple{N},
+        nblocks_per_dir::NTuple{N},
+        transform_fold::F,
+    ) where {N, F}
+    Threads.@threads :static for I ∈ eachindex(xp...)
+        y⃗ = unsafe_get_point(transform_fold, xp, I)
         n = block_index(y⃗, Δxs, block_dims, nblocks_per_dir)
 
         # Note: here index_within_block is the value *after* incrementing (≥ 1).
         S = eltype(cumulative_npoints_per_block)
         index_within_block = @inbounds (Atomix.@atomic cumulative_npoints_per_block[n + 1] += one(S))::S
         @inbounds blockidx[I] = index_within_block
-
-        # If points need to be sorted, then we fill `points` some time later (in permute_kernel!).
-        if sort_points === False()
-            for n ∈ eachindex(x⃗)
-                @inbounds points[n][I] = y⃗[n]
-            end
-        end
     end
     nothing
 end
@@ -110,15 +100,14 @@ function sortperm_cpu!(
         pointperm::AbstractVector,
         cumulative_npoints_per_block,
         blockidx,
-        xp::AbstractVector,
-        Δxs::NTuple,
+        xp::NTuple{N},
+        Δxs::NTuple{N},
         block_dims,
         nblocks_per_dir,
-        transform::F,
-    ) where {F}
-    Threads.@threads :static for I ∈ eachindex(xp)
-        x⃗ = unsafe_get_point_as_tuple(typeof(Δxs), xp, I)
-        y⃗ = to_unit_cell(transform(x⃗)) :: NTuple
+        transform_fold::F,
+    ) where {N, F}
+    Threads.@threads :static for I ∈ eachindex(xp...)
+        y⃗ = unsafe_get_point(transform_fold, xp, I)
         n = block_index(y⃗, Δxs, block_dims, nblocks_per_dir)
         @inbounds J = cumulative_npoints_per_block[n] + blockidx[I]
         @inbounds pointperm[J] = I
@@ -127,34 +116,34 @@ function sortperm_cpu!(
 end
 
 function set_points_impl!(
-        backend::CPU, bd::BlockDataCPU, points::StructVector, xp, timer;
-        transform::F = identity,
+        backend::CPU, point_transform_fold::F, bd::BlockDataCPU, points_ref::Ref, timer;
         synchronise,
     ) where {F <: Function}
     # This technically never happens, but we might use it as a way to disable blocking.
-    isempty(bd.buffers) && return set_points_impl!(backend, NullBlockData(), points, xp, timer; transform, synchronise)
+    isempty(bd.buffers) && return set_points_impl!(backend, point_transform_fold, NullBlockData(), points_ref, timer; synchronise)
 
     (;
         Δxs, cumulative_npoints_per_block, nblocks_per_dir, block_dims,
         blockidx, pointperm, sort_points,
     ) = bd
 
-    N = type_length(eltype(xp))  # = number of dimensions
-    @assert N == length(block_dims)
+    xp = points_ref[]
+    N = length(xp)  # number of dimensions
+    Np = length(xp[1])
+    all(x -> length(x) == Np, xp) || throw(DimensionMismatch("input points must have the same length along all dimensions"))
+
+    @assert N == length(block_dims)  # number of dimensions
 
     @timeit timer "(0) Init arrays" begin
-        Np = length(xp)
         resize_no_copy!(blockidx, Np)
         resize_no_copy!(pointperm, Np)
-        resize_no_copy!(points, Np)
         fill!(cumulative_npoints_per_block, 0)
     end
 
     @timeit timer "(1) Assign blocks" let
-        points_comp = StructArrays.components(points)
         assign_blocks_cpu!(
-            blockidx, cumulative_npoints_per_block, points_comp, xp, Δxs,
-            block_dims, nblocks_per_dir, sort_points, transform,
+            blockidx, cumulative_npoints_per_block, xp, Δxs,
+            block_dims, nblocks_per_dir, point_transform_fold,
         )
     end
 
@@ -173,23 +162,26 @@ function set_points_impl!(
     @timeit timer "(2) Sort" begin
         sortperm_cpu!(
             pointperm, cumulative_npoints_per_block, blockidx, xp, Δxs,
-            block_dims, nblocks_per_dir, transform,
+            block_dims, nblocks_per_dir, point_transform_fold,
         )
     end
 
     # Write sorted points into `points`.
+    # We need to allocate a new array to hold the result.
     # (This should rather be called "permute" instead of "sort"...)
     # Note: we don't use threading since it seems to be much slower.
     # This is very likely due to false sharing (https://en.wikipedia.org/wiki/False_sharing),
     # since all threads modify the same data in "random" order.
     if sort_points === True()
-        @timeit timer "(3) Permute points" begin
+        @timeit timer "(3) Permute points" let
             # TODO: combine this with Sort step?
+            points_ref[] = map(similar, xp)  # allocate new array
+            points = points_ref[]
             @inbounds for j ∈ eachindex(pointperm)
                 i = pointperm[j]
-                x⃗ = xp[i]
-                y⃗ = to_unit_cell(transform(NTuple{N}(x⃗)))  # converts `x⃗` to Tuple if it's an SVector
-                points[j] = y⃗
+                for n in 1:N
+                    points[n][j] = @inbounds xp[n][i]  # note: we could apply the transform here and not at each NUFFT
+                end
             end
         end
     end

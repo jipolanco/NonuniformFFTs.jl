@@ -18,7 +18,7 @@ function test_uniform_points(::Type{T}, N; σ = 1.25) where {T <: Number}
     Np = N
     rng = Random.Xoshiro(42)
     Tr = real(T)
-    xp = range(Tr(0), Tr(2π); length = N + 1)[1:N]
+    xp = collect(range(Tr(0), Tr(2π); length = N + 1)[1:N])
     vp = randn(rng, T, Np)
 
     if T <: Real
