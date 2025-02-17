@@ -71,29 +71,31 @@ exec_type2!(vp, plan_nufft, ûs)
 
 ```julia
 using NonuniformFFTs
-using StaticArrays: SVector  # for convenience
 
 Ns = (256, 256)  # number of Fourier modes in each direction
 Np = 1000        # number of non-uniform points
 
 # Generate some non-uniform random data
-T = Float64                                      # non-uniform data is real (can also be complex)
-d = length(Ns)                                   # number of dimensions (d = 2 here)
-xp = [T(2π) * rand(SVector{d, T}) for _ ∈ 1:Np]  # non-uniform points in [0, 2π]ᵈ
-vp = randn(T, Np)                                # random values at points
+T = Float64                # non-uniform data is real (can also be complex)
+d = length(Ns)             # number of dimensions (d = 2 here)
+xp = rand(T, Np) .* T(2π)  # non-uniform points in [0, 2π] (dimension 1)
+yp = rand(T, Np) .* T(2π)  # non-uniform points in [0, 2π] (dimension 2)
+vp = randn(T, Np)          # random values at points
 
 # Create plan for data of type T
 plan_nufft = PlanNUFFT(T, Ns; m = HalfSupport(4))
 
 # Set non-uniform points
-set_points!(plan_nufft, xp)
+points = (xp, yp)
+set_points!(plan_nufft, points)
 
 # Perform type-1 NUFFT on preallocated output
 ûs = Array{Complex{T}}(undef, size(plan_nufft))
 exec_type1!(ûs, plan_nufft, vp)
 
 # Perform type-2 NUFFT on preallocated output
-exec_type2!(vp, plan_nufft, ûs)
+wp = similar(vp)
+exec_type2!(wp, plan_nufft, ûs)
 ```
 
 </details>
@@ -124,8 +126,8 @@ ûs = ntuple(_ -> Array{Complex{T}}(undef, size(plan_nufft)), ntrans)
 exec_type1!(ûs, plan_nufft, vp)
 
 # Perform type-2 NUFFT on preallocated output (one vector per transformed quantity)
-vp_interp = map(similar, vp)
-exec_type2!(vp, plan_nufft, ûs)
+wp = map(similar, vp)  # this is a tuple of 3 vectors
+exec_type2!(wp, plan_nufft, ûs)
 ```
 
 </details>
@@ -146,7 +148,6 @@ on an AMD GPU by simply choosing `backend = ROCBackend()`.
 
 ```julia
 using NonuniformFFTs
-using StaticArrays: SVector  # for convenience
 using CUDA
 using Adapt: adapt  # optional (see below)
 
@@ -156,15 +157,17 @@ Ns = (256, 256)  # number of Fourier modes in each direction
 Np = 1000        # number of non-uniform points
 
 # Generate some non-uniform random data
-T = Float64                                          # non-uniform data is real (can also be complex)
-d = length(Ns)                                       # number of dimensions (d = 2 here)
-xp_cpu = [T(2π) * rand(SVector{d, T}) for _ ∈ 1:Np]  # non-uniform points in [0, 2π]ᵈ
-vp_cpu = randn(T, Np)                                # random values at points
+T = Float64                    # non-uniform data is real (can also be complex)
+d = length(Ns)                 # number of dimensions (d = 2 here)
+xp_cpu = rand(T, Np) .* T(2π)  # non-uniform points in [0, 2π] (dimension 1)
+yp_cpu = rand(T, Np) .* T(2π)  # non-uniform points in [0, 2π] (dimension 2)
+vp_cpu = randn(T, Np)          # random values at points
 
 # Copy data to the GPU (using Adapt is optional but it makes code more generic).
 # Note that all data needs to be on the GPU before setting points or executing transforms.
 # We could have also generated the data directly on the GPU.
-xp = adapt(backend, xp_cpu)  # returns a CuArray if backend = CUDABackend
+points_cpu = (xp_cpu, yp_cpu)
+points = adapt(backend, points_cpu)  # returns a tuple of CuArrays if backend = CUDABackend
 vp = adapt(backend, vp_cpu)
 
 # Create plan for data of type T
