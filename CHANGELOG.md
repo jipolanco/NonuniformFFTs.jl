@@ -5,6 +5,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.7.0] - 2025-02-17
+
 ### Changed
 
 - Plans no longer store a _copy_ of the non-uniform point locations. Instead,
@@ -178,7 +180,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Implement [AbstractNFFTs](https://juliamath.github.io/NFFT.jl/stable/abstract/)
   interface for easier comparison with other NUFFT packages.
 
-  [unreleased]: https://github.com/jipolanco/NonuniformFFTs.jl/compare/v0.6.8...HEAD
+  [unreleased]: https://github.com/jipolanco/NonuniformFFTs.jl/compare/v0.7.0...HEAD
+  [v0.7.0]: https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.7.0
   [v0.6.8]: https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.6.8
   [v0.6.7]: https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.6.7
   [v0.6.6]: https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.6.6
