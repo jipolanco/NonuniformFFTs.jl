@@ -33,7 +33,15 @@ function set_points! end
 function set_points!(p::PlanNUFFT{Z, N}, xp::NTuple{N, AbstractVector{T}}; kwargs...) where {Z, N, T}
     (; points_ref, synchronise,) = p
     T === real(Z) || throw(ArgumentError(lazy"input points must have the same accuracy as the created plan (got $T points for a $Z plan)"))
-    @assert eltype(points_ref) == typeof(xp)
+    P_in = typeof(xp)
+    P_plan = eltype(points_ref)
+    P_in === P_plan || throw(
+        ArgumentError(
+            lazy"""unexpected point container:
+            - expected:  points::$P_plan
+            - got:       points::$P_in"""
+        )
+    )
     points_ref[] = xp  # copy "pointer"
     timer = get_timer_nowarn(p)
     @timeit timer "Set points" set_points_impl!(
@@ -50,10 +58,16 @@ end
 
 # Here the element type of `xp` can be either an NTuple{N, <:Real}, an SVector{N, <:Real},
 # or anything else which has length `N`.
+# Note that this creates a copy!
 function set_points!(p::PlanNUFFT, xp::AbstractVector; kwargs...)
     N = ndims(p)
     type_length(eltype(xp)) == N || throw(DimensionMismatch(lazy"expected $N-dimensional points"))
-    xp_tup = ntuple(d -> getindex.(xp, d), Val(N))  # creates copy!
+    T = eltype(eltype(xp))
+    @assert T <: Real
+    xp_tup = ntuple(Val(N)) do d
+        yp = similar(xp, T, length(xp))
+        yp .= getindex.(xp, d)
+    end
     set_points!(p, xp_tup; kwargs...)
 end
 
@@ -67,9 +81,12 @@ function set_points!(p::PlanNUFFT, xp::AbstractMatrix{T}; kwargs...) where {T}
     N = ndims(p)
     size(xp, 1) == N || throw(DimensionMismatch(lazy"expected input matrix to have dimensions ($N, Np)"))
     if N == 1
-        xp_vec = vec(xp)
+        xp_tup = (vec(xp),)
     else
-        xp_vec = ntuple(d -> xp[d, :], Val(N))  # creates copies!
+        xp_tup = ntuple(Val(N)) do d
+            yp = similar(xp, T, size(xp, 2))
+            yp .= @view xp[d, :]
+        end
     end
-    set_points!(p, xp_vec; kwargs...)
+    set_points!(p, xp_tup; kwargs...)
 end
