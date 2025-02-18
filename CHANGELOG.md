@@ -5,6 +5,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.7.1] - 2025-02-18
+
+### Fixed
+
+- Fix GPU kernel compilation failures on AMDGPU.
+
 ## [v0.7.0] - 2025-02-17
 
 ### Changed
@@ -180,7 +186,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Implement [AbstractNFFTs](https://juliamath.github.io/NFFT.jl/stable/abstract/)
   interface for easier comparison with other NUFFT packages.
 
-  [unreleased]: https://github.com/jipolanco/NonuniformFFTs.jl/compare/v0.7.0...HEAD
+  [unreleased]: https://github.com/jipolanco/NonuniformFFTs.jl/compare/v0.7.1...HEAD
+  [v0.7.1]: https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.7.1
   [v0.7.0]: https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.7.0
   [v0.6.8]: https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.6.8
   [v0.6.7]: https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.6.7

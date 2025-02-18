@@ -9,7 +9,7 @@ using StaticArrays: MVector
         @Const(us::NTuple{C}),
         @Const(pointperm),
         @Const(prefactor::Real),    # = volume of a grid cell = prod(Δxs)
-        @Const(transform_fold::F),
+        transform_fold::F,
     ) where {C, D, F <: Function}
     i = @index(Global, Linear)
 
@@ -213,7 +213,7 @@ end
         @Const(prefactor::Real),    # = volume of a grid cell = prod(Δxs)
         ::Val{block_dims},
         ::Val{shmem_size},  # this is a bit redundant, but seems to be required for CPU backends (used in tests)
-        @Const(transform_fold::F),
+        transform_fold::F,
     ) where {C, D, Z <: Number, block_dims, shmem_size, F <: Function}
 
     @uniform begin

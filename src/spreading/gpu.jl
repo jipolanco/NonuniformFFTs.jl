@@ -6,7 +6,7 @@
         @Const(points::NTuple{D}),
         @Const(vp::NTuple{C}),
         @Const(pointperm),
-        @Const(transform_fold::F),
+        transform_fold::F,
     ) where {F <: Function, C, D}
     i = @index(Global, Linear)
 
@@ -240,7 +240,7 @@ end
         ::Val{block_dims},
         ::Val{shmem_size},  # this is a bit redundant, but seems to be required for CPU backends (used in tests)
         ::Val{Np},  # batch_size
-        @Const(transform_fold::F),
+        transform_fold::F,
     ) where {C, D, T, Z, M, Np, block_dims, shmem_size, F <: Function}
 
     @uniform begin

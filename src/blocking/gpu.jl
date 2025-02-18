@@ -171,7 +171,7 @@ end
         @Const(Δxs),
         @Const(block_dims::NTuple),
         @Const(nblocks_per_dir::NTuple),
-        @Const(transform_fold::F),
+        transform_fold::F,
     ) where {IntType, F}
     I::IntType = @index(Global, Linear)
     y⃗ = unsafe_get_point(transform_fold, xp, I)
@@ -192,7 +192,7 @@ end
         @Const(Δxs),
         @Const(block_dims),
         @Const(nblocks_per_dir),
-        @Const(transform_fold::F),
+        transform_fold::F,
     ) where {F}
     I = @index(Global, Linear)
     y⃗ = unsafe_get_point(transform_fold, xp, I)
@@ -206,7 +206,7 @@ end
         points::NTuple{D},
         @Const(xp::NTuple{D}),
         @Const(pointperm::AbstractVector{<:Integer}),
-        @Const(transform_fold::F),
+        transform_fold::F,
     ) where {F, D}
     j = @index(Global, Linear)
     i = @inbounds pointperm[j]
