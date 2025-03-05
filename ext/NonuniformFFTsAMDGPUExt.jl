@@ -2,8 +2,19 @@ module NonuniformFFTsAMDGPUExt
 
 using NonuniformFFTs
 using NonuniformFFTs.Kernels: Kernels
+using AbstractFFTs: AbstractFFTs
 using AMDGPU
+using AMDGPU.rocFFT: rocFFT
 using AMDGPU.Device: @device_override
+
+# We add a type assertion to workaround inference issues in AMDGPU.jl.
+# The issue was introduced in https://github.com/JuliaGPU/AMDGPU.jl/pull/728 (included since AMDGPU.jl v1.2.3).
+# The type assertion will fail on AMDGPU.jl < v1.2.3 since the `B` parameter didn't exist before that.
+function NonuniformFFTs.make_plan_rfft(u::ROCArray{T, N, Mem}, dims; kwargs...) where {T, N, Mem}
+    p = AbstractFFTs.plan_rfft(u, dims; kwargs...)
+    B = ROCArray{Complex{T}, N, Mem}
+    p::rocFFT.rROCFFTPlan{T, true, false, N, N, B}
+end
 
 # Some empirical observations (on AMD MI210, ROCm 6.0.2):
 #

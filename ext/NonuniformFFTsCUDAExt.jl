@@ -9,8 +9,7 @@ using CUDA: @device_override
 
 # We add a type assertion to workaround inference issues in CUDA.jl.
 # The issue was introduced in https://github.com/JuliaGPU/CUDA.jl/pull/2578 (included since CUDA.jl v5.6.0).
-# The type assertion will fail on CUDA.jl < v5.6 since the `B` parameter didn't exist before
-# that.
+# The type assertion will fail on CUDA.jl < v5.6 since the `B` parameter didn't exist before that.
 function NonuniformFFTs.make_plan_rfft(u::CuArray{T, N, Mem}, dims; kwargs...) where {T, N, Mem}
     p = AbstractFFTs.plan_rfft(u, dims; kwargs...)
     B = CuArray{Complex{T}, N, Mem}

@@ -30,7 +30,7 @@ NonuniformFFTsCUDAExt = ["CUDA"]
 NonuniformFFTsStructArraysExt = ["StructArrays"]
 
 [compat]
-AMDGPU = "1.0.5"
+AMDGPU = "1.2.3"
 AbstractFFTs = "1.5.0"
 AbstractNFFTs = "0.8.2"
 Adapt = "4.0.4"
