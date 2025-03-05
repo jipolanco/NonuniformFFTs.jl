@@ -33,6 +33,9 @@ end
 output_field(data::RealNUFFTData) = data.ûs
 output_field(data::ComplexNUFFTData) = data.us  # output === input
 
+# This is to workaround inference issues in both CUDA.jl and AMDGPU.jl (see respective extensions).
+make_plan_rfft(u::AbstractArray, dims; kwargs...) = AbstractFFTs.plan_rfft(u, dims; kwargs...)
+
 # Case of real data
 function init_plan_data(
         ::Type{T}, backend::KA.Backend, Ñs::Dims, ks::NTuple, ::Val{Nc};
@@ -42,8 +45,9 @@ function init_plan_data(
     us = ntuple(_ -> KA.zeros(backend, T, Ñs), Val(Nc))
     dims_out = (Ñs[1] ÷ 2 + 1, Base.tail(Ñs)...)
     ûs = ntuple(_ -> KA.zeros(backend, Complex{T}, dims_out), Val(Nc))
-    plan_fw = AbstractFFTs.plan_rfft(first(us); plan_kwargs...)
-    plan_bw = AbstractFFTs.plan_brfft(first(ûs), Ñs[1]; plan_kwargs...)
+    dims = ntuple(identity, Val(length(Ñs)))  # (1, …, D)
+    plan_fw = make_plan_rfft(first(us), dims; plan_kwargs...)
+    plan_bw = AbstractFFTs.plan_brfft(first(ûs), Ñs[1], dims; plan_kwargs...)
     RealNUFFTData(ks, us, ûs, plan_fw, plan_bw)
 end
 
@@ -54,8 +58,9 @@ function init_plan_data(
     ) where {T <: AbstractFloat, Nc}
     @assert Nc ≥ 1
     us = ntuple(_ -> KA.zeros(backend, Complex{T}, Ñs), Val(Nc))
-    plan_fw = AbstractFFTs.plan_fft!(first(us); plan_kwargs...)
-    plan_bw = AbstractFFTs.plan_bfft!(first(us); plan_kwargs...)
+    dims = ntuple(identity, Val(length(Ñs)))  # (1, …, D)
+    plan_fw = AbstractFFTs.plan_fft!(first(us), dims; plan_kwargs...)
+    plan_bw = AbstractFFTs.plan_bfft!(first(us), dims; plan_kwargs...)
     ComplexNUFFTData(ks, us, plan_fw, plan_bw)
 end
 
