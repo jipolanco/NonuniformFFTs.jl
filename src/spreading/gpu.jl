@@ -331,7 +331,7 @@ end
             # (2) All threads spread together onto shared memory, avoiding all collisions
             # and thus not requiring atomic operations.
             @inbounds for p in 1:batch_size
-                local istart = ntuple(d -> @inbounds(inds_start[d, p]), Val(D))
+                local istart = @view inds_start[:, p]
                 local v = vp_sm[p]
                 window_vals_p = @view window_vals[:, :, p]
                 spread_onto_array_shmem_threads!(u_local, istart, window_vals_p, v; threadidx, nthreads)
@@ -359,17 +359,19 @@ end
 # This is parallelised across threads in a workgroup.
 @inline function spread_onto_array_shmem_threads!(
         u_local::AbstractArray{Z, D},
-        inds_start::NTuple{D, Integer},
+        inds_start,
         window_vals::AbstractArray{T, 2},  # size (2M, D)
         v::Z;
         threadidx, nthreads,
-    ) where {T, D, Z}
+    ) where {T <: AbstractFloat, D, Z}
     inds = CartesianIndices(ntuple(_ -> axes(window_vals, 1), Val(D)))  # = (1:2M, 1:2M, ...)
-    Tr = real(T)
     @inbounds for n ∈ threadidx:nthreads:length(inds)
         I = inds[n]
-        js = Tuple(I) .+ inds_start
-        gprod = one(Tr)
+        js = ntuple(Val(D)) do d
+            @inline
+            @inbounds I[d] + inds_start[d]
+        end
+        gprod = one(T)
         for d ∈ 1:D
             gprod *= window_vals[I[d], d]
         end
