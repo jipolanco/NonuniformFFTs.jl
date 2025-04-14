@@ -40,13 +40,10 @@ gpu_shmem_ndrange_from_groupsize(groupsize::Integer, ngroups::Tuple) =
     ) + 128   # extra 128 bytes for safety (CUDA seems to use slightly more shared memory than what we estimate, maybe due to memory alignment?)
 
     # (2) Shared memory required per point in a batch
-    shmem_per_point = sizeof(T) * D * (
-        + 2M  # window_vals
-    ) + (
-        sizeof(Int) * D   # inds_start
-    ) + (
-        sizeof(Z)         # vp_sm
-    )
+    shmem_per_point =
+        sizeof(T) * D * 2M +  # window_vals
+        sizeof(Int) * D +     # inds_start
+        sizeof(Z)             # vp_sm
 
     # (3) Determine local grid size based on above values
     max_shmem_localgrid = max_shmem - const_shmem - Np_min * shmem_per_point  # maximum shared memory for local grid (single block)
