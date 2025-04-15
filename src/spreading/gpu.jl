@@ -228,7 +228,7 @@ end
 # The idea is to completely avoid slow atomic writes to shared memory arrays (u_local),
 # while parallelising some operations across up to Np points.
 # TODO: Should Np be equal to the number of threads? or how to choose it optimally so that the block size stays not too small?
-@kernel function spread_from_points_shmem_kernel!(
+@kernel unsafe_indices=true function spread_from_points_shmem_kernel!(
         us::NTuple{C, AbstractArray{T}},
         @Const(gs::NTuple{D}),
         @Const(evalmode::EvaluationMode),

@@ -1,7 +1,7 @@
 name = "NonuniformFFTs"
 uuid = "cd96f58b-6017-4a02-bb9e-f4d81626177f"
 authors = ["Juan Ignacio Polanco <juan-ignacio.polanco@cnrs.fr>"]
-version = "0.7.1"
+version = "0.7.2"
 
 [deps]
 AbstractFFTs = "621f4979-c628-5d54-868e-fcf4e3e8185c"
@@ -40,7 +40,7 @@ Bumper = "0.6, 0.7"
 CUDA = "5.5"
 FFTW = "1.7"
 GPUArraysCore = "0.1.6, 0.2"
-KernelAbstractions = "0.9.25"
+KernelAbstractions = "0.9.34"
 LinearAlgebra = "1.9"
 PrecompileTools = "1.2"
 Static = "0.8, 1"

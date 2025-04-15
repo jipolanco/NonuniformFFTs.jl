@@ -202,7 +202,10 @@ end
 ## ========================================================================================== ##
 ## Shared-memory implementation
 
-@kernel function interpolate_to_points_shmem_kernel!(
+# Note: we can use unsafe_indices=true (avoiding implicit bounds checking) since we don't
+# use global indices, i.e. @index(Global), in this kernel.
+# See https://juliagpu.github.io/KernelAbstractions.jl/v0.9/#0.9.34
+@kernel unsafe_indices=true function interpolate_to_points_shmem_kernel!(
         vp::NTuple{C, AbstractVector{Z}},
         @Const(gs::NTuple{D}),
         @Const(evalmode::EvaluationMode),
