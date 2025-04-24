@@ -33,10 +33,10 @@ jobs:
             julia-arch: aarch64
             os: ubuntu-24.04-arm
             experimental: true
-        #   - version: 'pre'
-        #     os: ubuntu-latest
-        #     experimental: true
-        #     arch: x64
+          - julia-version: 'pre'
+            julia-arch: x64
+            os: ubuntu-latest
+            experimental: true
     steps:
       - uses: actions/checkout@v4
       - uses: julia-actions/setup-julia@v2
