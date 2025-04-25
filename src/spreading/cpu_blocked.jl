@@ -102,7 +102,7 @@ function spread_from_points!(
     Base.require_one_based_indexing(indices)
     lck = ReentrantLock()
 
-    Threads.@threads :static for i ∈ 1:Nt
+    Threads.@threads for i ∈ 1:Nt
         # j_start = (i - 1) * nblocks ÷ Nt + 1
         # j_end = i * nblocks ÷ Nt
         j_start = bd.blocks_per_thread[i] + 1

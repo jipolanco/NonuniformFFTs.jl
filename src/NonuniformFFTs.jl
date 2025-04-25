@@ -347,7 +347,7 @@ function copy_deconvolve_to_non_oversampled!(
     index_map_front, index_map_last = Base.front(index_map), last(index_map)
     ϕ̂s_front, ϕ̂s_last = Base.front(ϕ̂s), last(ϕ̂s)
 
-    Threads.@threads :static for i_last ∈ inds_last
+    Threads.@threads for i_last ∈ inds_last
         @inbounds begin
             j_last = index_map_last[i_last]
             ϕ̂_last = ϕ̂s_last[i_last]
@@ -403,7 +403,7 @@ function copy_deconvolve_to_oversampled!(
     index_map_front, index_map_last = Base.front(index_map), last(index_map)
     ϕ̂s_front, ϕ̂s_last = Base.front(ϕ̂s), last(ϕ̂s)
 
-    Threads.@threads :static for i_last ∈ inds_last
+    Threads.@threads for i_last ∈ inds_last
         @inbounds begin
             j_last = index_map_last[i_last]
             ϕ̂_last = ϕ̂s_last[i_last]

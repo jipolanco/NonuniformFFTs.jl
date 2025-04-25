@@ -84,7 +84,7 @@ function assign_blocks_cpu!(
         nblocks_per_dir::NTuple{N},
         transform_fold::F,
     ) where {N, F}
-    Threads.@threads :static for I ∈ eachindex(xp...)
+    Threads.@threads for I ∈ eachindex(xp...)
         y⃗ = unsafe_get_point(transform_fold, xp, I)
         n = block_index(y⃗, Δxs, block_dims, nblocks_per_dir)
 
@@ -106,7 +106,7 @@ function sortperm_cpu!(
         nblocks_per_dir,
         transform_fold::F,
     ) where {N, F}
-    Threads.@threads :static for I ∈ eachindex(xp...)
+    Threads.@threads for I ∈ eachindex(xp...)
         y⃗ = unsafe_get_point(transform_fold, xp, I)
         n = block_index(y⃗, Δxs, block_dims, nblocks_per_dir)
         @inbounds J = cumulative_npoints_per_block[n] + blockidx[I]

@@ -107,7 +107,7 @@ function interpolate!(
     Base.require_one_based_indexing(buffers)
     Base.require_one_based_indexing(indices)
 
-    Threads.@threads :static for i ∈ 1:Nt
+    Threads.@threads for i ∈ 1:Nt
         # j_start = (i - 1) * nblocks ÷ Nt + 1
         # j_end = i * nblocks ÷ Nt
         j_start = bd.blocks_per_thread[i] + 1

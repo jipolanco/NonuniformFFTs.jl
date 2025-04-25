@@ -5,6 +5,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- CPU: avoid `:static` scheduling when using threads.
+  This improves composability while it shouldn't noticeably impact performance.
+  See the [Julia docs](https://docs.julialang.org/en/v1/base/multi-threading/#Base.Threads.@threads) for more details.
+
 ## [v0.7.2] - 2025-04-15
 
 ### Changed
