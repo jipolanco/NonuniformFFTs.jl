@@ -5,6 +5,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Tune performance on AMDGPU.
+  We now default to `Direct` evaluation (as with CUDA), which can be much
+  faster than `FastApproximation`. The difference is more visible in type-2
+  transforms, while type-1 doesn't change that much.
+  Besides, direct evaluation of the (non-default) `KaiserBesselKernel` has been optimised.
+
 ## [v0.7.3] - 2025-04-28
 
 ### Changed
