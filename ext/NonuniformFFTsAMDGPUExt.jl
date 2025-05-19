@@ -2,21 +2,23 @@ module NonuniformFFTsAMDGPUExt
 
 using NonuniformFFTs
 using NonuniformFFTs.Kernels: Kernels
+using Bessels: Bessels
 using AMDGPU
 using AMDGPU.Device: @device_override
 
-# Some empirical observations (on AMD MI210, ROCm 6.0.2):
+# Some empirical observations (on AMD MI300A, ROCm 6.3.3):
 #
 # - using Bessel functions defined by AMD (@device_override below) is significantly slower
-#   than calling functions in Bessels.jl (at least on Float64), so we disable the overrides
-#   for now;
+#   than calling functions in Bessels.jl (at least on Float64). Moreover, GPU performance of
+#   the Bessels.jl implementation can be greatly improved by avoiding branches (if/else), even
+#   if this means performing more operations. This is what we do below.
 #
-# - direct evaluation of the BackwardsKaiserBesselKernel (sinh) is faster than the
-#   KaiserBesselKernel (Bessel function I₀), so BKB is the default;
+# - direct evaluation of the BackwardsKaiserBesselKernel (sinh) is very slightly faster than the
+#   KaiserBesselKernel (Bessel function I₀) and also a bit more accurate, so BKB is the default.
 #
-# - in both cases, direct evaluation is significantly slower than fast polynomial
-#   approximation (which is not the case on CUDA / A100), so we use FastApproximation by
-#   default.
+# - direct evaluation can be significantly faster than fast polynomial approximation
+#   (especially for shared-memory type-2, where the difference is huge for some reason), so
+#   we use Direct() evaliation by default.
 
 # This is currently not wrapped in AMDGPU.jl, probably because besseli0 is not defined by
 # SpecialFunctions.jl either (the more general besseli is defined though).
@@ -26,6 +28,23 @@ using AMDGPU.Device: @device_override
 # @device_override Kernels._besseli0(x::Float64) = ccall("extern __ocml_i0_f64", llvmcall, Cdouble, (Cdouble,), x)
 # @device_override Kernels._besseli0(x::Float32) = ccall("extern __ocml_i0_f32", llvmcall, Cfloat, (Cfloat,), x)
 
+# Adapted from Bessels.jl implementation; seems to be faster on AMD GPUs.
+function besseli0_branchless(x::T) where {T}
+    x = abs(x)
+    xh = x / 2
+    y_lo = let a = xh * xh
+        muladd(a, evalpoly(a, Bessels.besseli0_small_coefs(T)), 1)
+    end
+    y_hi = let a = exp(xh)
+	    xinv = inv(x)
+        s = a * evalpoly(xinv, Bessels.besseli0_med_coefs(T)) * sqrt(xinv)
+        a * s
+    end
+    ifelse(x < T(7.75), y_lo, y_hi)
+end
+
+@device_override Kernels._besseli0(x::Union{Float32, Float64}) = besseli0_branchless(x)
+
 # This should enable minor performance gains in set_points!.
 # This is not needed in the CUDA extension as CUDA.jl already overrides `rem` to call CUDA functions.
 # TODO: add this to AMDGPU.jl
@@ -34,7 +53,7 @@ using AMDGPU.Device: @device_override
 
 NonuniformFFTs.default_kernel(::ROCBackend) = BackwardsKaiserBesselKernel()
 
-NonuniformFFTs.default_kernel_evalmode(::ROCBackend) = FastApproximation()
+NonuniformFFTs.default_kernel_evalmode(::ROCBackend) = Direct()
 
 # We want the result of this function to be a compile-time constant to avoid some type
 # instabilities, which is why we hardcode the result even though it could be obtained using
@@ -50,10 +69,10 @@ function NonuniformFFTs.available_static_shared_memory(::ROCBackend)
     expected
 end
 
-# This seems to be significantly faster than the default in some tests (but should be further tuned...).
+# This seems to be significantly faster than the default.
 NonuniformFFTs.groupsize_spreading_gpu_shmem(::ROCBackend, Np::Integer) = 256
 
-# For shared-memory interpolation, the MI210 prefers a very large group size.
+# For shared-memory interpolation, the MI210 and MI300A prefer a very large group size.
 NonuniformFFTs.groupsize_interp_gpu_shmem(::ROCBackend) = 1024
 
 end
