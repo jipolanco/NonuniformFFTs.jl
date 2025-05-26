@@ -239,7 +239,7 @@ For real-to-complex transforms, the NonuniformFFTs.jl API demonstrated above sho
 
 NonuniformFFTs.jl can be *fast*:
 
-![](benchmarks/plots/benchmark_ComplexF64_type1.svg)
+![](benchmark/comparisons/plots/benchmark_ComplexF64_type1.svg)
 
 On the CPU, for complex non-uniform data, it displays comparable performance to
 the [FINUFFT library](https://github.com/flatironinstitute/finufft) written in
