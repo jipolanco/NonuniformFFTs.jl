@@ -17,7 +17,8 @@ function setup_cpu_benchmark(::Type{Z}, Ns::Dims, Np; σ, m, fftw_flags = FFTW.E
         randn(rng, T, Np)
     end
     vp = randn(rng, Z, Np)
-    p = PlanNUFFT(Z, Ns; backend, σ, m, gpu_method, fftw_flags, kws...)
+    backend = CPU()
+    p = PlanNUFFT(Z, Ns; backend, σ, m, fftw_flags, kws...)
     ûs = similar(vp, complex(T), size(p))
     (; p, xp, vp, ûs,)
 end
@@ -36,11 +37,18 @@ function run_cpu_benchmark_type2(data)
     nothing
 end
 
-let Ns = (128, 128, 128), Np = prod(Ns), σ = 1.5, m = HalfSupport(4)
-    local ρ = Np / prod(Ns)
-    local key = "CPU: Ns = $Ns, Np = $Np (density $ρ), σ = $σ, m = $m"
-    for T in (Float64, ComplexF64)
-        SUITE[key]["$T Type 1"] = @benchmarkable run_cpu_benchmark_type1(data) setup=(data = setup_cpu_benchmark(T, Ns, Np; σ, m))
-        SUITE[key]["$T Type 2"] = @benchmarkable run_cpu_benchmark_type2(data) setup=(data = setup_cpu_benchmark(T, Ns, Np; σ, m))
-    end
+## Run benchmarks
+
+Ns = (128, 128, 128)
+Np = prod(Ns)
+σ = 1.5
+m = HalfSupport(4)
+
+ρ = Np / prod(Ns)
+key = "CPU: Ns = $Ns, Np = $Np (density $ρ), σ = $σ, m = $m"
+
+for Z in (Float64, ComplexF64)
+    local data = setup_cpu_benchmark(Z, Ns, Np; σ, m)
+    SUITE[key]["$Z Type 1"] = @benchmarkable run_cpu_benchmark_type1($data)
+    SUITE[key]["$Z Type 2"] = @benchmarkable run_cpu_benchmark_type2($data)
 end
