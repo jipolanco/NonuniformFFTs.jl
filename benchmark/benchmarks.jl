@@ -45,7 +45,7 @@ Np = prod(Ns)
 m = HalfSupport(4)
 
 ρ = Np / prod(Ns)
-key = "CPU: Ns = $Ns, Np = $Np (density $ρ), σ = $σ, m = $m"
+key = "CPU: Ns = $Ns, ρ = $ρ, σ = $σ, m = $m"
 
 for Z in (Float64, ComplexF64)
     local data = setup_cpu_benchmark(Z, Ns, Np; σ, m)

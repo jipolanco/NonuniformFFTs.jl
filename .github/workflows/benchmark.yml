@@ -14,5 +14,5 @@ jobs:
         with:
           # https://github.com/MilesCranmer/AirspeedVelocity.jl?tab=readme-ov-file#ci-parameters
           julia-version: '1.11'
-          tune: true
-          enable-plots: true
+          tune: false
+          enable-plots: false
