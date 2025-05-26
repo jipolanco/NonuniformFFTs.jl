@@ -4,7 +4,7 @@ available_static_shared_memory(backend::KA.Backend) = Int32(48) << 10  # 48 KiB 
 
 # Minimum size of a batch (in number of non-uniform points) used in the shared-memory
 # implementation of GPU spreading.
-const DEFAULT_GPU_BATCH_SIZE = 16
+default_gpu_batch_size(backend::KA.Backend) = 16
 
 # Return ndrange parameter to be passed to KA kernels defining shared memory implementations.
 gpu_shmem_ndrange_from_groupsize(groupsize::Integer, ngroups::Tuple) =
@@ -17,7 +17,7 @@ gpu_shmem_ndrange_from_groupsize(groupsize::Integer, ngroups::Tuple) =
 # For this to be true, the available_static_shared_memory function should also return a
 # compile-time constant (see CUDA and AMDGPU extensions for details).
 @inline function block_dims_gpu_shmem(
-        backend, ::Type{Z}, ::Dims{D}, ::HalfSupport{M}, ::Val{Np_min} = Val(DEFAULT_GPU_BATCH_SIZE);
+        backend, ::Type{Z}, ::Dims{D}, ::HalfSupport{M}, ::Val{Np_min};
         warn = false,
     ) where {Z <: Number, D, M, Np_min}
     T = real(Z)

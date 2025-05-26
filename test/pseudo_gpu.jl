@@ -105,7 +105,8 @@ end
 
 # Test that block_dims_gpu_shmem returns compile-time constants.
 function test_inference_block_dims_shmem(backend, ::Type{Z}, dims, m::HalfSupport) where {Z}
-    ret = NonuniformFFTs.block_dims_gpu_shmem(backend, Z, dims, m)
+    batch_size = Val(NonuniformFFTs.default_gpu_batch_size(backend))
+    ret = NonuniformFFTs.block_dims_gpu_shmem(backend, Z, dims, m, batch_size)
     Val(ret)
 end
 
