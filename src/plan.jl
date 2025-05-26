@@ -363,7 +363,7 @@ function _PlanNUFFT(
         block_size::Union{Integer, Dims{D}, Nothing} = default_block_size(Ns, backend),
         synchronise::Bool = false,
         gpu_method::Symbol = :global_memory,
-        gpu_batch_size::Val = Val(DEFAULT_GPU_BATCH_SIZE),  # currently only used in shared-memory GPU spreading
+        gpu_batch_size::Val = Val(default_gpu_batch_size(backend)),  # currently only used in shared-memory GPU spreading
         point_transform::F = identity,
     ) where {Z <: Number, D, F <: Function}
     ks = init_wavenumbers(Z, Ns)

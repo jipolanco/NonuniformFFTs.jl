@@ -18,7 +18,7 @@ using AMDGPU.Device: @device_override
 #
 # - direct evaluation can be significantly faster than fast polynomial approximation
 #   (especially for shared-memory type-2, where the difference is huge for some reason), so
-#   we use Direct() evaliation by default.
+#   we use Direct() evaluation by default.
 
 # This is currently not wrapped in AMDGPU.jl, probably because besseli0 is not defined by
 # SpecialFunctions.jl either (the more general besseli is defined though).
