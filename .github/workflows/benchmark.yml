@@ -1,0 +1,18 @@
+name: Benchmark
+on:
+  pull_request_target:
+    branches:
+      - master
+permissions:
+  pull-requests: write    # needed to post comments
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: MilesCranmer/AirspeedVelocity.jl@action-v1
+        with:
+          # https://github.com/MilesCranmer/AirspeedVelocity.jl?tab=readme-ov-file#ci-parameters
+          julia-version: '1.11'
+          tune: false
+          enable-plots: false

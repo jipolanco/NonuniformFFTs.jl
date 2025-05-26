@@ -9,6 +9,8 @@ struct HalfSupport{M} end
 HalfSupport(M) = HalfSupport{M}()
 half_support(::HalfSupport{M}) where {M} = M::Int
 
+Base.show(io::IO, ::HalfSupport{M}) where {M} = print(io, "HalfSupport($M)")
+
 abstract type EvaluationMode end
 
 """

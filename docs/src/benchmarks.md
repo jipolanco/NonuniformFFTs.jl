@@ -26,7 +26,7 @@ The benchmarks compare NonuniformFFTs.jl v0.6.7 (26/11/2024) and FINUFFT v2.3.1
 Each reported time includes (1) the time spent processing non-uniform points
 (`set_points!` / `(cu)finufft_setpts!`) and (2) the time spent on the actual transform (`exec_type{1,2}!` / `(cu)finufft_exec!`).
 
-The script used for benchmarking can be found in [`benchmarks/run_benchmarks.jl`](https://github.com/jipolanco/NonuniformFFTs.jl/blob/master/benchmarks/run_benchmarks.jl).
+The script used for benchmarking can be found in [`benchmark/comparisons/run_benchmarks.jl`](https://github.com/jipolanco/NonuniformFFTs.jl/blob/master/benchmark/comparisons/run_benchmarks.jl).
 
 ## [Complex non-uniform data](@id benchmarks-complex)
 
