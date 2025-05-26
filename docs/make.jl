@@ -4,7 +4,7 @@ using Downloads: Downloads
 using NonuniformFFTs
 
 # Copy benchmark results to docs/src/benchmarks/
-srcdir = relpath(joinpath(@__DIR__, "..", "benchmarks", "plots"))
+srcdir = relpath(joinpath(@__DIR__, "..", "benchmark", "plots"))
 dstdir = relpath(joinpath(@__DIR__, "src", "img"))
 mkpath(dstdir)
 for fname ∈ readdir(srcdir)
