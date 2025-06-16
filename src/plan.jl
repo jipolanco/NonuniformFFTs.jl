@@ -69,24 +69,25 @@ These are user-defined functions that allow to modify the input and/or the outpu
 
 Concretely, one can define two different callback functions:
 
-1.  a *callback on non-uniform data* (input of type-1 NUFFT / output of type-2 NUFFT).
+1.  a callback on *non-uniform data* (input of type-1 NUFFT / output of type-2 NUFFT).
 
-    Its signature should be `nonuniform(v::Tuple, x::Tuple, n::Integer)`, where `v = (v₁, v₂, …)` is the
-    "original" value at non-uniform point `x = (x₁, x₂, …)`, and `n` is the index of point `x` in the list
-    of non-uniform locations. Note that `v` and `x` are tuples which may have different lengths:
+    Its signature should be `nonuniform(v::Tuple, n::Integer)`, where `v = (v₁, v₂, …)` is the
+    "original" value at the non-uniform point with index `n` (i.e. in the `points` array of [`set_points!`](@ref)).
 
-    - the length of `x` is equal to the number of _dimensions_ (e.g. 3 for 3D transforms);
-    - the length of `v` is equal to the number of _transforms_ (`ntransforms` argument of [`PlanNUFFT`](@ref)).
+    Note: the length of `v` is equal to the number of _transforms_ (`ntransforms` argument of [`PlanNUFFT`](@ref)).
 
-2.  a *callback on uniform data* (output of type-1 NUFFT / input of type-2 NUFFT).
+2.  a callback on *uniform data* (output of type-1 NUFFT / input of type-2 NUFFT).
 
     Its signature should be `uniform(w::Tuple, idx::Tuple)`, where `w = (w₁, w₂, …)` is
-    the "original" value at grid point with index `idx = (i₁, i₂, …)`. Similarly to above:
+    the "original" value at grid point with index `idx = (i₁, i₂, …)`. Note that `w` and `idx`
+    are tuples which may have different lengths:
 
-    - the length of `idx` is equal to the number of _dimensions_ (e.g. 3 for 3D transforms);
-    - the length of `w` is equal to the number of _transforms_ (`ntransforms` argument of [`PlanNUFFT`](@ref)).
+    - the length of `w` is equal to the number of _transforms_ (`ntransforms` argument of [`PlanNUFFT`](@ref));
+    - the length of `idx` is equal to the number of _dimensions_ (e.g. 3 for 3D transforms).
 
 # Examples
+
+## Callback on non-uniform data
 
 Define a callback function that multiplies each non-uniform point by random weights in 2D:
 
@@ -95,9 +96,11 @@ Np = 1000                                # number of non-uniform points
 xs = (rand(Np) .* 2pi, rand(Np) .* 2pi)  # random non-uniform points in [0, 2π]²
 weights = rand(Np)                       # random weights
 
-callback_nu(v, x, n) = v .* weights[n]   # define callback which will multiply each non-uniform value by its corresponding weight
+callback_nu(v, n) = v .* weights[n]   # define callback which will multiply each non-uniform value by its corresponding weight
 callbacks = NUFFTCallbacks(nonuniform = callback_nu)
 ```
+
+## Callback on uniform data
 
 Define a callback function that divides each uniform point by ``|\\bm{k}|^2`` (where
 ``\\bm{k}`` can represent a Fourier wavevector):
@@ -127,10 +130,10 @@ struct NUFFTCallbacks{
     uniform::CallbackU
 end
 
-NUFFTCallbacks(; nonuniform = default_callback(), uniform = default_callback(),) = NUFFTCallbacks(nonuniform, uniform)
+NUFFTCallbacks(; nonuniform = default_callback, uniform = default_callback) = NUFFTCallbacks(nonuniform, uniform)
 
 # By default, the callback returns the first passed argument (which is the input or output NUFFT value).
-default_callback() = @inline (v, args...) -> v
+@inline default_callback(v, args...) = v
 
 """
     PlanNUFFT([T = ComplexF64], dims::Dims; ntransforms = Val(1), backend = CPU(), kwargs...)
@@ -455,6 +458,8 @@ function _PlanNUFFT(
         gpu_method::Symbol = :global_memory,
         gpu_batch_size::Val = Val(default_gpu_batch_size(backend)),  # currently only used in shared-memory GPU spreading
         point_transform::F = identity,
+        callbacks_type1::NUFFTCallbacks = NUFFTCallbacks(),
+        callbacks_type2::NUFFTCallbacks = NUFFTCallbacks(),
     ) where {Z <: Number, D, F <: Function}
     ks = init_wavenumbers(Z, Ns)
     # Determine dimensions of oversampled grid.
@@ -514,6 +519,7 @@ function _PlanNUFFT(
     PlanNUFFT(
         kernel_data, backend, kernel_evalmode, σ, points_ref, nufft_data, blocks,
         fftshift, index_map, timer, synchronise, point_transform_fold,
+        callbacks_type1, callbacks_type2,
     )
 end
 

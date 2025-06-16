@@ -144,6 +144,7 @@ function exec_type1! end
 function exec_type1!(ûs_k::NTuple{C, AbstractArray{Z}}, p::PlanNUFFT{T}, vp::NTuple{C, AbstractVector{T}}) where {T, Z, C}
     (; backend, points, kernels, data, blocks, index_map,) = p
     (; us,) = data
+    callbacks = p.callbacks_type1
     Z === complex(T) || throw(ArgumentError(lazy"uniform data must have the same accuracy as the created plan (got $Z values for a $T plan)"))
     timer = get_timer_nowarn(p)
 
@@ -160,7 +161,7 @@ function exec_type1!(ûs_k::NTuple{C, AbstractArray{Z}}, p::PlanNUFFT{T}, vp::N
         end
 
         @timeit timer "(1) Spreading" begin
-            spread_from_points!(backend, p.point_transform_fold, blocks, kernels, p.kernel_evalmode, us, points, vp)
+            spread_from_points!(backend, callbacks.nonuniform, p.point_transform_fold, blocks, kernels, p.kernel_evalmode, us, points, vp)
             maybe_synchronise(p)
         end
 
@@ -173,7 +174,7 @@ function exec_type1!(ûs_k::NTuple{C, AbstractArray{Z}}, p::PlanNUFFT{T}, vp::N
             R = real(T)
             normfactor::R = prod(N -> 2π / N, size(first(us)))  # FFT normalisation factor
             ϕ̂s = map(fourier_coefficients, kernels)
-            copy_deconvolve_to_non_oversampled!(backend, ûs_k, ûs, index_map, ϕ̂s, normfactor)  # truncate to original grid + normalise
+            copy_deconvolve_to_non_oversampled!(backend, callbacks.uniform, ûs_k, ûs, index_map, ϕ̂s, normfactor)  # truncate to original grid + normalise
             maybe_synchronise(p)
         end
     end
@@ -336,8 +337,8 @@ function non_oversampled_indices!(
 end
 
 function copy_deconvolve_to_non_oversampled!(
-        ::CPU, ŵs_all::NTuple{C}, ûs_all::NTuple{C}, index_map, ϕ̂s, normfactor,
-    ) where {C}
+        ::CPU, callback::F, ŵs_all::NTuple{C}, ûs_all::NTuple{C}, index_map, ϕ̂s, normfactor,
+    ) where {C, F}
     @assert C > 0
     inds_out = axes(first(ŵs_all))
     @assert inds_out == map(eachindex, index_map)
@@ -357,8 +358,10 @@ function copy_deconvolve_to_non_oversampled!(
                 js_front = map(inbounds_getindex, index_map_front, Tuple(I_front))
                 ϕ̂_front = map(inbounds_getindex, ϕ̂s_front, Tuple(I_front))
                 β = normfactor / (prod(ϕ̂_front) * ϕ̂_last)   # deconvolution + FFT normalisation factor
-                for (ŵs, ûs) ∈ zip(ŵs_all, ûs_all)
-                    ŵs[I] = β * ûs[js_front..., j_last]
+                u⃗ = map(ûs -> β * @inbounds(ûs[js_front..., j_last]), ûs_all)::NTuple{C}
+                u⃗_new = @inline callback(u⃗, Tuple(I))  # possibly modify value of u⃗
+                for (ŵs, û) ∈ zip(ŵs_all, u⃗_new)
+                    ŵs[I] = û
                 end
             end
         end
@@ -368,26 +371,29 @@ function copy_deconvolve_to_non_oversampled!(
 end
 
 @kernel function copy_deconvolve_to_non_oversampled_kernel!(
+        callback::F,
         ŵs_all::NTuple{C}, @Const(ûs_all::NTuple{C}), @Const(index_map), @Const(ϕ̂s), @Const(normfactor),
-    ) where {C}
+    ) where {C, F}
     is = @index(Global, NTuple)                 # output index
     js = map(inbounds_getindex, index_map, is)  # input index
     ϕs_local = map(inbounds_getindex, ϕ̂s, is)   # convolution coefficients (one for each Cartesian direction)
     β = normfactor / prod(ϕs_local)
-    for n ∈ eachindex(ŵs_all, ûs_all)
-        @inbounds ŵs_all[n][is...] = β * ûs_all[n][js...]
+    u⃗ = map(ûs -> β * @inbounds(ûs[js...]), ûs_all)::NTuple{C}
+    u⃗_new = @inline callback(u⃗, is)  # possibly modify value of u⃗
+    for n ∈ eachindex(ŵs_all, u⃗_new)
+        @inbounds ŵs_all[n][is...] = u⃗_new[n]
     end
     nothing
 end
 
 function copy_deconvolve_to_non_oversampled!(
-        backend::GPU, ŵs_all::NTuple{C}, ûs_all::NTuple{C}, index_map, ϕ̂s, normfactor,
-    ) where {C}
+        backend::GPU, callback::F, ŵs_all::NTuple{C}, ûs_all::NTuple{C}, index_map, ϕ̂s, normfactor,
+    ) where {C, F}
     @assert C > 0
     ndrange = size(first(ŵs_all))  # size of output array (uniform grid, non oversampled)
     workgroupsize = default_workgroupsize(backend, ndrange)
     kernel! = copy_deconvolve_to_non_oversampled_kernel!(backend, workgroupsize, ndrange)
-    kernel!(ŵs_all, ûs_all, index_map, ϕ̂s, normfactor)
+    kernel!(callback, ŵs_all, ûs_all, index_map, ϕ̂s, normfactor)
     ŵs_all
 end
 
