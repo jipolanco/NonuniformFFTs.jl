@@ -55,11 +55,7 @@ function spread_from_points!(
     for i ∈ eachindex(x⃗s[1], vp_all[1])  # iterate over all points
         x⃗ = map(xp -> @inbounds(transform_fold(xp[i])), x⃗s)
         vs = map(vp -> @inbounds(vp[i]), vp_all)  # non-uniform values at point x⃗
-        vs_new = if callback === default_callback
-            vs
-        else
-            @inline callback(vs, i)
-        end
+        vs_new = @inline callback(vs, i)
         spread_from_point!(gs, evalmode, us_all, x⃗, vs_new)
     end
     us_all
