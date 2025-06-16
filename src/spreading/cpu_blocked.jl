@@ -83,6 +83,7 @@ end
 
 function spread_from_points!(
         ::CPU,
+        callback::Callback,
         transform_fold::F,
         bd::BlockDataCPU,
         gs,
@@ -90,7 +91,7 @@ function spread_from_points!(
         us_all::NTuple{C, AbstractArray},
         xp::NTuple{D, AbstractVector},
         vp_all::NTuple{C, AbstractVector},
-    ) where {F <: Function, C, D}
+    ) where {F <: Function, Callback <: Function, C, D}
     (; block_dims, pointperm, buffers, indices,) = bd
     Ms = map(Kernels.half_support, gs)
     for us ∈ us_all
@@ -126,7 +127,8 @@ function spread_from_points!(
                 end
                 x⃗ = map(xp -> transform_fold(@inbounds(xp[point_idx])), xp)
                 vs = map(vp -> @inbounds(vp[l]), vp_all)  # values at the non-uniform point x⃗
-                spread_from_point_blocked!(gs, evalmode, block, x⃗, vs, Tuple(I₀))
+                vs_new = @inline callback(vs, point_idx)
+                spread_from_point_blocked!(gs, evalmode, block, x⃗, vs_new, Tuple(I₀))
             end
 
             # Indices of current block including padding

@@ -10,7 +10,8 @@ using StaticArrays: MVector
         @Const(pointperm),
         @Const(prefactor::Real),    # = volume of a grid cell = prod(Δxs)
         transform_fold::F,
-    ) where {C, D, F <: Function}
+        callback::Callback,
+    ) where {C, D, F <: Function, Callback <: Function}
     i = @index(Global, Linear)
 
     j = if pointperm === nothing
@@ -27,9 +28,10 @@ using StaticArrays: MVector
     indvals = get_inds_vals_gpu(transform_fold, gs, evalmode, points, Ns, j)
 
     v⃗ = interpolate_from_arrays_gpu(us, indvals, Ns, prefactor)
+    v⃗_new = @inline callback(v⃗, j)
 
-    for n ∈ eachindex(vp, v⃗)
-        @inbounds vp[n][j] = v⃗[n]
+    for n ∈ eachindex(vp, v⃗_new)
+        @inbounds vp[n][j] = v⃗_new[n]
     end
 
     nothing
@@ -37,6 +39,7 @@ end
 
 function interpolate!(
         backend::GPU,
+        callback::Callback,
         transform_fold::F,
         bd::Union{BlockDataGPU, NullBlockData},
         gs::NTuple{D},
@@ -44,7 +47,7 @@ function interpolate!(
         vp_all::NTuple{C, AbstractVector},
         us::NTuple{C, AbstractArray},
         xp::NTuple{D, AbstractVector},
-    ) where {F <: Function, C, D}
+    ) where {F <: Function, Callback <: Function, C, D}
     # Note: the dimensions of arrays have already been checked via check_nufft_nonuniform_data.
     foreach(Base.require_one_based_indexing, xp)  # this is to make sure that all indices match
     foreach(Base.require_one_based_indexing, vp_all)
@@ -78,7 +81,7 @@ function interpolate!(
     if method === :global_memory
         let ndrange = ndrange_points, groupsize = groupsize_points
             kernel! = interpolate_to_point_naive_kernel!(backend, groupsize)
-            kernel!(vp_sorted, gs, evalmode, xp, us, pointperm_, prefactor, transform_fold; ndrange)
+            kernel!(vp_sorted, gs, evalmode, xp, us, pointperm_, prefactor, transform_fold, callback; ndrange)
         end
     elseif method === :shared_memory
         @assert bd isa BlockDataGPU
@@ -98,7 +101,7 @@ function interpolate!(
             kernel!(
                 vp_sorted, gs, evalmode, xp, us, pointperm_, bd.cumulative_npoints_per_block,
                 prefactor,
-                block_dims, Val(shmem_size), transform_fold,
+                block_dims, Val(shmem_size), transform_fold, callback,
             )
         end
     end
@@ -217,7 +220,8 @@ end
         ::Val{block_dims},
         ::Val{shmem_size},  # this is a bit redundant, but seems to be required for CPU backends (used in tests)
         transform_fold::F,
-    ) where {C, D, Z <: Number, block_dims, shmem_size, F <: Function}
+        callback::Callback,
+    ) where {C, D, Z <: Number, block_dims, shmem_size, F <: Function, Callback <: Function}
 
     @uniform begin
         groupsize = @groupsize()
@@ -281,12 +285,41 @@ end
             inds_start = map(first, indvals)
             window_vals = map(last, indvals)
             v = interpolate_from_arrays_shmem(u_local, inds_start, window_vals, prefactor)
-            @inbounds vp[c][j] = v
+            if C == 1
+                # Only apply callback if we're not doing multiple simultaneous transforms.
+                # Otherwise, we need the whole vp[:][j], which we don't currently have.
+                # In that case, we apply the callback at the end of the kernel (which is not
+                # optimal...).
+                v_new, = @inline callback((v,), j)
+            else
+                v_new = v
+            end
+            @inbounds vp[c][j] = v_new
         end
 
         # Avoid copying data to u_local too early in the next iteration (c -> c + 1).
         # This is mostly useful when c < C (but putting an `if` fails...).
         @synchronize
+    end
+
+    # Now apply callback if C > 1 and if we've defined a custom callback.
+    # We repeat a lot of stuff from above, which is probably not optimal...
+    if C > 1 && callback !== default_callback
+        # This block will take care of non-uniform points (a + 1):b
+        @inbounds a = cumulative_npoints_per_block[block_n]
+        @inbounds b = cumulative_npoints_per_block[block_n + 1]
+        for i in (a + threadidx):nthreads:b
+            j = if pointperm === nothing
+                i
+            else
+                @inbounds pointperm[i]
+            end
+            v⃗ = map(vs -> @inbounds(vs[j]), vp)
+            v⃗_new = @inline callback(v⃗, j)
+            for c in eachindex(vp, v⃗_new)
+                @inbounds vp[c][j] = v⃗_new[c]
+            end
+        end
     end
 
     nothing

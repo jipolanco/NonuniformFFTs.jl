@@ -34,6 +34,7 @@ using .Kernels:
 
 export
     PlanNUFFT,
+    NUFFTCallbacks,
     HalfSupport,
     Direct, FastApproximation,
     GaussianKernel,
@@ -119,8 +120,8 @@ end
 end
 
 """
-    exec_type1!(ûs::AbstractArray{Z}, p::PlanNUFFT{T}, vp::AbstractVector{T})
-    exec_type1!(ûs::NTuple{N,AbstractArray{Z}}, p::PlanNUFFT{T}, vp::NTuple{N,AbstractVector{T}})
+    exec_type1!(ûs::AbstractArray{Z}, p::PlanNUFFT{T}, vp::AbstractVector{T}; callbacks = NUFFTCallbacks())
+    exec_type1!(ûs::NTuple{N,AbstractArray{Z}}, p::PlanNUFFT{T}, vp::NTuple{N,AbstractVector{T}}; callbacks = NUFFTCallbacks())
 
 Perform type-1 NUFFT (from non-uniform points to uniform grid).
 
@@ -136,11 +137,16 @@ The input types must satisfy `Z = complex(T)`. This means:
 - `Z = Complex{T}` for real-data transforms (where `T <: Real`);
 - `Z = T` for complex-data transforms (where `T <: Complex`).
 
+See [`NUFFTCallbacks`](@ref) for details on the optional `callbacks` keyword argument.
+
 See also [`exec_type2!`](@ref).
 """
 function exec_type1! end
 
-function exec_type1!(ûs_k::NTuple{C, AbstractArray{Z}}, p::PlanNUFFT{T}, vp::NTuple{C, AbstractVector{T}}) where {T, Z, C}
+function exec_type1!(
+        ûs_k::NTuple{C, AbstractArray{Z}}, p::PlanNUFFT{T}, vp::NTuple{C, AbstractVector{T}};
+        callbacks::NUFFTCallbacks = NUFFTCallbacks()
+    ) where {T, Z, C}
     (; backend, points, kernels, data, blocks, index_map,) = p
     (; us,) = data
     Z === complex(T) || throw(ArgumentError(lazy"uniform data must have the same accuracy as the created plan (got $Z values for a $T plan)"))
@@ -159,7 +165,7 @@ function exec_type1!(ûs_k::NTuple{C, AbstractArray{Z}}, p::PlanNUFFT{T}, vp::N
         end
 
         @timeit timer "(1) Spreading" begin
-            spread_from_points!(backend, p.point_transform_fold, blocks, kernels, p.kernel_evalmode, us, points, vp)
+            spread_from_points!(backend, callbacks.nonuniform, p.point_transform_fold, blocks, kernels, p.kernel_evalmode, us, points, vp)
             maybe_synchronise(p)
         end
 
@@ -172,7 +178,7 @@ function exec_type1!(ûs_k::NTuple{C, AbstractArray{Z}}, p::PlanNUFFT{T}, vp::N
             R = real(T)
             normfactor::R = prod(N -> 2π / N, size(first(us)))  # FFT normalisation factor
             ϕ̂s = map(fourier_coefficients, kernels)
-            copy_deconvolve_to_non_oversampled!(backend, ûs_k, ûs, index_map, ϕ̂s, normfactor)  # truncate to original grid + normalise
+            copy_deconvolve_to_non_oversampled!(backend, callbacks.uniform, ûs_k, ûs, index_map, ϕ̂s, normfactor)  # truncate to original grid + normalise
             maybe_synchronise(p)
         end
     end
@@ -181,8 +187,8 @@ function exec_type1!(ûs_k::NTuple{C, AbstractArray{Z}}, p::PlanNUFFT{T}, vp::N
 end
 
 # Case of a single transform
-function exec_type1!(ûs_k::AbstractArray{<:Complex}, p::PlanNUFFT, vp)
-    exec_type1!((ûs_k,), p, (vp,))
+function exec_type1!(ûs_k::AbstractArray{<:Complex}, p::PlanNUFFT, vp; kws...)
+    exec_type1!((ûs_k,), p, (vp,); kws...)
     ûs_k
 end
 
@@ -203,8 +209,8 @@ function _type1_fft!(data::ComplexNUFFTData)
 end
 
 """
-    exec_type2!(vp::AbstractVector{T}, p::PlanNUFFT{T}, ûs::AbstractArray{Z})
-    exec_type2!(vp::NTuple{N,AbstractVector{T}}, p::PlanNUFFT{T}, ûs::NTuple{N,AbstractArray{Z}})
+    exec_type2!(vp::AbstractVector{T}, p::PlanNUFFT{T}, ûs::AbstractArray{Z}; callbacks = NUFFTCallbacks())
+    exec_type2!(vp::NTuple{N,AbstractVector{T}}, p::PlanNUFFT{T}, ûs::NTuple{N,AbstractArray{Z}}; callbacks = NUFFTCallbacks())
 
 Perform type-2 NUFFT (from uniform grid to non-uniform points).
 
@@ -220,11 +226,16 @@ The input types must satisfy `Z = complex(T)`. This means:
 - `Z = Complex{T}` for real-data transforms (where `T <: Real`);
 - `Z = T` for complex-data transforms (where `T <: Complex`).
 
+See [`NUFFTCallbacks`](@ref) for details on the optional `callbacks` keyword argument.
+
 See also [`exec_type1!`](@ref).
 """
 function exec_type2! end
 
-function exec_type2!(vp::NTuple{C, AbstractVector{T}}, p::PlanNUFFT{T}, ûs_k::NTuple{C, AbstractArray{Z}}) where {T, Z, C}
+function exec_type2!(
+        vp::NTuple{C, AbstractVector{T}}, p::PlanNUFFT{T}, ûs_k::NTuple{C, AbstractArray{Z}};
+        callbacks::NUFFTCallbacks = NUFFTCallbacks()
+    ) where {T, Z, C}
     (; backend, points, kernels, data, blocks, index_map,) = p
     (; us,) = data
     Z === complex(T) || throw(ArgumentError(lazy"uniform data must have the same accuracy as the created plan (got $Z values for a $T plan)"))
@@ -254,7 +265,7 @@ function exec_type2!(vp::NTuple{C, AbstractVector{T}}, p::PlanNUFFT{T}, ûs_k::
 
         @timeit timer "(1) Deconvolution" begin
             ϕ̂s = map(fourier_coefficients, kernels)
-            copy_deconvolve_to_oversampled!(backend, ûs, ûs_k, index_map, ϕ̂s)
+            copy_deconvolve_to_oversampled!(backend, callbacks.uniform, ûs, ûs_k, index_map, ϕ̂s)
             maybe_synchronise(p)
         end
 
@@ -264,7 +275,7 @@ function exec_type2!(vp::NTuple{C, AbstractVector{T}}, p::PlanNUFFT{T}, ûs_k::
         end
 
         @timeit timer "(3) Interpolation" begin
-            interpolate!(backend, p.point_transform_fold, blocks, kernels, p.kernel_evalmode, vp, us, points)
+            interpolate!(backend, callbacks.nonuniform, p.point_transform_fold, blocks, kernels, p.kernel_evalmode, vp, us, points)
             maybe_synchronise(p)
         end
     end
@@ -273,8 +284,8 @@ function exec_type2!(vp::NTuple{C, AbstractVector{T}}, p::PlanNUFFT{T}, ûs_k::
 end
 
 # Case of a single transform
-function exec_type2!(vp::AbstractVector, p::PlanNUFFT, ûs_k::AbstractArray{<:Complex})
-    exec_type2!((vp,), p, (ûs_k,))
+function exec_type2!(vp::AbstractVector, p::PlanNUFFT, ûs_k::AbstractArray{<:Complex}; kws...)
+    exec_type2!((vp,), p, (ûs_k,); kws...)
 end
 
 function _type2_fft!(data::RealNUFFTData)
@@ -335,8 +346,8 @@ function non_oversampled_indices!(
 end
 
 function copy_deconvolve_to_non_oversampled!(
-        ::CPU, ŵs_all::NTuple{C}, ûs_all::NTuple{C}, index_map, ϕ̂s, normfactor,
-    ) where {C}
+        ::CPU, callback::F, ŵs_all::NTuple{C}, ûs_all::NTuple{C}, index_map, ϕ̂s, normfactor,
+    ) where {C, F}
     @assert C > 0
     inds_out = axes(first(ŵs_all))
     @assert inds_out == map(eachindex, index_map)
@@ -356,8 +367,10 @@ function copy_deconvolve_to_non_oversampled!(
                 js_front = map(inbounds_getindex, index_map_front, Tuple(I_front))
                 ϕ̂_front = map(inbounds_getindex, ϕ̂s_front, Tuple(I_front))
                 β = normfactor / (prod(ϕ̂_front) * ϕ̂_last)   # deconvolution + FFT normalisation factor
-                for (ŵs, ûs) ∈ zip(ŵs_all, ûs_all)
-                    ŵs[I] = β * ûs[js_front..., j_last]
+                u⃗ = map(ûs -> β * @inbounds(ûs[js_front..., j_last]), ûs_all)::NTuple{C}
+                u⃗_new = @inline callback(u⃗, Tuple(I))  # possibly modify value of u⃗
+                for (ŵs, û) ∈ zip(ŵs_all, u⃗_new)
+                    ŵs[I] = û
                 end
             end
         end
@@ -367,32 +380,35 @@ function copy_deconvolve_to_non_oversampled!(
 end
 
 @kernel function copy_deconvolve_to_non_oversampled_kernel!(
+        callback::F,
         ŵs_all::NTuple{C}, @Const(ûs_all::NTuple{C}), @Const(index_map), @Const(ϕ̂s), @Const(normfactor),
-    ) where {C}
+    ) where {C, F}
     is = @index(Global, NTuple)                 # output index
     js = map(inbounds_getindex, index_map, is)  # input index
     ϕs_local = map(inbounds_getindex, ϕ̂s, is)   # convolution coefficients (one for each Cartesian direction)
     β = normfactor / prod(ϕs_local)
-    for n ∈ eachindex(ŵs_all, ûs_all)
-        @inbounds ŵs_all[n][is...] = β * ûs_all[n][js...]
+    u⃗ = map(ûs -> β * @inbounds(ûs[js...]), ûs_all)::NTuple{C}
+    u⃗_new = @inline callback(u⃗, is)  # possibly modify value of u⃗
+    for n ∈ eachindex(ŵs_all, u⃗_new)
+        @inbounds ŵs_all[n][is...] = u⃗_new[n]
     end
     nothing
 end
 
 function copy_deconvolve_to_non_oversampled!(
-        backend::GPU, ŵs_all::NTuple{C}, ûs_all::NTuple{C}, index_map, ϕ̂s, normfactor,
-    ) where {C}
+        backend::GPU, callback::F, ŵs_all::NTuple{C}, ûs_all::NTuple{C}, index_map, ϕ̂s, normfactor,
+    ) where {C, F}
     @assert C > 0
     ndrange = size(first(ŵs_all))  # size of output array (uniform grid, non oversampled)
     workgroupsize = default_workgroupsize(backend, ndrange)
     kernel! = copy_deconvolve_to_non_oversampled_kernel!(backend, workgroupsize, ndrange)
-    kernel!(ŵs_all, ûs_all, index_map, ϕ̂s, normfactor)
+    kernel!(callback, ŵs_all, ûs_all, index_map, ϕ̂s, normfactor)
     ŵs_all
 end
 
 function copy_deconvolve_to_oversampled!(
-        backend::CPU, ûs_all::NTuple{C, DenseArray}, ŵs_all::NTuple{C}, index_map, ϕ̂s,
-    ) where {C}
+        backend::CPU, callback::F, ûs_all::NTuple{C, DenseArray}, ŵs_all::NTuple{C}, index_map, ϕ̂s,
+    ) where {C, F}
     @assert C > 0
     inds_out = axes(first(ŵs_all))
     @assert inds_out == map(eachindex, index_map)
@@ -412,8 +428,10 @@ function copy_deconvolve_to_oversampled!(
                 js_front = map(inbounds_getindex, index_map_front, Tuple(I_front))
                 ϕ̂_front = map(inbounds_getindex, ϕ̂s_front, Tuple(I_front))
                 β = 1 / (prod(ϕ̂_front) * ϕ̂_last)  # deconvolution factor
-                for (ŵs, ûs) ∈ zip(ŵs_all, ûs_all)
-                    ûs[js_front..., j_last] = β * ŵs[I]
+                w⃗ = map(ŵs -> β * @inbounds(ŵs[I]), ŵs_all)::NTuple{C}
+                w⃗_new = @inline callback(w⃗, Tuple(I))  # possibly modify value of w⃗
+                for (ŵ, ûs) ∈ zip(w⃗_new, ûs_all)
+                    ûs[js_front..., j_last] = ŵ
                 end
             end
         end
@@ -423,26 +441,29 @@ function copy_deconvolve_to_oversampled!(
 end
 
 @kernel function copy_deconvolve_to_oversampled_kernel!(
+        callback::F,
         ûs_all::NTuple{C}, @Const(ŵs_all::NTuple{C}), @Const(index_map), @Const(ϕ̂s),
-    ) where {C}
+    ) where {C, F}
     is = @index(Global, NTuple)                 # input index (on non-oversampled grid)
     js = map(inbounds_getindex, index_map, is)  # output index (on oversampled grid)
     ϕs_local = map(inbounds_getindex, ϕ̂s, is)   # convolution coefficients (one for each Cartesian direction)
     β = 1 / prod(ϕs_local)                      # deconvolution factor
-    for n ∈ eachindex(ŵs_all, ûs_all)
-        @inbounds ûs_all[n][js...] = β * ŵs_all[n][is...]
+    w⃗ = map(ŵs -> β * @inbounds(ŵs[is...]), ŵs_all)::NTuple{C}
+    w⃗_new = @inline callback(w⃗, is)  # possibly modify value of w⃗
+    for n ∈ eachindex(w⃗_new, ûs_all)
+        @inbounds ûs_all[n][js...] = w⃗_new[n]
     end
     nothing
 end
 
 function copy_deconvolve_to_oversampled!(
-        backend::GPU, ûs_all::NTuple{C}, ŵs_all::NTuple{C}, index_map, ϕ̂s,
-    ) where {C}
+        backend::GPU, callback::F, ûs_all::NTuple{C}, ŵs_all::NTuple{C}, index_map, ϕ̂s,
+    ) where {C, F}
     @assert C > 0
     ndrange = size(first(ŵs_all))  # size of input array (uniform grid, non oversampled)
     workgroupsize = default_workgroupsize(backend, ndrange)
     kernel! = copy_deconvolve_to_oversampled_kernel!(backend, workgroupsize, ndrange)
-    kernel!(ûs_all, ŵs_all, index_map, ϕ̂s)
+    kernel!(callback, ûs_all, ŵs_all, index_map, ϕ̂s)
     ŵs_all
 end
 

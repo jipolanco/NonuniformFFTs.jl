@@ -5,6 +5,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Allow user-defined callbacks, which can be used to modify input and/or output transform
+  values "on the fly". This can help improve performance and lead to memory savings in
+  certain applications, as it allows to merge operations and to avoid the allocation of
+  extra arrays.
+
 ### Changed
 
 - Tune performance on AMDGPU.

@@ -60,6 +60,103 @@ function init_plan_data(
 end
 
 """
+    NUFFTCallbacks(; nonuniform, uniform,)
+
+Optional callback functions to be applied at different stages of a NUFFT.
+
+These are user-defined functions that allow to modify "on the fly" the input and/or the
+output of a NUFFT (type 1 or 2).
+
+This can be useful for performance (as it allows to combine operations and reduce the number
+of passes through memory) and for reducing memory usage (avoiding allocation of new arrays).
+Note that **transform inputs are never modified by the callback**, which means that one
+can safely do further operations on the original input data after the transform.
+
+Callbacks defined via `NUFFTCallbacks` are accepted by [`exec_type1!`](@ref) and [`exec_type2!`](@ref)
+via their `callbacks` keyword argument.
+
+# Callback types
+
+One can define two types of callback functions:
+
+1.  a callback on **non-uniform data** (input of type-1 NUFFT / output of type-2 NUFFT).
+
+    Its signature should be `nonuniform(v::Tuple, n::Integer)`, where `v = (v₁, v₂, …)` is the
+    "original" value at the non-uniform point with index `n` (i.e. in the `points` array of [`set_points!`](@ref)).
+
+    Note: the length of `v` is equal to the number of _transforms_ (`ntransforms` argument of [`PlanNUFFT`](@ref)).
+
+2.  a callback on **uniform data** (output of type-1 NUFFT / input of type-2 NUFFT).
+
+    Its signature should be `uniform(w::Tuple, idx::Tuple)`, where `w = (w₁, w₂, …)` is
+    the "original" value at grid point with index `idx = (i₁, i₂, …)`. Note that `w` and `idx`
+    are tuples which may have different lengths:
+
+    - the length of `w` is equal to the number of _transforms_ (`ntransforms` argument of [`PlanNUFFT`](@ref));
+    - the length of `idx` is equal to the number of _dimensions_ (e.g. 3 for 3D transforms).
+
+!!! warning "Output type"
+
+    One must make sure that the value returned by the callback has the **same type** as the input.
+    For instance, if uniform data has type `ComplexF32`, then values returned by `uniform`
+    must also be `ComplexF32`. One may use [`oftype`](https://docs.julialang.org/en/v1/base/base/#Base.oftype)
+    to ensure this (see examples below).
+
+# Examples
+
+## Callback on non-uniform data
+
+Define a callback function that multiplies each non-uniform point by random weights in 2D:
+
+```julia
+Np = 1000                                # number of non-uniform points
+xs = (rand(Np) .* 2pi, rand(Np) .* 2pi)  # random non-uniform points in [0, 2π]²
+weights = rand(Np)                       # random weights
+
+callback_nu(v, n) = oftype(v, v .* weights[n])   # define callback which will multiply each non-uniform value by its corresponding weight
+callbacks = NUFFTCallbacks(nonuniform = callback_nu)
+
+exec_type1!(output, plan, input; callbacks = callbacks)  # use callback in type-1 transform (for example)
+```
+
+## Callback on uniform data
+
+Define a callback function that multiplies each uniform point by ``|\\bm{k}|^2`` (where
+``\\bm{k}`` can represent a Fourier wavevector):
+
+```julia
+using AbstractFFTs: fftfreq
+Nx = Ny = 256                    # dimensions of uniform grid
+ws = rand(ComplexF64, (Nx, Ny))  # random non-uniform data
+kx = fftfreq(Nx, Nx)             # wavenumbers (frequencies) in x direction
+ky = fftfreq(Ny, Ny)             # wavenumbers (frequencies) in y direction
+
+function callback_u(w, idx)
+    i, j = idx
+    k² = kx[i]^2 + ky[j]^2
+    oftype(w, w .* k²)
+end
+
+callbacks = NUFFTCallbacks(uniform = callback_u)
+
+exec_type1!(output, plan, input; callbacks = callbacks)  # use callback in type-1 transform (for example)
+```
+
+"""
+struct NUFFTCallbacks{
+        CallbackNU <: Function,
+        CallbackU <: Function,
+    }
+    nonuniform::CallbackNU
+    uniform::CallbackU
+end
+
+NUFFTCallbacks(; nonuniform = default_callback, uniform = default_callback) = NUFFTCallbacks(nonuniform, uniform)
+
+# By default, the callback returns the first passed argument (which is the input or output NUFFT value).
+@inline default_callback(v, args...) = v
+
+"""
     PlanNUFFT([T = ComplexF64], dims::Dims; ntransforms = Val(1), backend = CPU(), kwargs...)
 
 Construct a plan for performing non-uniform FFTs (NUFFTs).

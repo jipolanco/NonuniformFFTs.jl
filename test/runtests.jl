@@ -23,6 +23,7 @@ end
     @includetest "approx_window_functions.jl"
     @includetest "accuracy.jl"
     @includetest "multidimensional.jl"
+    @includetest "callbacks.jl"
     @includetest "pseudo_gpu.jl"
     @includetest "abstractNFFTs.jl"
     @includetest "uniform_points.jl"

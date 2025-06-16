@@ -7,7 +7,8 @@
         @Const(vp::NTuple{C}),
         @Const(pointperm),
         transform_fold::F,
-    ) where {F <: Function, C, D}
+        callback::Callback,
+    ) where {F <: Function, Callback <: Function, C, D}
     i = @index(Global, Linear)
 
     j = if pointperm === nothing
@@ -28,7 +29,8 @@
     indvals = get_inds_vals_gpu(transform_fold, gs, evalmode, points, Ns, j)
 
     v⃗ = map(v -> @inbounds(v[j]), vp)
-    spread_onto_arrays_gpu!(us, indvals, v⃗, Ns)
+    v⃗_new = @inline callback(v⃗, j)
+    spread_onto_arrays_gpu!(us, indvals, v⃗_new, Ns)
 
     nothing
 end
@@ -129,6 +131,7 @@ to_real_array(u::AbstractArray{T}) where {T <: Complex} = reinterpret(reshape, r
 # We assume all arrays are already on the GPU.
 function spread_from_points!(
         backend::GPU,
+        callback::Callback,
         transform_fold::F,
         bd::Union{BlockDataGPU, NullBlockData},
         gs,
@@ -136,7 +139,7 @@ function spread_from_points!(
         us::NTuple{C, AbstractGPUArray},
         xp::NTuple{D, AbstractGPUVector},
         vp_all::NTuple{C, AbstractGPUVector},
-    ) where {F <: Function, C, D}
+    ) where {F <: Function, Callback <: Function, C, D}
     # Note: the dimensions of arrays have already been checked via check_nufft_nonuniform_data.
     foreach(Base.require_one_based_indexing, xp)  # this is to make sure that all indices match
     foreach(Base.require_one_based_indexing, vp_all)
@@ -176,7 +179,7 @@ function spread_from_points!(
     if method === :global_memory
         let ndrange = ndrange_points, groupsize = groupsize_points
             kernel! = spread_from_point_naive_kernel!(backend, groupsize)
-            kernel!(us_real, gs, evalmode, xp, vp_sorted, pointperm_, transform_fold; ndrange)
+            kernel!(us_real, gs, evalmode, xp, vp_sorted, pointperm_, transform_fold, callback; ndrange)
         end
     elseif method === :shared_memory
         @assert bd isa BlockDataGPU
@@ -195,7 +198,7 @@ function spread_from_points!(
             kernel! = spread_from_points_shmem_kernel!(backend, groupsize, ndrange)
             kernel!(
                 us_real, gs, evalmode, xp, vp_sorted, pointperm_, bd.cumulative_npoints_per_block,
-                HalfSupport(M), block_dims, Val(shmem_size), bd.batch_size, transform_fold,
+                HalfSupport(M), block_dims, Val(shmem_size), bd.batch_size, transform_fold, callback,
             )
         end
     end
@@ -241,7 +244,8 @@ end
         ::Val{shmem_size},  # this is a bit redundant, but seems to be required for CPU backends (used in tests)
         ::Val{Np},  # batch_size
         transform_fold::F,
-    ) where {C, D, T, Z, M, Np, block_dims, shmem_size, F <: Function}
+        callback::Callback,
+    ) where {C, D, T, Z, M, Np, block_dims, shmem_size, F <: Function, Callback <: Function}
 
     @uniform begin
         groupsize = @groupsize()
@@ -316,7 +320,20 @@ end
                 end
                 g = gs[d]
                 x = transform_fold(points[d][j])
-                vp_sm[p] = vp[c][j]
+                if callback === default_callback
+                    # Avoid loading the whole vp[:][j] if we haven't set a callback.
+                    vp_sm[p] = vp[c][j]
+                else
+                    # If we've set a callback, then we need to load all "components" vp[:][j],
+                    # since the callback takes a tuple and not a scalar value. This is only
+                    # relevant for multiple simultaneous transforms (C = ntransforms > 1).
+                    # This is needed, for instance, if we wanted to take a vector product
+                    # requiring the whole vp[:][j].
+                    let v⃗ = map(v -> @inbounds(v[j]), vp)
+                        v⃗_new = @inline callback(v⃗, j)
+                        vp_sm[p] = v⃗_new[c]  # only keep component `c` of the output value
+                    end
+                end
                 gdata = Kernels.evaluate_kernel(evalmode, g, x)
                 ishift = ishifts_sm[d]
                 inds_start[d, p] = gdata.i - ishift

@@ -40,6 +40,7 @@ end
 
 function spread_from_points!(
         ::CPU,
+        callback::Callback,
         transform_fold::F,
         ::NullBlockData,  # no blocking
         gs,
@@ -47,14 +48,15 @@ function spread_from_points!(
         us_all::NTuple{C, AbstractArray},
         x⃗s::NTuple{N, AbstractVector},
         vp_all::NTuple{C, AbstractVector},
-    ) where {F <: Function, C, N}
+    ) where {F <: Function, Callback <: Function, C, N}
     # Note: the dimensions of arrays have already been checked via check_nufft_nonuniform_data.
     foreach(Base.require_one_based_indexing, x⃗s)  # this is to make sure that all indices match
     foreach(Base.require_one_based_indexing, vp_all)
     for i ∈ eachindex(x⃗s[1], vp_all[1])  # iterate over all points
         x⃗ = map(xp -> @inbounds(transform_fold(xp[i])), x⃗s)
         vs = map(vp -> @inbounds(vp[i]), vp_all)  # non-uniform values at point x⃗
-        spread_from_point!(gs, evalmode, us_all, x⃗, vs)
+        vs_new = @inline callback(vs, i)
+        spread_from_point!(gs, evalmode, us_all, x⃗, vs_new)
     end
     us_all
 end
