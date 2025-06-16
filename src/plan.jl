@@ -85,6 +85,13 @@ Concretely, one can define two different callback functions:
     - the length of `w` is equal to the number of _transforms_ (`ntransforms` argument of [`PlanNUFFT`](@ref));
     - the length of `idx` is equal to the number of _dimensions_ (e.g. 3 for 3D transforms).
 
+!!! warning "Output type"
+
+    One must make sure that the value returned by the callback has the *same type* as the input.
+    For instance, if uniform data has type `ComplexF32`, then values returned by `uniform`
+    must also be `ComplexF32`. One may use [`oftype`](https://docs.julialang.org/en/v1/base/base/#Base.oftype)
+    to ensure this (see examples below).
+
 # Examples
 
 ## Callback on non-uniform data
@@ -96,26 +103,26 @@ Np = 1000                                # number of non-uniform points
 xs = (rand(Np) .* 2pi, rand(Np) .* 2pi)  # random non-uniform points in [0, 2π]²
 weights = rand(Np)                       # random weights
 
-callback_nu(v, n) = v .* weights[n]   # define callback which will multiply each non-uniform value by its corresponding weight
+callback_nu(v, n) = oftype(v, v .* weights[n])   # define callback which will multiply each non-uniform value by its corresponding weight
 callbacks = NUFFTCallbacks(nonuniform = callback_nu)
 ```
 
 ## Callback on uniform data
 
-Define a callback function that divides each uniform point by ``|\\bm{k}|^2`` (where
+Define a callback function that multiplies each uniform point by ``|\\bm{k}|^2`` (where
 ``\\bm{k}`` can represent a Fourier wavevector):
 
 ```julia
 using AbstractFFTs: fftfreq
 Nx = Ny = 256                    # dimensions of uniform grid
 ws = rand(ComplexF64, (Nx, Ny))  # random non-uniform data
-kx = fftfreq(Nx, Nx)             # wavenumbers (frequencies) in x direction
-ky = fftfreq(Ny, Ny)             # wavenumbers (frequencies) in y direction
+kx = fftfreq(Nx, Float64(Nx))    # wavenumbers (frequencies) in x direction
+ky = fftfreq(Ny, Float64(Ny))    # wavenumbers (frequencies) in y direction
 
 function callback_u(w, idx)
     i, j = idx
     k² = kx[i]^2 + ky[j]^2
-    w ./ k²
+    oftype(w, w .* k²)
 end
 
 callbacks = NUFFTCallbacks(uniform = callback_u)

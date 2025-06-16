@@ -92,6 +92,7 @@ end
 
 function interpolate!(
         backend::CPU,
+        callback::Callback,
         transform_fold::F,
         bd::BlockDataCPU,
         gs,
@@ -99,7 +100,7 @@ function interpolate!(
         vp_all::NTuple{C, AbstractVector},
         us_all::NTuple{C, AbstractArray},
         xp::NTuple{D, AbstractVector},
-    ) where {F <: Function, C, D}
+    ) where {F <: Function, Callback <: Function, C, D}
     (; block_dims, pointperm, buffers, indices,) = bd
     Ms = map(Kernels.half_support, gs)
     Nt = length(buffers)  # usually equal to the number of threads
@@ -136,7 +137,8 @@ function interpolate!(
                 end
                 x⃗ = map(xp -> transform_fold(@inbounds(xp[point_idx])), xp)
                 vs = interpolate_blocked(gs, evalmode, block, x⃗, Tuple(I₀)) :: NTuple{C}  # non-uniform values at point x⃗
-                for (vp, v) ∈ zip(vp_all, vs)
+                vs_new = @inline callback(vs, point_idx)
+                for (vp, v) ∈ zip(vp_all, vs_new)
                     @inbounds vp[l] = v
                 end
             end

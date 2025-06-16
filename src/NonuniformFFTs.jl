@@ -229,6 +229,7 @@ function exec_type2! end
 function exec_type2!(vp::NTuple{C, AbstractVector{T}}, p::PlanNUFFT{T}, ûs_k::NTuple{C, AbstractArray{Z}}) where {T, Z, C}
     (; backend, points, kernels, data, blocks, index_map,) = p
     (; us,) = data
+    callbacks = p.callbacks_type2
     Z === complex(T) || throw(ArgumentError(lazy"uniform data must have the same accuracy as the created plan (got $Z values for a $T plan)"))
     timer = get_timer_nowarn(p)
 
@@ -256,7 +257,7 @@ function exec_type2!(vp::NTuple{C, AbstractVector{T}}, p::PlanNUFFT{T}, ûs_k::
 
         @timeit timer "(1) Deconvolution" begin
             ϕ̂s = map(fourier_coefficients, kernels)
-            copy_deconvolve_to_oversampled!(backend, ûs, ûs_k, index_map, ϕ̂s)
+            copy_deconvolve_to_oversampled!(backend, callbacks.uniform, ûs, ûs_k, index_map, ϕ̂s)
             maybe_synchronise(p)
         end
 
@@ -266,7 +267,7 @@ function exec_type2!(vp::NTuple{C, AbstractVector{T}}, p::PlanNUFFT{T}, ûs_k::
         end
 
         @timeit timer "(3) Interpolation" begin
-            interpolate!(backend, p.point_transform_fold, blocks, kernels, p.kernel_evalmode, vp, us, points)
+            interpolate!(backend, callbacks.nonuniform, p.point_transform_fold, blocks, kernels, p.kernel_evalmode, vp, us, points)
             maybe_synchronise(p)
         end
     end
@@ -398,8 +399,8 @@ function copy_deconvolve_to_non_oversampled!(
 end
 
 function copy_deconvolve_to_oversampled!(
-        backend::CPU, ûs_all::NTuple{C, DenseArray}, ŵs_all::NTuple{C}, index_map, ϕ̂s,
-    ) where {C}
+        backend::CPU, callback::F, ûs_all::NTuple{C, DenseArray}, ŵs_all::NTuple{C}, index_map, ϕ̂s,
+    ) where {C, F}
     @assert C > 0
     inds_out = axes(first(ŵs_all))
     @assert inds_out == map(eachindex, index_map)
@@ -419,8 +420,10 @@ function copy_deconvolve_to_oversampled!(
                 js_front = map(inbounds_getindex, index_map_front, Tuple(I_front))
                 ϕ̂_front = map(inbounds_getindex, ϕ̂s_front, Tuple(I_front))
                 β = 1 / (prod(ϕ̂_front) * ϕ̂_last)  # deconvolution factor
-                for (ŵs, ûs) ∈ zip(ŵs_all, ûs_all)
-                    ûs[js_front..., j_last] = β * ŵs[I]
+                w⃗ = map(ŵs -> β * @inbounds(ŵs[I]), ŵs_all)::NTuple{C}
+                w⃗_new = @inline callback(w⃗, Tuple(I))  # possibly modify value of w⃗
+                for (ŵ, ûs) ∈ zip(w⃗_new, ûs_all)
+                    ûs[js_front..., j_last] = ŵ
                 end
             end
         end
@@ -430,26 +433,29 @@ function copy_deconvolve_to_oversampled!(
 end
 
 @kernel function copy_deconvolve_to_oversampled_kernel!(
+        callback::F,
         ûs_all::NTuple{C}, @Const(ŵs_all::NTuple{C}), @Const(index_map), @Const(ϕ̂s),
-    ) where {C}
+    ) where {C, F}
     is = @index(Global, NTuple)                 # input index (on non-oversampled grid)
     js = map(inbounds_getindex, index_map, is)  # output index (on oversampled grid)
     ϕs_local = map(inbounds_getindex, ϕ̂s, is)   # convolution coefficients (one for each Cartesian direction)
     β = 1 / prod(ϕs_local)                      # deconvolution factor
-    for n ∈ eachindex(ŵs_all, ûs_all)
-        @inbounds ûs_all[n][js...] = β * ŵs_all[n][is...]
+    w⃗ = map(ŵs -> β * @inbounds(ŵs[is...]), ŵs_all)::NTuple{C}
+    w⃗_new = @inline callback(w⃗, is)  # possibly modify value of w⃗
+    for n ∈ eachindex(w⃗_new, ûs_all)
+        @inbounds ûs_all[n][js...] = w⃗_new[n]
     end
     nothing
 end
 
 function copy_deconvolve_to_oversampled!(
-        backend::GPU, ûs_all::NTuple{C}, ŵs_all::NTuple{C}, index_map, ϕ̂s,
-    ) where {C}
+        backend::GPU, callback::F, ûs_all::NTuple{C}, ŵs_all::NTuple{C}, index_map, ϕ̂s,
+    ) where {C, F}
     @assert C > 0
     ndrange = size(first(ŵs_all))  # size of input array (uniform grid, non oversampled)
     workgroupsize = default_workgroupsize(backend, ndrange)
     kernel! = copy_deconvolve_to_oversampled_kernel!(backend, workgroupsize, ndrange)
-    kernel!(ûs_all, ŵs_all, index_map, ϕ̂s)
+    kernel!(callback, ûs_all, ŵs_all, index_map, ϕ̂s)
     ŵs_all
 end
 

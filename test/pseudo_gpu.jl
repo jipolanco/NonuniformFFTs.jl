@@ -21,6 +21,7 @@
 using NonuniformFFTs
 using StaticArrays: SVector  # for convenience
 using KernelAbstractions: KernelAbstractions as KA
+using AbstractFFTs: fftfreq
 using AbstractNFFTs: AbstractNFFTs
 using Adapt: Adapt, adapt
 using GPUArraysCore: AbstractGPUArray
@@ -137,14 +138,22 @@ function compare_with_cpu(::Type{T}, dims; Np = prod(dims), ntransforms::Val{Nc}
     r_cpu = run_plan(p_cpu, xp_init, vp_init)
     r_gpu = run_plan(p_gpu, xp_init, vp_init)
 
-    for c ∈ 1:Nc
-        # The differences of the order of 1e-7 (= roughly the expected accuracy given the
-        # chosen parameters) are explained by the fact that the CPU uses a polynomial
-        # approximation of the KB kernel, while the GPU evaluates it "exactly" from its
-        # definition (based on Bessel functions for KB).
-        rtol = Tr === Float64 ? 1e-7 : Tr === Float32 ? 1f-5 : nothing
-        @test r_cpu.us[c] ≈ Array(r_gpu.us[c]) rtol=rtol  # output of type-1 transform
-        @test r_cpu.wp[c] ≈ Array(r_gpu.wp[c]) rtol=rtol  # output of type-2 transform
+    # The differences of the order of 1e-7 (= roughly the expected accuracy given the
+    # chosen parameters) are explained by the fact that the CPU uses a polynomial
+    # approximation of the KB kernel, while the GPU evaluates it "exactly" from its
+    # definition (based on Bessel functions for KB).
+    rtol = Tr === Float64 ? 1e-7 : Tr === Float32 ? 1f-5 : nothing
+
+    @testset "Type 1" begin
+        for c ∈ 1:Nc
+            @test r_cpu.us[c] ≈ Array(r_gpu.us[c]) rtol=rtol  # output of type-1 transform
+        end
+    end
+
+    @testset "Type 2" begin
+        for c ∈ 1:Nc
+            @test r_cpu.wp[c] ≈ Array(r_gpu.wp[c]) rtol=rtol  # output of type-2 transform
+        end
     end
 
     nothing
@@ -169,5 +178,22 @@ end
         ntransforms = Val(2)
         @testset "Global memory" compare_with_cpu(Float32, dims; ntransforms, gpu_method = :global_memory)
         @testset "Shared memory" compare_with_cpu(Float32, dims; ntransforms, gpu_method = :shared_memory)
+    end
+    @testset "Callbacks" begin
+        Np = prod(dims) ÷ 2
+        ks = map(N -> fftfreq(N, N), dims)
+        weights = rand(Xoshiro(42), Np)
+        callbacks = NUFFTCallbacks(
+            nonuniform = (v, n) -> oftype(v, @inbounds(v .* weights[n])),
+            uniform = (w, idx) -> let
+                k⃗ = @inbounds getindex.(ks, idx)
+                k² = sum(abs2, k⃗)
+                factor = ifelse(iszero(k²), zero(k²), inv(k²))  # divide by k² but avoiding division by zero
+                oftype(w, w .* factor)
+            end,
+        )
+        @testset "Global memory" compare_with_cpu(ComplexF32, dims; Np, callbacks_type1 = callbacks, callbacks_type2 = callbacks, gpu_method = :global_memory)
+        @testset "Shared memory" compare_with_cpu(ComplexF32, dims; Np, callbacks_type1 = callbacks, callbacks_type2 = callbacks, gpu_method = :shared_memory)
+        @testset "Shared memory (ntransforms = 2)" compare_with_cpu(ComplexF32, dims; Np, ntransforms = Val(2), callbacks_type1 = callbacks, callbacks_type2 = callbacks, gpu_method = :shared_memory)
     end
 end

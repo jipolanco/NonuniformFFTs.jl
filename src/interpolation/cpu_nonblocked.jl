@@ -1,5 +1,6 @@
 function interpolate!(
         ::CPU,
+        callback::Callback,
         transform_fold::F,
         ::NullBlockData,
         gs,
@@ -7,14 +8,15 @@ function interpolate!(
         vp_all::NTuple{C, AbstractVector},
         us::NTuple{C, AbstractArray},
         x⃗s::NTuple{N, AbstractVector},
-    ) where {F <: Function, C, N}
+    ) where {F <: Function, Callback <: Function, C, N}
     # Note: the dimensions of arrays have already been checked via check_nufft_nonuniform_data.
     foreach(Base.require_one_based_indexing, x⃗s)  # this is to make sure that all indices match
     foreach(Base.require_one_based_indexing, vp_all)
     for i ∈ eachindex(x⃗s[1], vp_all[1])  # iterate over all points
         x⃗ = map(xp -> @inbounds(transform_fold(xp[i])), x⃗s)
         vs = interpolate(gs, evalmode, us, x⃗) :: NTuple{C}  # non-uniform values at point x⃗
-        for (vp, v) ∈ zip(vp_all, vs)
+        vs_new = @inline callback(vs, i)
+        for (vp, v) ∈ zip(vp_all, vs_new)
             @inbounds vp[i] = v
         end
     end
