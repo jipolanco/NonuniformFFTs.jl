@@ -24,6 +24,12 @@ exec_type1!
 exec_type2!
 ```
 
+## Using callbacks
+
+```@docs
+NUFFTCallbacks
+```
+
 ## Other functions
 
 ```@docs

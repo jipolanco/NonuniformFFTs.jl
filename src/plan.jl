@@ -60,6 +60,79 @@ function init_plan_data(
 end
 
 """
+    NUFFTCallbacks(; nonuniform, uniform,)
+
+Optional callback functions to be applied at different stages of a NUFFT.
+
+These are user-defined functions that allow to modify the input and/or the output of a NUFFT
+(type 1 or 2) and to perform other operations with data involved in the transformations.
+
+Concretely, one can define two different callback functions:
+
+1.  a *callback on non-uniform data* (input of type-1 NUFFT / output of type-2 NUFFT).
+
+    Its signature should be `nonuniform(v::Tuple, x::Tuple, n::Integer)`, where `v = (v₁, v₂, …)` is the
+    "original" value at non-uniform point `x = (x₁, x₂, …)`, and `n` is the index of point `x` in the list
+    of non-uniform locations. Note that `v` and `x` are tuples which may have different lengths:
+
+    - the length of `x` is equal to the number of _dimensions_ (e.g. 3 for 3D transforms);
+    - the length of `v` is equal to the number of _transforms_ (`ntransforms` argument of [`PlanNUFFT`](@ref)).
+
+2.  a *callback on uniform data* (output of type-1 NUFFT / input of type-2 NUFFT).
+
+    Its signature should be `uniform(w::Tuple, idx::Tuple)`, where `w = (w₁, w₂, …)` is
+    the "original" value at grid point with index `idx = (i₁, i₂, …)`. Similarly to above:
+
+    - the length of `idx` is equal to the number of _dimensions_ (e.g. 3 for 3D transforms);
+    - the length of `w` is equal to the number of _transforms_ (`ntransforms` argument of [`PlanNUFFT`](@ref)).
+
+# Examples
+
+Define a callback function that multiplies each non-uniform point by random weights in 2D:
+
+```julia
+Np = 1000                                # number of non-uniform points
+xs = (rand(Np) .* 2pi, rand(Np) .* 2pi)  # random non-uniform points in [0, 2π]²
+weights = rand(Np)                       # random weights
+
+callback_nu(v, x, n) = v .* weights[n]   # define callback which will multiply each non-uniform value by its corresponding weight
+callbacks = NUFFTCallbacks(nonuniform = callback_nu)
+```
+
+Define a callback function that divides each uniform point by ``|\\bm{k}|^2`` (where
+``\\bm{k}`` can represent a Fourier wavevector):
+
+```julia
+using AbstractFFTs: fftfreq
+Nx = Ny = 256                    # dimensions of uniform grid
+ws = rand(ComplexF64, (Nx, Ny))  # random non-uniform data
+kx = fftfreq(Nx, Nx)             # wavenumbers (frequencies) in x direction
+ky = fftfreq(Ny, Ny)             # wavenumbers (frequencies) in y direction
+
+function callback_u(w, idx)
+    i, j = idx
+    k² = kx[i]^2 + ky[j]^2
+    w ./ k²
+end
+
+callbacks = NUFFTCallbacks(uniform = callback_u)
+```
+
+"""
+struct NUFFTCallbacks{
+        CallbackNU <: Function,
+        CallbackU <: Function,
+    }
+    nonuniform::CallbackNU
+    uniform::CallbackU
+end
+
+NUFFTCallbacks(; nonuniform = default_callback(), uniform = default_callback(),) = NUFFTCallbacks(nonuniform, uniform)
+
+# By default, the callback returns the first passed argument (which is the input or output NUFFT value).
+default_callback() = @inline (v, args...) -> v
+
+"""
     PlanNUFFT([T = ComplexF64], dims::Dims; ntransforms = Val(1), backend = CPU(), kwargs...)
 
 Construct a plan for performing non-uniform FFTs (NUFFTs).
@@ -158,6 +231,19 @@ change in the future.
   When tuning performance, it is helpful to print the plan (as in `println(plan)`) to see
   the actual block and batch sizes.
 
+### Callbacks
+
+As detailed in [`NUFFTCallbacks`](@ref), one can define callbacks which allow to modify
+transform inputs and/or outputs "on the fly". This can be useful for performance (allowing
+to merge operations) or for reducing memory usage (avoiding allocation of new arrays).
+
+Callbacks can be different for type-1 and type-2 transforms, and may be set via the keyword
+arguments `callbacks_type1` and `callbacks_type2`. For example, to set callbacks for type-1
+transforms, create a [`NUFFTCallbacks`](@ref) (see examples there) and then construct the plan with:
+
+    callbacks = NUFFTCallbacks(...)
+    plan = PlanNUFFT(...; callbacks_type1 = callbacks)
+
 ### Other parameters
 
 - `fftshift = false`: determines the order of wavenumbers in uniform space.
@@ -228,6 +314,8 @@ struct PlanNUFFT{
         IndexMap <: NTuple{N, AbstractVector{Int}},
         Timer <: TimerOutput,
         PointTransform <: Function,
+        CallbacksType1 <: NUFFTCallbacks,
+        CallbacksType2 <: NUFFTCallbacks,
     }
     kernels :: Kernels
     backend :: Backend  # CPU, GPU, ...
@@ -241,6 +329,8 @@ struct PlanNUFFT{
     timer   :: Timer
     synchronise :: Bool
     point_transform_fold :: PointTransform  # folds points onto the [0, 2π) box (+ optional transforms)
+    callbacks_type1 :: CallbacksType1
+    callbacks_type2 :: CallbacksType2
 end
 
 # This represents the type of data in Fourier space.

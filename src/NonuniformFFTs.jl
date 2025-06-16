@@ -34,6 +34,7 @@ using .Kernels:
 
 export
     PlanNUFFT,
+    NUFFTCallbacks,
     HalfSupport,
     Direct, FastApproximation,
     GaussianKernel,
