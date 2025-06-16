@@ -235,6 +235,20 @@ For real-to-complex transforms, the NonuniformFFTs.jl API demonstrated above sho
 
 <br>
 
+## Unique features
+
+Compared to other available packages in Julia, such as [FINUFFT.jl](https://github.com/ludvigak/FINUFFT.jl) and
+[NFFT.jl](https://github.com/JuliaMath/NFFT.jl), NonuniformFFTs.jl provides the following unique features:
+
+- Optimised transforms of **purely real non-uniform data**, by taking advantage
+  of real-to-complex FFT implementations available in FFTW and in vendor GPU libraries.
+
+- **Generic and fast GPU implementation**, allowing to target different GPU
+  platforms thanks to the incredible [KernelAbstractions.jl](https://github.com/JuliaGPU/KernelAbstractions.jl) package.
+
+- User-defined **callback functions**, which can help improve performance and reduce memory requirements in certain applications.
+  These can be used to modify input and/or output data "on the fly" when applying a transform.
+
 ## Performance
 
 NonuniformFFTs.jl can be *fast*:

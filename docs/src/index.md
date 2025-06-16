@@ -101,13 +101,25 @@ applied when the [AbstractNFFTs.jl interface](@ref AbstractNFFTs-interface) is u
 In this specific case, modes are assumed to be ordered in increasing order, and
 the opposite sign convention is used for Fourier transforms.
 
-### Differences with NFFT.jl
+### Unique features
 
-- This package allows NUFFTs of purely real non-uniform data.
+Compared to other available packages in Julia, such as [FINUFFT.jl](https://github.com/ludvigak/FINUFFT.jl) and
+[NFFT.jl](https://github.com/JuliaMath/NFFT.jl), NonuniformFFTs.jl provides the following unique features:
+
+- Optimised transforms of **purely real non-uniform data**, by taking advantage
+  of real-to-complex FFT implementations available in FFTW and in vendor GPU libraries.
+
+- **Generic and fast GPU implementation**, allowing to target different GPU
+  platforms thanks to the incredible [KernelAbstractions.jl](https://github.com/JuliaGPU/KernelAbstractions.jl) package.
+
+- User-defined **callback functions**, which can help improve performance and reduce memory requirements in certain applications.
+  These can be used to modify input and/or output data "on the fly" when applying a transform.
+
+### Other differences with NFFT.jl
 
 - Different convention is used: non-uniform points are expected to be in $[0, 2π]$.
 
-### Differences with FINUFFT / cuFINUFFT / FINUFFT.jl
+### Other differences with FINUFFT / cuFINUFFT / FINUFFT.jl
 
 - This package is written in "pure" Julia (besides the FFTs themselves which rely on the FFTW3 library, via their Julia interface).
 
@@ -116,8 +128,7 @@ the opposite sign convention is used for Fourier transforms.
   meaning that many kinds of GPUs are supported, including not only Nvidia GPUs but
   also AMD ones and possibly more.
 
-- This package allows NUFFTs of purely real non-uniform data.
-  Moreover, transforms can be performed on arbitrary number of dimensions.
+- Transforms can be performed on arbitrary number of dimensions.
 
 - A different smoothing kernel function is used (backwards Kaiser–Bessel kernel by default on CPUs; Kaiser–Bessel kernel on GPUs).
 
