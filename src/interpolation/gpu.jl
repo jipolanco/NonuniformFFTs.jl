@@ -288,7 +288,7 @@ end
             if C == 1
                 # Only apply callback if we're not doing multiple simultaneous transforms.
                 # Otherwise, we need the whole vp[:][j], which we don't currently have.
-                # In that case, we apply the callback after the kernel (which is not
+                # In that case, we apply the callback at the end of the kernel (which is not
                 # optimal...).
                 v_new, = @inline callback((v,), j)
             else
@@ -302,7 +302,7 @@ end
         @synchronize
     end
 
-    # Now apply callback if C > 1 and if we've defined a callback.
+    # Now apply callback if C > 1 and if we've defined a custom callback.
     # We repeat a lot of stuff from above, which is probably not optimal...
     if C > 1 && callback !== default_callback
         # This block will take care of non-uniform points (a + 1):b

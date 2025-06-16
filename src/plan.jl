@@ -69,14 +69,14 @@ These are user-defined functions that allow to modify the input and/or the outpu
 
 Concretely, one can define two different callback functions:
 
-1.  a callback on *non-uniform data* (input of type-1 NUFFT / output of type-2 NUFFT).
+1.  a callback on **non-uniform data** (input of type-1 NUFFT / output of type-2 NUFFT).
 
     Its signature should be `nonuniform(v::Tuple, n::Integer)`, where `v = (v₁, v₂, …)` is the
     "original" value at the non-uniform point with index `n` (i.e. in the `points` array of [`set_points!`](@ref)).
 
     Note: the length of `v` is equal to the number of _transforms_ (`ntransforms` argument of [`PlanNUFFT`](@ref)).
 
-2.  a callback on *uniform data* (output of type-1 NUFFT / input of type-2 NUFFT).
+2.  a callback on **uniform data** (output of type-1 NUFFT / input of type-2 NUFFT).
 
     Its signature should be `uniform(w::Tuple, idx::Tuple)`, where `w = (w₁, w₂, …)` is
     the "original" value at grid point with index `idx = (i₁, i₂, …)`. Note that `w` and `idx`
@@ -87,7 +87,7 @@ Concretely, one can define two different callback functions:
 
 !!! warning "Output type"
 
-    One must make sure that the value returned by the callback has the *same type* as the input.
+    One must make sure that the value returned by the callback has the **same type** as the input.
     For instance, if uniform data has type `ComplexF32`, then values returned by `uniform`
     must also be `ComplexF32`. One may use [`oftype`](https://docs.julialang.org/en/v1/base/base/#Base.oftype)
     to ensure this (see examples below).
@@ -116,8 +116,8 @@ Define a callback function that multiplies each uniform point by ``|\\bm{k}|^2``
 using AbstractFFTs: fftfreq
 Nx = Ny = 256                    # dimensions of uniform grid
 ws = rand(ComplexF64, (Nx, Ny))  # random non-uniform data
-kx = fftfreq(Nx, Float64(Nx))    # wavenumbers (frequencies) in x direction
-ky = fftfreq(Ny, Float64(Ny))    # wavenumbers (frequencies) in y direction
+kx = fftfreq(Nx, Nx)             # wavenumbers (frequencies) in x direction
+ky = fftfreq(Ny, Ny)             # wavenumbers (frequencies) in y direction
 
 function callback_u(w, idx)
     i, j = idx
@@ -251,7 +251,7 @@ Callbacks can be different for type-1 and type-2 transforms, and may be set via 
 arguments `callbacks_type1` and `callbacks_type2`. For example, to set callbacks for type-1
 transforms, create a [`NUFFTCallbacks`](@ref) (see examples there) and then construct the plan with:
 
-    callbacks = NUFFTCallbacks(...)
+    callbacks = NUFFTCallbacks(nonuniform = ..., uniform = ...)
     plan = PlanNUFFT(...; callbacks_type1 = callbacks)
 
 ### Other parameters
