@@ -127,7 +127,11 @@ function spread_from_points!(
                 end
                 x⃗ = map(xp -> transform_fold(@inbounds(xp[point_idx])), xp)
                 vs = map(vp -> @inbounds(vp[l]), vp_all)  # values at the non-uniform point x⃗
-                vs_new = @inline callback(vs, point_idx)
+                vs_new = if callback === default_callback
+                    vs
+                else
+                    @inline callback(vs, point_idx)
+                end
                 spread_from_point_blocked!(gs, evalmode, block, x⃗, vs_new, Tuple(I₀))
             end
 

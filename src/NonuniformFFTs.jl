@@ -360,7 +360,11 @@ function copy_deconvolve_to_non_oversampled!(
                 ϕ̂_front = map(inbounds_getindex, ϕ̂s_front, Tuple(I_front))
                 β = normfactor / (prod(ϕ̂_front) * ϕ̂_last)   # deconvolution + FFT normalisation factor
                 u⃗ = map(ûs -> β * @inbounds(ûs[js_front..., j_last]), ûs_all)::NTuple{C}
-                u⃗_new = @inline callback(u⃗, Tuple(I))  # possibly modify value of u⃗
+                u⃗_new = if callback === default_callback
+                    u⃗
+                else
+                    @inline callback(u⃗, Tuple(I))  # possibly modify value of u⃗
+                end
                 for (ŵs, û) ∈ zip(ŵs_all, u⃗_new)
                     ŵs[I] = û
                 end
@@ -421,7 +425,11 @@ function copy_deconvolve_to_oversampled!(
                 ϕ̂_front = map(inbounds_getindex, ϕ̂s_front, Tuple(I_front))
                 β = 1 / (prod(ϕ̂_front) * ϕ̂_last)  # deconvolution factor
                 w⃗ = map(ŵs -> β * @inbounds(ŵs[I]), ŵs_all)::NTuple{C}
-                w⃗_new = @inline callback(w⃗, Tuple(I))  # possibly modify value of w⃗
+                w⃗_new = if callback === default_callback
+                    w⃗
+                else
+                    @inline callback(w⃗, Tuple(I))  # possibly modify value of w⃗
+                end
                 for (ŵ, ûs) ∈ zip(w⃗_new, ûs_all)
                     ûs[js_front..., j_last] = ŵ
                 end
