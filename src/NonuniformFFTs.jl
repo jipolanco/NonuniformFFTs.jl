@@ -120,8 +120,8 @@ end
 end
 
 """
-    exec_type1!(ûs::AbstractArray{Z}, p::PlanNUFFT{T}, vp::AbstractVector{T})
-    exec_type1!(ûs::NTuple{N,AbstractArray{Z}}, p::PlanNUFFT{T}, vp::NTuple{N,AbstractVector{T}})
+    exec_type1!(ûs::AbstractArray{Z}, p::PlanNUFFT{T}, vp::AbstractVector{T}; callbacks = NUFFTCallbacks())
+    exec_type1!(ûs::NTuple{N,AbstractArray{Z}}, p::PlanNUFFT{T}, vp::NTuple{N,AbstractVector{T}}; callbacks = NUFFTCallbacks())
 
 Perform type-1 NUFFT (from non-uniform points to uniform grid).
 
@@ -137,14 +137,18 @@ The input types must satisfy `Z = complex(T)`. This means:
 - `Z = Complex{T}` for real-data transforms (where `T <: Real`);
 - `Z = T` for complex-data transforms (where `T <: Complex`).
 
+See [`NUFFTCallbacks`](@ref) for details on the optional `callbacks` keyword argument.
+
 See also [`exec_type2!`](@ref).
 """
 function exec_type1! end
 
-function exec_type1!(ûs_k::NTuple{C, AbstractArray{Z}}, p::PlanNUFFT{T}, vp::NTuple{C, AbstractVector{T}}) where {T, Z, C}
+function exec_type1!(
+        ûs_k::NTuple{C, AbstractArray{Z}}, p::PlanNUFFT{T}, vp::NTuple{C, AbstractVector{T}};
+        callbacks::NUFFTCallbacks = NUFFTCallbacks()
+    ) where {T, Z, C}
     (; backend, points, kernels, data, blocks, index_map,) = p
     (; us,) = data
-    callbacks = p.callbacks_type1
     Z === complex(T) || throw(ArgumentError(lazy"uniform data must have the same accuracy as the created plan (got $Z values for a $T plan)"))
     timer = get_timer_nowarn(p)
 
@@ -183,8 +187,8 @@ function exec_type1!(ûs_k::NTuple{C, AbstractArray{Z}}, p::PlanNUFFT{T}, vp::N
 end
 
 # Case of a single transform
-function exec_type1!(ûs_k::AbstractArray{<:Complex}, p::PlanNUFFT, vp)
-    exec_type1!((ûs_k,), p, (vp,))
+function exec_type1!(ûs_k::AbstractArray{<:Complex}, p::PlanNUFFT, vp; kws...)
+    exec_type1!((ûs_k,), p, (vp,); kws...)
     ûs_k
 end
 
@@ -205,8 +209,8 @@ function _type1_fft!(data::ComplexNUFFTData)
 end
 
 """
-    exec_type2!(vp::AbstractVector{T}, p::PlanNUFFT{T}, ûs::AbstractArray{Z})
-    exec_type2!(vp::NTuple{N,AbstractVector{T}}, p::PlanNUFFT{T}, ûs::NTuple{N,AbstractArray{Z}})
+    exec_type2!(vp::AbstractVector{T}, p::PlanNUFFT{T}, ûs::AbstractArray{Z}; callbacks = NUFFTCallbacks())
+    exec_type2!(vp::NTuple{N,AbstractVector{T}}, p::PlanNUFFT{T}, ûs::NTuple{N,AbstractArray{Z}}; callbacks = NUFFTCallbacks())
 
 Perform type-2 NUFFT (from uniform grid to non-uniform points).
 
@@ -222,14 +226,18 @@ The input types must satisfy `Z = complex(T)`. This means:
 - `Z = Complex{T}` for real-data transforms (where `T <: Real`);
 - `Z = T` for complex-data transforms (where `T <: Complex`).
 
+See [`NUFFTCallbacks`](@ref) for details on the optional `callbacks` keyword argument.
+
 See also [`exec_type1!`](@ref).
 """
 function exec_type2! end
 
-function exec_type2!(vp::NTuple{C, AbstractVector{T}}, p::PlanNUFFT{T}, ûs_k::NTuple{C, AbstractArray{Z}}) where {T, Z, C}
+function exec_type2!(
+        vp::NTuple{C, AbstractVector{T}}, p::PlanNUFFT{T}, ûs_k::NTuple{C, AbstractArray{Z}};
+        callbacks::NUFFTCallbacks = NUFFTCallbacks()
+    ) where {T, Z, C}
     (; backend, points, kernels, data, blocks, index_map,) = p
     (; us,) = data
-    callbacks = p.callbacks_type2
     Z === complex(T) || throw(ArgumentError(lazy"uniform data must have the same accuracy as the created plan (got $Z values for a $T plan)"))
     timer = get_timer_nowarn(p)
 
@@ -276,8 +284,8 @@ function exec_type2!(vp::NTuple{C, AbstractVector{T}}, p::PlanNUFFT{T}, ûs_k::
 end
 
 # Case of a single transform
-function exec_type2!(vp::AbstractVector, p::PlanNUFFT, ûs_k::AbstractArray{<:Complex})
-    exec_type2!((vp,), p, (ûs_k,))
+function exec_type2!(vp::AbstractVector, p::PlanNUFFT, ûs_k::AbstractArray{<:Complex}; kws...)
+    exec_type2!((vp,), p, (ûs_k,); kws...)
 end
 
 function _type2_fft!(data::RealNUFFTData)

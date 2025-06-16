@@ -27,8 +27,9 @@ using Test
     xp = map(_ -> rand(rng, T, Np) .* T(2π), Ns)
     vp = randn(rng, Z, Np)
 
-    # Generate reference results by applying callback functions before and after the transforms.
-    plan_base = PlanNUFFT(Z, Ns)  # plan without callbacks and with default parameters
+    # Generate reference results by applying callback functions before and after the
+    # transforms (instead of passing them to exec_* functions).
+    plan_base = PlanNUFFT(Z, Ns)  # plan with default parameters
     set_points!(plan_base, xp)
     reference = let plan = plan_base, type1_input = callbacks.nonuniform.(vp, eachindex(vp))
         type1_output = similar(type1_input, complex(Z), size(plan))
@@ -41,15 +42,16 @@ using Test
         (; type1_output, type2_output,)
     end
 
+    # Test transforms with callbacks.
     # Note: we also test the non-blocking implementation (block_size = nothing)
     @testset "Block size: $block_size" for block_size in (nothing, (8, 8, 8))
-        plan = PlanNUFFT(Z, Ns; block_size, callbacks_type1 = callbacks, callbacks_type2 = callbacks)
+        plan = PlanNUFFT(Z, Ns; block_size)
         set_points!(plan, xp)
         ws = similar(vp, complex(Z), size(plan))
-        exec_type1!(ws, plan, vp)
+        exec_type1!(ws, plan, vp; callbacks)
         @test ws ≈ reference.type1_output
         wp = similar(vp)
-        exec_type2!(wp, plan, ws)
+        exec_type2!(wp, plan, ws; callbacks)
         @test wp ≈ reference.type2_output
     end
 end

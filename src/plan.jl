@@ -64,10 +64,20 @@ end
 
 Optional callback functions to be applied at different stages of a NUFFT.
 
-These are user-defined functions that allow to modify the input and/or the output of a NUFFT
-(type 1 or 2) and to perform other operations with data involved in the transformations.
+These are user-defined functions that allow to modify "on the fly" the input and/or the
+output of a NUFFT (type 1 or 2).
 
-Concretely, one can define two different callback functions:
+This can be useful for performance (as it allows to combine operations and reduce the number
+of passes through memory) and for reducing memory usage (avoiding allocation of new arrays).
+Note that **transform inputs are never modified by the callback**, which means that one
+can safely do further operations on the original input data after the transform.
+
+Callbacks defined via `NUFFTCallbacks` are accepted by [`exec_type1!`](@ref) and [`exec_type2!`](@ref)
+via their `callbacks` keyword argument.
+
+# Callback types
+
+One can define two types of callback functions:
 
 1.  a callback on **non-uniform data** (input of type-1 NUFFT / output of type-2 NUFFT).
 
@@ -105,6 +115,8 @@ weights = rand(Np)                       # random weights
 
 callback_nu(v, n) = oftype(v, v .* weights[n])   # define callback which will multiply each non-uniform value by its corresponding weight
 callbacks = NUFFTCallbacks(nonuniform = callback_nu)
+
+exec_type1!(output, plan, input; callbacks = callbacks)  # use callback in type-1 transform (for example)
 ```
 
 ## Callback on uniform data
@@ -126,6 +138,8 @@ function callback_u(w, idx)
 end
 
 callbacks = NUFFTCallbacks(uniform = callback_u)
+
+exec_type1!(output, plan, input; callbacks = callbacks)  # use callback in type-1 transform (for example)
 ```
 
 """
@@ -241,19 +255,6 @@ change in the future.
   When tuning performance, it is helpful to print the plan (as in `println(plan)`) to see
   the actual block and batch sizes.
 
-### Callbacks
-
-As detailed in [`NUFFTCallbacks`](@ref), one can define callbacks which allow to modify
-transform inputs and/or outputs "on the fly". This can be useful for performance (allowing
-to merge operations) or for reducing memory usage (avoiding allocation of new arrays).
-
-Callbacks can be different for type-1 and type-2 transforms, and may be set via the keyword
-arguments `callbacks_type1` and `callbacks_type2`. For example, to set callbacks for type-1
-transforms, create a [`NUFFTCallbacks`](@ref) (see examples there) and then construct the plan with:
-
-    callbacks = NUFFTCallbacks(nonuniform = ..., uniform = ...)
-    plan = PlanNUFFT(...; callbacks_type1 = callbacks)
-
 ### Other parameters
 
 - `fftshift = false`: determines the order of wavenumbers in uniform space.
@@ -324,8 +325,6 @@ struct PlanNUFFT{
         IndexMap <: NTuple{N, AbstractVector{Int}},
         Timer <: TimerOutput,
         PointTransform <: Function,
-        CallbacksType1 <: NUFFTCallbacks,
-        CallbacksType2 <: NUFFTCallbacks,
     }
     kernels :: Kernels
     backend :: Backend  # CPU, GPU, ...
@@ -339,8 +338,6 @@ struct PlanNUFFT{
     timer   :: Timer
     synchronise :: Bool
     point_transform_fold :: PointTransform  # folds points onto the [0, 2π) box (+ optional transforms)
-    callbacks_type1 :: CallbacksType1
-    callbacks_type2 :: CallbacksType2
 end
 
 # This represents the type of data in Fourier space.
@@ -465,8 +462,6 @@ function _PlanNUFFT(
         gpu_method::Symbol = :global_memory,
         gpu_batch_size::Val = Val(default_gpu_batch_size(backend)),  # currently only used in shared-memory GPU spreading
         point_transform::F = identity,
-        callbacks_type1::NUFFTCallbacks = NUFFTCallbacks(),
-        callbacks_type2::NUFFTCallbacks = NUFFTCallbacks(),
     ) where {Z <: Number, D, F <: Function}
     ks = init_wavenumbers(Z, Ns)
     # Determine dimensions of oversampled grid.
@@ -526,7 +521,6 @@ function _PlanNUFFT(
     PlanNUFFT(
         kernel_data, backend, kernel_evalmode, σ, points_ref, nufft_data, blocks,
         fftshift, index_map, timer, synchronise, point_transform_fold,
-        callbacks_type1, callbacks_type2,
     )
 end
 
