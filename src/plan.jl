@@ -151,6 +151,13 @@ struct NUFFTCallbacks{
     uniform::CallbackU
 end
 
+function Adapt.adapt_structure(to, c::NUFFTCallbacks)
+    NUFFTCallbacks(
+        adapt(to, c.nonuniform),
+        adapt(to, c.uniform),
+    )
+end
+
 NUFFTCallbacks(; nonuniform = default_callback, uniform = default_callback) = NUFFTCallbacks(nonuniform, uniform)
 
 # By default, the callback returns the first passed argument (which is the input or output NUFFT value).

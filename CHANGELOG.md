@@ -5,6 +5,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Define `Adapt.adapt_structure` for `NUFFTCallbacks`. This makes it easier to
+  transform callbacks defined for the CPU to callbacks defined for the GPU.
+  This is used in tests; might also be useful in practice.
+
 ## [v0.8.0] - 2025-06-16
 
 ### Added
