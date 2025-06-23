@@ -19,7 +19,6 @@
 # - use new JLBackend in the latest GPUArrays
 
 using NonuniformFFTs
-using StaticArrays: SVector  # for convenience
 using KernelAbstractions: KernelAbstractions as KA
 using AbstractFFTs: fftfreq
 using AbstractNFFTs: AbstractNFFTs
@@ -85,7 +84,7 @@ end
 @info "GPU tests - using:" GPU_BACKEND GPUBackend GPUArrayType
 
 function run_plan(
-        p::PlanNUFFT, xp_init::AbstractArray, vp_init::NTuple{Nc, AbstractVector};
+        p::PlanNUFFT, xp_init::Tuple, vp_init::NTuple{Nc, AbstractVector};
         callbacks_type1 = NUFFTCallbacks(), callbacks_type2 = NUFFTCallbacks(),
     ) where {Nc}
     (; backend,) = p
@@ -123,9 +122,9 @@ function compare_with_cpu(
     ) where {T <: Number, Nc}
     # Generate some non-uniform random data on the CPU
     rng = Xoshiro(42)
-    N = length(dims)    # number of dimensions
+    D = length(dims)    # number of dimensions
     Tr = real(T)
-    xp_init = [rand(rng, SVector{N, Tr}) * Tr(2π) for _ ∈ 1:Np]  # non-uniform points in [0, 2π]ᵈ
+    xp_init = ntuple(_ -> [rand(rng, Tr) * Tr(2π) for _ ∈ 1:Np], D)  # non-uniform points in [0, 2π]ᵈ
     vp_init = ntuple(_ -> randn(rng, T, Np), ntransforms)
 
     @inferred test_inference_block_dims_shmem(GPUBackend(), T, dims, HalfSupport(4))
@@ -136,7 +135,7 @@ function compare_with_cpu(
 
     # Test that plan_nfft interface works.
     @testset "AbstractNFFTs.plan_nfft" begin
-        xmat = reinterpret(reshape, Tr, xp_init)
+        xmat = hcat(xp_init...)'  # matrix of dimensions (D, Np)
         p_nfft = @inferred AbstractNFFTs.plan_nfft(GPUArrayType, xmat, dims)
         @test p_nfft.p.backend isa GPUBackend
         # Test without the initial argument (type of array)
@@ -145,7 +144,11 @@ function compare_with_cpu(
     end
 
     r_cpu = run_plan(p_cpu, xp_init, vp_init; callbacks_type1, callbacks_type2)
-    r_gpu = run_plan(p_gpu, xp_init, vp_init; callbacks_type1, callbacks_type2)
+    r_gpu = run_plan(
+        p_gpu, xp_init, vp_init;
+        callbacks_type1 = adapt(GPUBackend(), callbacks_type1),
+        callbacks_type2 = adapt(GPUBackend(), callbacks_type2),
+    )
 
     # The differences of the order of 1e-7 (= roughly the expected accuracy given the
     # chosen parameters) are explained by the fact that the CPU uses a polynomial
@@ -167,6 +170,14 @@ function compare_with_cpu(
 
     nothing
 end
+
+# Defining callbacks as a callable struct is needed for testing callbacks on CPU and GPU
+# with captured arrays (e.g. ks, weights). Using adapt(CUDABackend(), ::NonuniformCallbackMultiplyByWeights)
+# transforms the weights array into a CUDA array.
+struct NonuniformCallbackMultiplyByWeights{Weights <: AbstractArray} <: Function
+    weights :: Weights
+end
+(f::NonuniformCallbackMultiplyByWeights)(v, n) = oftype(v, @inbounds(v .* f.weights[n]))
 
 @testset "GPU implementation (using $GPU_BACKEND backend)" begin
     dims = (35, 64, 40)
@@ -191,15 +202,19 @@ end
     @testset "Callbacks" begin
         Np = prod(dims) ÷ 2
         ks = map(N -> fftfreq(N, N), dims)
-        weights = rand(Xoshiro(42), Np)
-        callbacks = NUFFTCallbacks(
-            nonuniform = (v, n) -> oftype(v, @inbounds(v .* weights[n])),
-            uniform = (w, idx) -> let
+        weights = rand(Xoshiro(42), Np)  # note: this needs to be moved to the GPU for GPU transforms (we use A# dapt for this)
+        nonuniform = NonuniformCallbackMultiplyByWeights(weights)
+        uniform = let ks = ks
+            @inline function (w, idx)
                 k⃗ = @inbounds getindex.(ks, idx)
                 k² = sum(abs2, k⃗)
                 factor = ifelse(iszero(k²), zero(k²), inv(k²))  # divide by k² but avoiding division by zero
                 oftype(w, w .* factor)
-            end,
+            end
+        end
+        callbacks = NUFFTCallbacks(;
+            nonuniform,
+            uniform,
         )
         @testset "Global memory" compare_with_cpu(ComplexF32, dims; Np, callbacks_type1 = callbacks, callbacks_type2 = callbacks, gpu_method = :global_memory)
         @testset "Shared memory" compare_with_cpu(ComplexF32, dims; Np, callbacks_type1 = callbacks, callbacks_type2 = callbacks, gpu_method = :shared_memory)
