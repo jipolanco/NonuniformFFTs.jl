@@ -1,6 +1,6 @@
 name = "NonuniformFFTs"
 uuid = "cd96f58b-6017-4a02-bb9e-f4d81626177f"
-version = "0.8.1"
+version = "0.8.2"
 authors = ["Juan Ignacio Polanco <juan-ignacio.polanco@cnrs.fr>"]
 
 [deps]

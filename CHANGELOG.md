@@ -5,6 +5,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.8.2] - 2025-07-08
+
 ### Added
 
 - Add `use_atomics` option to `PlanNUFFT`, for using atomic operations in
@@ -234,7 +236,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Implement [AbstractNFFTs](https://juliamath.github.io/NFFT.jl/stable/abstract/)
   interface for easier comparison with other NUFFT packages.
 
-  [unreleased]: https://github.com/jipolanco/NonuniformFFTs.jl/compare/v0.7.2...HEAD
+  [unreleased]: https://github.com/jipolanco/NonuniformFFTs.jl/compare/v0.8.2...HEAD
+  [v0.8.2]: https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.8.2
+  [v0.8.1]: https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.8.1
+  [v0.8.0]: https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.8.0
+  [v0.7.3]: https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.7.3
   [v0.7.2]: https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.7.2
   [v0.7.1]: https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.7.1
   [v0.7.0]: https://github.com/jipolanco/NonuniformFFTs.jl/releases/tag/v0.7.0
