@@ -1,3 +1,5 @@
+using Atomix: Atomix
+
 function split_periodic(
         Ia::CartesianIndex{D}, Ib::CartesianIndex{D}, Ns::Dims{D},
     ) where {D}
@@ -101,7 +103,6 @@ function spread_from_points!(
     # nblocks = length(indices)
     Base.require_one_based_indexing(buffers)
     Base.require_one_based_indexing(indices)
-    lck = ReentrantLock()
 
     Threads.@threads for i ∈ 1:Nt
         # j_start = (i - 1) * nblocks ÷ Nt + 1
@@ -137,10 +138,7 @@ function spread_from_points!(
             inds_split = split_periodic(Ia, Ib, size(first(us_all)))
 
             # Add data from block to output array.
-            # Note that only one thread can write at a time.
-            lock(lck) do
-                add_from_block!(us_all, block, inds_split)
-            end
+            add_from_block!(us_all, block, inds_split)
         end
     end
 
@@ -177,6 +175,24 @@ function _generate_split_loop_expr(d, inds, loop_core)
     end
 end
 
+@inline function cpu_add_atomic!(us::AbstractArray{<:Real}, js::Tuple, w::Real)
+    @inbounds begin
+        Atomix.@atomic us[js...] = w
+    end
+    nothing
+end
+
+# @atomic doesn't directly work with complex numbers, so we need to separately add the real
+# and imaginary parts.
+@inline function cpu_add_atomic!(us::AbstractArray{Complex{T}}, js::Tuple, w::Complex) where {T}
+    @inbounds begin
+        vs = reinterpret(reshape, T, us)
+        Atomix.@atomic vs[1, js...] = real(w)
+        Atomix.@atomic vs[2, js...] = imag(w)
+    end
+    nothing
+end
+
 function _add_from_block!(
         us::AbstractArray{T, D},
         ws::AbstractArray{T, D},
@@ -186,7 +202,8 @@ function _add_from_block!(
         loop_core = quote
             n += 1
             js = @ntuple $D j
-            us[js...] += ws[n]  # us[j_1, j_2, ..., j_D] += ws[n]
+            w = ws[n]
+            cpu_add_atomic!(us, js, ws[n])  # us[j_1, j_2, ..., j_D] += ws[n]
         end
         ex_loop = _generate_split_loop_expr(D, :inds_wrapped, loop_core)
         quote
@@ -211,7 +228,7 @@ function _add_from_block!(
             is_tail = map(first, inds_tail)
             js_tail = map(last, inds_tail)
             for (i, j) ∈ iter_first
-                us[j, js_tail...] += ws[i, is_tail...]
+                cpu_add_atomic!(us, (j, js_tail...), ws[i, is_tail...])
             end
         end
         us
