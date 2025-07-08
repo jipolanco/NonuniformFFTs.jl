@@ -6,6 +6,9 @@ using FFTW: FFTW
 using Random: Xoshiro
 using BenchmarkTools
 
+using ThreadPinning
+pinthreads(:cores)
+
 # Create benchmark suite for AirspeedVelocity.jl (benchmarks on github CI)
 const SUITE = BenchmarkGroup()
 
@@ -45,10 +48,19 @@ Np = prod(Ns)
 m = HalfSupport(4)
 
 ρ = Np / prod(Ns)
-key = "CPU: Ns = $Ns, ρ = $ρ, σ = $σ, m = $m"
+case = "CPU: Ns = $Ns, ρ = $ρ, σ = $σ, m = $m"
 
 for Z in (Float64, ComplexF64)
-    local data = setup_cpu_benchmark(Z, Ns, Np; σ, m)
-    SUITE[key]["$Z Type 1"] = @benchmarkable run_cpu_benchmark_type1($data)
-    SUITE[key]["$Z Type 2"] = @benchmarkable run_cpu_benchmark_type2($data)
+    for (key_atomics, use_atomics) in ("atomics" => true, "no atomics" => false)
+        local data = setup_cpu_benchmark(Z, Ns, Np; σ, m, use_atomics)
+        SUITE[case][key_atomics]["$Z Type 1"] = @benchmarkable run_cpu_benchmark_type1($data)
+        SUITE[case][key_atomics]["$Z Type 2"] = @benchmarkable run_cpu_benchmark_type2($data)
+    end
 end
+
+# Example interactive usage:
+# @time tune!(SUITE)
+# results = run(SUITE[case]["atomics"]["Float64 Type 1"]; verbose = true, seconds = 2)
+# results = run(SUITE[case]["atomics"]["ComplexF64 Type 1"]; verbose = true, seconds = 2)
+# results = run(SUITE[case]["no atomics"]["Float64 Type 1"]; verbose = true, seconds = 2)
+# results = run(SUITE[case]["no atomics"]["ComplexF64 Type 1"]; verbose = true, seconds = 2)

@@ -47,7 +47,8 @@ function spread_from_points!(
         evalmode::EvaluationMode,
         us_all::NTuple{C, AbstractArray},
         x⃗s::NTuple{N, AbstractVector},
-        vp_all::NTuple{C, AbstractVector},
+        vp_all::NTuple{C, AbstractVector};
+        cpu_use_atomics = false,  # ignored
     ) where {F <: Function, Callback <: Function, C, N}
     # Note: the dimensions of arrays have already been checked via check_nufft_nonuniform_data.
     foreach(Base.require_one_based_indexing, x⃗s)  # this is to make sure that all indices match
