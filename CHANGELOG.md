@@ -5,6 +5,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Add `use_atomics` option to `PlanNUFFT`, for using atomic operations in
+  type-1 transforms when using multiple CPU threads. By default this is `false`
+  which corresponds to the old behaviour, in which we use a lock to make sure
+  that one thread writes to the output array at a time. Setting `use_atomics = true`
+  can noticeably improve performance when using a large number of threads.
+
 ## [v0.8.1] - 2025-06-23
 
 ### Added

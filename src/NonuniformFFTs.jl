@@ -147,7 +147,7 @@ function exec_type1!(
         ûs_k::NTuple{C, AbstractArray{Z}}, p::PlanNUFFT{T}, vp::NTuple{C, AbstractVector{T}};
         callbacks::NUFFTCallbacks = NUFFTCallbacks()
     ) where {T, Z, C}
-    (; backend, points, kernels, data, blocks, index_map,) = p
+    (; backend, points, kernels, data, blocks, index_map, cpu_use_atomics,) = p
     (; us,) = data
     Z === complex(T) || throw(ArgumentError(lazy"uniform data must have the same accuracy as the created plan (got $Z values for a $T plan)"))
     timer = get_timer_nowarn(p)
@@ -165,7 +165,7 @@ function exec_type1!(
         end
 
         @timeit timer "(1) Spreading" begin
-            spread_from_points!(backend, callbacks.nonuniform, p.point_transform_fold, blocks, kernels, p.kernel_evalmode, us, points, vp)
+            spread_from_points!(backend, callbacks.nonuniform, p.point_transform_fold, blocks, kernels, p.kernel_evalmode, us, points, vp; cpu_use_atomics)
             maybe_synchronise(p)
         end
 

@@ -1,3 +1,5 @@
+using Atomix: Atomix
+
 function split_periodic(
         Ia::CartesianIndex{D}, Ib::CartesianIndex{D}, Ns::Dims{D},
     ) where {D}
@@ -90,7 +92,8 @@ function spread_from_points!(
         evalmode::EvaluationMode,
         us_all::NTuple{C, AbstractArray},
         xp::NTuple{D, AbstractVector},
-        vp_all::NTuple{C, AbstractVector},
+        vp_all::NTuple{C, AbstractVector};
+        cpu_use_atomics::Bool = false,
     ) where {F <: Function, Callback <: Function, C, D}
     (; block_dims, pointperm, buffers, indices,) = bd
     Ms = map(Kernels.half_support, gs)
@@ -137,9 +140,13 @@ function spread_from_points!(
             inds_split = split_periodic(Ia, Ib, size(first(us_all)))
 
             # Add data from block to output array.
-            # Note that only one thread can write at a time.
-            lock(lck) do
-                add_from_block!(us_all, block, inds_split)
+            if cpu_use_atomics
+                add_from_block!(us_all, block, inds_split; atomics = Val(true))
+            else
+                # This is executed by only one thread at a time (can be slower for many threads)
+                lock(lck) do
+                    add_from_block!(us_all, block, inds_split; atomics = Val(false))
+                end
             end
         end
     end
@@ -150,10 +157,11 @@ end
 function add_from_block!(
         us_all::NTuple{C, AbstractArray},
         block::NTuple{C, AbstractArray},
-        inds_wrapped::NTuple,
+        inds_wrapped::NTuple;
+        kws...,
     ) where {C}
     for i ∈ 1:C
-        _add_from_block!(us_all[i], block[i], inds_wrapped)
+        _add_from_block!(us_all[i], block[i], inds_wrapped; kws...)
     end
     us_all
 end
@@ -177,16 +185,39 @@ function _generate_split_loop_expr(d, inds, loop_core)
     end
 end
 
+@inline function cpu_add_atomic!(us::AbstractArray{<:Real}, js::Tuple, w::Real)
+    @inbounds begin
+        Atomix.@atomic :monotonic us[js...] += w
+    end
+    nothing
+end
+
+# @atomic doesn't directly work with complex numbers, so we need to separately add the real
+# and imaginary parts.
+@inline function cpu_add_atomic!(us::AbstractArray{Complex{T}}, js::Tuple, w::Complex) where {T}
+    @inbounds begin
+        vs = reinterpret(reshape, T, us)
+        Atomix.@atomic :monotonic vs[1, js...] += real(w)
+        Atomix.@atomic :monotonic vs[2, js...] += imag(w)
+    end
+    nothing
+end
+
 function _add_from_block!(
         us::AbstractArray{T, D},
         ws::AbstractArray{T, D},
-        inds_wrapped::NTuple{D, NTuple{2, UnitRange}},
+        inds_wrapped::NTuple{D, NTuple{2, UnitRange}};
+        atomics::Val,
     ) where {T, D}
     if @generated
         loop_core = quote
             n += 1
             js = @ntuple $D j
-            us[js...] += ws[n]  # us[j_1, j_2, ..., j_D] += ws[n]
+            if atomics === Val(true)
+                cpu_add_atomic!(us, js, ws[n])  # us[j_1, j_2, ..., j_D] += ws[n]
+            else
+                us[js...] += ws[n]  # us[j_1, j_2, ..., j_D] += ws[n]
+            end
         end
         ex_loop = _generate_split_loop_expr(D, :inds_wrapped, loop_core)
         quote
@@ -211,7 +242,11 @@ function _add_from_block!(
             is_tail = map(first, inds_tail)
             js_tail = map(last, inds_tail)
             for (i, j) ∈ iter_first
-                us[j, js_tail...] += ws[i, is_tail...]
+                if atomics === Val(true)
+                    cpu_add_atomic!(us, (j, js_tail...), ws[i, is_tail...])
+                else
+                    us[j, js_tail...] += ws[i, is_tail...]
+                end
             end
         end
         us

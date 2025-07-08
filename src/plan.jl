@@ -200,7 +200,7 @@ the order of ``10^{-7}`` for `Float64` or `ComplexF64` data.
 - `kernel_evalmode`: method used for kernel evaluation.
   The default is [`FastApproximation`](@ref) on CPU, which will attempt to use a fast
   approximation method which greatly speeds up kernel evaluation.
-  On GPUs the default is [`Direct`](@ref), as the fast approximation method is not
+  On NVIDIA GPUs the default is [`Direct`](@ref), as the fast approximation method is not
   necessarily faster.
 
 - `block_size`: the block size (in number of elements) when using block partitioning or when
@@ -217,7 +217,13 @@ the order of ``10^{-7}`` for `Float64` or `ComplexF64` data.
   Blocking / spatial sorting can be completely disabled by passing `block_size = nothing` (but this is
   generally slower).
 
-- `gpu_method`: allows to select between different implementations of
+- `use_atomics = false`: if `true`, atomic operations are used in type-1 transforms (spreading).
+  This can improve performance when using a large number of CPU threads.
+  Otherwise, if `false` (default), we use a `ReentrantLock` to make sure that only one
+  thread writes at once to the output array.
+  This does not affect GPU performance.
+
+- `gpu_method = :global_memory`: allows to select between different implementations of
   GPU transforms. Possible options are:
 
   * `:global_memory` (default): directly read and write onto arrays in global memory in spreading
@@ -345,6 +351,7 @@ struct PlanNUFFT{
     timer   :: Timer
     synchronise :: Bool
     point_transform_fold :: PointTransform  # folds points onto the [0, 2π) box (+ optional transforms)
+    cpu_use_atomics :: Bool
 end
 
 # This represents the type of data in Fourier space.
@@ -378,6 +385,8 @@ function Base.show(io::IO, p::PlanNUFFT{Z, N, Nc}) where {Z, N, Nc}
             @assert hasproperty(blocks, :batch_size)
             print(io, "\n  - batch size for GPU type-1: ", get_batch_size(blocks))
         end
+    else
+        print(io, "\n  - using atomics in type-1: ", p.cpu_use_atomics)
     end
     nothing
 end
@@ -469,6 +478,7 @@ function _PlanNUFFT(
         gpu_method::Symbol = :global_memory,
         gpu_batch_size::Val = Val(default_gpu_batch_size(backend)),  # currently only used in shared-memory GPU spreading
         point_transform::F = identity,
+        use_atomics::Bool = false,
     ) where {Z <: Number, D, F <: Function}
     ks = init_wavenumbers(Z, Ns)
     # Determine dimensions of oversampled grid.
@@ -527,7 +537,7 @@ function _PlanNUFFT(
     point_transform_fold = generate_point_transform_fold_function(point_transform, backend)
     PlanNUFFT(
         kernel_data, backend, kernel_evalmode, σ, points_ref, nufft_data, blocks,
-        fftshift, index_map, timer, synchronise, point_transform_fold,
+        fftshift, index_map, timer, synchronise, point_transform_fold, use_atomics,
     )
 end
 
