@@ -253,7 +253,7 @@ Compared to other available packages in Julia, such as [FINUFFT.jl](https://gith
 
 NonuniformFFTs.jl can be *fast*:
 
-![](benchmark/comparisons/plots/benchmark_ComplexF64_type1.svg)
+![](benchmark/CPU+CUDA/plots/benchmark_ComplexF64_type1.svg)
 
 On the CPU, for complex non-uniform data, it displays comparable performance to
 the [FINUFFT library](https://github.com/flatironinstitute/finufft) written in
