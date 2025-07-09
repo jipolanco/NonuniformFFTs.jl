@@ -408,6 +408,16 @@ function run_all_benchmarks(; cpu = true, gpu = true,)
     @show get_device_name(CPU())
     @show get_device_name(gpu_backend)
 
+    # kernel = BackwardsKaiserBesselKernel()
+    # kernel = KaiserBesselKernel()
+    # kernel_evalmode = Direct()
+    # kernel_evalmode = FastApproximation()
+    params = (;
+        # kernel,
+        # kernel_evalmode,
+        σ, m,
+    )
+
     # Real data
     if gpu
         @info "Running benchmark" Z=T backend=gpu_backend gpu_method=:shared_memory
