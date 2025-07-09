@@ -20,6 +20,9 @@ end
 
 threadinfo()
 
+CUDA.versioninfo()
+@show CUDA.device()
+
 # # Useful for FINUFFT (CPU):
 # ENV["OMP_PROC_BIND"] = "true"
 # # ENV["OMP_PLACES"] = "cores"
@@ -50,6 +53,7 @@ function bench_nonuniformffts(
 
     p = PlanNUFFT(Z, Ns; backend, σ, m, gpu_method, kws...)
     println(p)
+    flush(stdout)
     ûs = similar(vp, complex(T), size(p))
 
     # Execute plan once
@@ -89,6 +93,7 @@ function bench_nonuniformffts(
 
     if backend isa KA.CPU
         println(p.timer)
+        flush(stdout)
     end
 
     (; type1, type2, relative_errors,)
@@ -376,7 +381,7 @@ function run_benchmark_finufft_cpu(
     filename
 end
 
-function run_all_benchmarks()
+function run_all_benchmarks(; cpu = true, gpu = true,)
     T = Float64
     Z = complex(T)
     Ngrid = 256
@@ -393,30 +398,46 @@ function run_all_benchmarks()
     end
 
     # Real data
-    @info "Running benchmark" Z=T backend=CUDABackend() gpu_method=:shared_memory
-    run_benchmark_nonuniformffts(T, CUDABackend(), Ns, Nps; σ, m, gpu_method = :shared_memory)
+    if gpu
+        @info "Running benchmark" Z=T backend=CUDABackend() gpu_method=:shared_memory
+        flush(stdout)
+        run_benchmark_nonuniformffts(T, CUDABackend(), Ns, Nps; σ, m, gpu_method = :shared_memory)
 
-    @info "Running benchmark" Z=T backend=CUDABackend() gpu_method=:global_memory
-    run_benchmark_nonuniformffts(T, CUDABackend(), Ns, Nps; σ, m, gpu_method = :global_memory)
+        @info "Running benchmark" Z=T backend=CUDABackend() gpu_method=:global_memory
+        flush(stdout)
+        run_benchmark_nonuniformffts(T, CUDABackend(), Ns, Nps; σ, m, gpu_method = :global_memory)
+    end
 
-    @info "Running benchmark" Z=T backend=CPU() use_atomics=false
-    run_benchmark_nonuniformffts(T, CPU(), Ns, Nps; σ, m, use_atomics = false)
+    if cpu
+        @info "Running benchmark" Z=T backend=CPU() use_atomics=false
+        flush(stdout)
+        run_benchmark_nonuniformffts(T, CPU(), Ns, Nps; σ, m, use_atomics = false)
 
-    @info "Running benchmark" Z=T backend=CPU() use_atomics=true
-    run_benchmark_nonuniformffts(T, CPU(), Ns, Nps; σ, m, use_atomics = true)
+        @info "Running benchmark" Z=T backend=CPU() use_atomics=true
+        flush(stdout)
+        run_benchmark_nonuniformffts(T, CPU(), Ns, Nps; σ, m, use_atomics = true)
+    end
 
     # Complex data
-    @info "Running benchmark" Z=Z backend=CUDABackend() gpu_method=:shared_memory
-    run_benchmark_nonuniformffts(Z, CUDABackend(), Ns, Nps; σ, m, gpu_method = :shared_memory)
+    if gpu
+        @info "Running benchmark" Z=Z backend=CUDABackend() gpu_method=:shared_memory
+        flush(stdout)
+        run_benchmark_nonuniformffts(Z, CUDABackend(), Ns, Nps; σ, m, gpu_method = :shared_memory)
 
-    @info "Running benchmark" Z=Z backend=CUDABackend() gpu_method=:global_memory
-    run_benchmark_nonuniformffts(Z, CUDABackend(), Ns, Nps; σ, m, gpu_method = :global_memory)
+        @info "Running benchmark" Z=Z backend=CUDABackend() gpu_method=:global_memory
+        flush(stdout)
+        run_benchmark_nonuniformffts(Z, CUDABackend(), Ns, Nps; σ, m, gpu_method = :global_memory)
+    end
 
-    @info "Running benchmark" Z=Z backend=CPU() use_atomics=false
-    run_benchmark_nonuniformffts(Z, CPU(), Ns, Nps; σ, m, use_atomics = false)
+    if cpu
+        @info "Running benchmark" Z=Z backend=CPU() use_atomics=false
+        flush(stdout)
+        run_benchmark_nonuniformffts(Z, CPU(), Ns, Nps; σ, m, use_atomics = false)
 
-    @info "Running benchmark" Z=Z backend=CPU() use_atomics=true
-    run_benchmark_nonuniformffts(Z, CPU(), Ns, Nps; σ, m, use_atomics = true)
+        @info "Running benchmark" Z=Z backend=CPU() use_atomics=true
+        flush(stdout)
+        run_benchmark_nonuniformffts(Z, CPU(), Ns, Nps; σ, m, use_atomics = true)
+    end
 
     # CuFINUFFT
     params_cufinufft = (;
@@ -425,19 +446,28 @@ function run_all_benchmarks()
         tol = 1e-6,
     )
 
-    gpu_method = 1  # global memory (GM-sort)
-    run_benchmark_cufinufft(Z, Ns, Nps; gpu_method, params_cufinufft...)
+    if gpu
+        gpu_method = 1  # global memory (GM-sort)
+        @info "Running CuFINUFFT benchmark" Z=Z backend=CUDABackend() gpu_method=gpu_method
+        flush(stdout)
+        run_benchmark_cufinufft(Z, Ns, Nps; gpu_method, params_cufinufft...)
 
-    gpu_method = 2  # shared memory (SM)
-    run_benchmark_cufinufft(Z, Ns, Nps; gpu_method, params_cufinufft...)
+        gpu_method = 2  # shared memory (SM)
+        @info "Running CuFINUFFT benchmark" Z=Z backend=CUDABackend() gpu_method=gpu_method
+        flush(stdout)
+        run_benchmark_cufinufft(Z, Ns, Nps; gpu_method, params_cufinufft...)
+    end
 
     # FINUFFT CPU
-    params_finufft = (;
-        spread_sort = 1,
-        spread_kerevalmeth = 1,
-        tol = 1e-6,
-    )
-    run_benchmark_finufft_cpu(Z, Ns, Nps; params_finufft...)
+    if cpu
+        @info "Running FINUFFT benchmark" Z=Z backend=CPU()
+        params_finufft = (;
+            spread_sort = 1,
+            spread_kerevalmeth = 1,
+            tol = 1e-6,
+        )
+        run_benchmark_finufft_cpu(Z, Ns, Nps; params_finufft...)
+    end
 
     nothing
 end
@@ -445,5 +475,6 @@ end
 outdir = "results"
 mkpath(outdir)
 cd(outdir) do
-    run_all_benchmarks()
+    run_all_benchmarks(; gpu = true, cpu = false,)
+    run_all_benchmarks(; gpu = false, cpu = true,)
 end
