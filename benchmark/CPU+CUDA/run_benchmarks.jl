@@ -6,24 +6,24 @@ using FFTW
 using LinearAlgebra: norm
 using KernelAbstractions
 using KernelAbstractions: KernelAbstractions as KA
-using ThreadPinning
+using ThreadPinning: pinthreads, threadinfo
 using Random: randn!, Xoshiro
 using BenchmarkTools
 using Statistics
 using TimerOutputs
 
-# NOTE: FINUFFT doesn't play well with ThreadPinning, so pinthreads should *not* be used
-# for FINUFFT (CPU) benchmarks! Seems to be a conflict between ThreadPinning and OpenMP.
 if haskey(ENV, "SLURM_JOB_ID")
     pinthreads(:affinitymask)
 else
     pinthreads(:cores)
 end
 
-# Useful for FINUFFT (CPU):
-ENV["OMP_PROC_BIND"] = "true"
-# ENV["OMP_PLACES"] = "cores"
-ENV["OMP_NUM_THREADS"] = Threads.nthreads()
+threadinfo()
+
+# # Useful for FINUFFT (CPU):
+# ENV["OMP_PROC_BIND"] = "true"
+# # ENV["OMP_PLACES"] = "cores"
+# ENV["OMP_NUM_THREADS"] = Threads.nthreads()
 
 get_device_name(::CPU) = string(Sys.cpu_info()[1].model, " ($(Sys.CPU_NAME), $(Sys.CPU_THREADS) threads)")
 
@@ -49,6 +49,7 @@ function bench_nonuniformffts(
     wp = similar(vp)
 
     p = PlanNUFFT(Z, Ns; backend, σ, m, gpu_method, kws...)
+    println(p)
     ûs = similar(vp, complex(T), size(p))
 
     # Execute plan once
@@ -247,11 +248,14 @@ function run_benchmark_nonuniformffts(
         σ = 1.5, m = HalfSupport(4),  # rtol = 1e-6
         gpu_method = :global_memory,
         fftw_flags = FFTW.ESTIMATE,
+        use_atomics = false,
         params...,
     ) where {Z <: Number}
     N = first(Ns)
     suffix = if backend isa GPU
         "_$gpu_method"
+    elseif backend isa CPU && use_atomics
+        "_atomics"
     else
         ""
     end
@@ -270,10 +274,11 @@ function run_benchmark_nonuniformffts(
             println(io, "#  - GPU method: ", gpu_method)
         else
             println(io, "#  - Number of threads: ", Threads.nthreads())
+            println(io, "#  - Using atomics: ", use_atomics)
         end
         println(io, "# (1) Number of points  (2) Type 1 (median, s)  (3) Type 2 (median, s)  (4) Relative error type 1  (5) Relative error type 2")
         for Np ∈ Nps
-            bench = bench_nonuniformffts(Z, backend, Ns, Np; params..., σ, m, gpu_method, fftw_flags)
+            bench = bench_nonuniformffts(Z, backend, Ns, Np; params..., use_atomics, σ, m, gpu_method, fftw_flags)
             type1 = median(bench.type1.times) / 1e9  # in seconds
             type2 = median(bench.type2.times) / 1e9  # in seconds
             @show Np, type1, type2, bench.relative_errors.type1, bench.relative_errors.type2
@@ -388,14 +393,30 @@ function run_all_benchmarks()
     end
 
     # Real data
-    run_benchmark_nonuniformffts(T, CUDABackend(), Ns, Nps; σ, m, gpu_method = :global_memory)
+    @info "Running benchmark" Z=T backend=CUDABackend() gpu_method=:shared_memory
     run_benchmark_nonuniformffts(T, CUDABackend(), Ns, Nps; σ, m, gpu_method = :shared_memory)
-    run_benchmark_nonuniformffts(T, CPU(), Ns, Nps; σ, m)
+
+    @info "Running benchmark" Z=T backend=CUDABackend() gpu_method=:global_memory
+    run_benchmark_nonuniformffts(T, CUDABackend(), Ns, Nps; σ, m, gpu_method = :global_memory)
+
+    @info "Running benchmark" Z=T backend=CPU() use_atomics=false
+    run_benchmark_nonuniformffts(T, CPU(), Ns, Nps; σ, m, use_atomics = false)
+
+    @info "Running benchmark" Z=T backend=CPU() use_atomics=true
+    run_benchmark_nonuniformffts(T, CPU(), Ns, Nps; σ, m, use_atomics = true)
 
     # Complex data
-    run_benchmark_nonuniformffts(Z, CUDABackend(), Ns, Nps; σ, m, gpu_method = :global_memory)
+    @info "Running benchmark" Z=Z backend=CUDABackend() gpu_method=:shared_memory
     run_benchmark_nonuniformffts(Z, CUDABackend(), Ns, Nps; σ, m, gpu_method = :shared_memory)
-    run_benchmark_nonuniformffts(Z, CPU(), Ns, Nps; σ, m)
+
+    @info "Running benchmark" Z=Z backend=CUDABackend() gpu_method=:global_memory
+    run_benchmark_nonuniformffts(Z, CUDABackend(), Ns, Nps; σ, m, gpu_method = :global_memory)
+
+    @info "Running benchmark" Z=Z backend=CPU() use_atomics=false
+    run_benchmark_nonuniformffts(Z, CPU(), Ns, Nps; σ, m, use_atomics = false)
+
+    @info "Running benchmark" Z=Z backend=CPU() use_atomics=true
+    run_benchmark_nonuniformffts(Z, CPU(), Ns, Nps; σ, m, use_atomics = true)
 
     # CuFINUFFT
     params_cufinufft = (;
