@@ -101,11 +101,10 @@ function interpolate!(
         us_all::NTuple{C, AbstractArray},
         xp::NTuple{D, AbstractVector},
     ) where {F <: Function, Callback <: Function, C, D}
-    (; block_dims, pointperm, buffers, indices,) = bd
+    (; block_dims, pointperm, indices,) = bd
     Z = eltype(eltype(us_all))
     Ms = map(Kernels.half_support, gs)
     block_dims_padded = @. block_dims + 2 * Ms
-    Base.require_one_based_indexing(buffers)
     Base.require_one_based_indexing(indices)
 
     js = eachindex(IndexLinear(), indices)  # block indices (= 1:nblocks)
