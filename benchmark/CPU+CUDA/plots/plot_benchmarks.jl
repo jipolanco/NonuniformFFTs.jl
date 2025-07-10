@@ -1,8 +1,11 @@
 using GLMakie
 using CairoMakie
 using DelimitedFiles
+using MathTeXEngine
 
+MathTeXEngine.set_texfont_family!(FontFamily("TeXGyreHeros"))
 GLMakie.activate!()
+Makie.set_theme!(theme_latexfonts())
 
 function read_timings(io::IO; nufft_type::Int)
     while Char(peek(io)) == '#'
@@ -25,7 +28,7 @@ function plot_from_file!(ax::Axis, filename; nufft_type, zorder = nothing, kws..
     l
 end
 
-function plot_benchmark(::Type{T}; nufft_type = 1, save_svg = false,) where {T <: Number}
+function plot_benchmark(::Type{T}, results_dir; nufft_type = 1, save_svg = false,) where {T <: Number}
     Ns = (256, 256, 256)
     N = first(Ns)
     Ngrid = prod(Ns)
@@ -73,25 +76,25 @@ function plot_benchmark(::Type{T}; nufft_type = 1, save_svg = false,) where {T <
     first_points_gpu = Point2{Float64}[]
     last_points_gpu = Point2{Float64}[]
 
-    l = plot_from_file!(ax, "../results/NonuniformFFTs_$(N)_$(T)_CPU.dat"; label = "NonuniformFFTs CPU", kws_nonuniform..., kws_cpu..., kws_all...)
+    l = plot_from_file!(ax, "$results_dir/NonuniformFFTs_$(N)_$(T)_CPU_atomics.dat"; label = "NonuniformFFTs CPU", kws_nonuniform..., kws_cpu..., kws_all...)
     push!(first_points_cpu, l[1][][1])  # get first datapoint in line
 
-    l = plot_from_file!(ax, "../results/NonuniformFFTs_$(N)_$(T)_CUDABackend_global_memory.dat"; label = "NonuniformFFTs GPU", kws_nonuniform..., kws_gpu..., kws_all...)
+    l = plot_from_file!(ax, "$results_dir/NonuniformFFTs_$(N)_$(T)_CUDABackend_global_memory.dat"; label = "NonuniformFFTs GPU", kws_nonuniform..., kws_gpu..., kws_all...)
     push!(first_points_gpu, l[1][][1])  # get first datapoint in line
     push!(last_points_gpu, l[1][][end])  # get last datapoint in line
 
-    l = plot_from_file!(ax, "../results/NonuniformFFTs_$(N)_$(T)_CUDABackend_shared_memory.dat"; label = "NonuniformFFTs GPU (SM)", kws_nonuniform..., kws_gpu_sm..., kws_all...)
+    l = plot_from_file!(ax, "$results_dir/NonuniformFFTs_$(N)_$(T)_CUDABackend_shared_memory.dat"; label = "NonuniformFFTs GPU (SM)", kws_nonuniform..., kws_gpu_sm..., kws_all...)
     push!(first_points_gpu, l[1][][1])  # get first datapoint in line
     push!(last_points_gpu, l[1][][end])  # get last datapoint in line
 
-    l = plot_from_file!(ax, "../results/FINUFFT_$(N)_$(Z)_CPU.dat"; label = "FINUFFT CPU", kws_finufft..., kws_cpu..., kws_all...)
+    l = plot_from_file!(ax, "$results_dir/FINUFFT_$(N)_$(Z)_CPU.dat"; label = "FINUFFT CPU", kws_finufft..., kws_cpu..., kws_all...)
     push!(first_points_cpu, l[1][][1])  # get first datapoint in line
 
-    l = plot_from_file!(ax, "../results/CuFINUFFT_$(N)_$(Z)_global_memory.dat"; label = "CuFINUFFT GPU", kws_finufft..., kws_gpu..., kws_all...)
+    l = plot_from_file!(ax, "$results_dir/CuFINUFFT_$(N)_$(Z)_global_memory.dat"; label = "CuFINUFFT GPU", kws_finufft..., kws_gpu..., kws_all...)
     push!(first_points_gpu, l[1][][1])  # get first datapoint in line
     push!(last_points_gpu, l[1][][end])  # get last datapoint in line
 
-    l = plot_from_file!(ax, "../results/CuFINUFFT_$(N)_$(Z)_shared_memory.dat"; label = "CuFINUFFT GPU (SM)", kws_finufft..., kws_gpu_sm..., kws_all...)
+    l = plot_from_file!(ax, "$results_dir/CuFINUFFT_$(N)_$(Z)_shared_memory.dat"; label = "CuFINUFFT GPU (SM)", kws_finufft..., kws_gpu_sm..., kws_all...)
     push!(first_points_gpu, l[1][][1])  # get first datapoint in line
     push!(last_points_gpu, l[1][][end])  # get last datapoint in line
 
@@ -136,7 +139,7 @@ function plot_benchmark(::Type{T}; nufft_type = 1, save_svg = false,) where {T <
 end
 
 for T ∈ (Float64, ComplexF64), nufft_type ∈ (1, 2)
-    plot_benchmark(T; nufft_type, save_svg = true)
+    plot_benchmark(T, "../results.H100_jean-zay"; nufft_type, save_svg = true)
 end
 
-fig = plot_benchmark(ComplexF64; nufft_type = 1)
+fig = plot_benchmark(ComplexF64, "../results.H100_jean-zay"; nufft_type = 1)
