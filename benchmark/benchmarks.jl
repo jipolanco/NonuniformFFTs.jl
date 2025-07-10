@@ -17,7 +17,7 @@ function setup_cpu_benchmark(::Type{Z}, Ns::Dims, Np; σ, m, fftw_flags = FFTW.E
     T = real(Z)
     rng = Xoshiro(42)
     xp = ntuple(D) do _
-        randn(rng, T, Np)
+        T(π) .+ randn(rng, T, Np) .* T(2π)  # note: points can be outside [0, 2π]
     end
     vp = randn(rng, Z, Np)
     backend = CPU()

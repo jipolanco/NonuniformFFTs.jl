@@ -90,66 +90,67 @@ function spread_from_points!(
         bd::BlockDataCPU,
         gs,
         evalmode::EvaluationMode,
-        us_all::NTuple{C, AbstractArray},
+        us_all::NTuple{C, AbstractArray},  # we assume this is completely set to zero
         xp::NTuple{D, AbstractVector},
         vp_all::NTuple{C, AbstractVector};
         cpu_use_atomics::Bool = false,
     ) where {F <: Function, Callback <: Function, C, D}
     (; block_dims, pointperm, buffers, indices,) = bd
+    Z = eltype(eltype(us_all))
     Ms = map(Kernels.half_support, gs)
-    for us ∈ us_all
-        fill!(us, zero(eltype(us)))
-    end
-    Nt = length(buffers)  # usually equal to the number of threads
-    # nblocks = length(indices)
+    block_dims_padded = @. block_dims + 2 * Ms
     Base.require_one_based_indexing(buffers)
     Base.require_one_based_indexing(indices)
     lck = ReentrantLock()
 
-    Threads.@threads for i ∈ 1:Nt
-        # j_start = (i - 1) * nblocks ÷ Nt + 1
-        # j_end = i * nblocks ÷ Nt
-        j_start = bd.blocks_per_thread[i] + 1
-        j_end = bd.blocks_per_thread[i + 1]
-        block = buffers[i]
-        @inbounds for j ∈ j_start:j_end
-            a = bd.cumulative_npoints_per_block[j]
-            b = bd.cumulative_npoints_per_block[j + 1]
-            a == b && continue  # no points in this block (otherwise b > a)
+    js = eachindex(IndexLinear(), indices)  # block indices (= 1:nblocks)
 
-            # Iterate over all points in the current block
-            I₀ = indices[j]
-            fill_with_zeros_serial!(block)
-            for k ∈ (a + 1):b
-                l = pointperm[k]
-                # @assert bd.blockidx[l] == j  # check that point is really in the current block
-                point_idx = if bd.sort_points === True()
-                    k  # if points have been permuted (may be slightly faster here, but requires permutation in set_points!)
-                else
-                    l  # if points have not been permuted
+    @sync for j ∈ js  # iterate over blocks
+        Threads.@spawn begin  # spawn a parallel task working on a single block
+            @inline
+            buf = Bumper.default_buffer()  # task-local buffer
+            @no_escape buf begin
+                block = ntuple(Val(C)) do component
+                    @alloc(Z, block_dims_padded...)
                 end
-                x⃗ = map(xp -> transform_fold(@inbounds(xp[point_idx])), xp)
-                vs = map(vp -> @inbounds(vp[l]), vp_all)  # values at the non-uniform point x⃗
-                vs_new = @inline callback(vs, point_idx)
-                spread_from_point_blocked!(gs, evalmode, block, x⃗, vs_new, Tuple(I₀))
-            end
+                a = @inbounds bd.cumulative_npoints_per_block[j]
+                b = @inbounds bd.cumulative_npoints_per_block[j + 1]
+                if b > a  # if there are points in this block (otherwise there's nothing to do)
+                    # Iterate over all points in the current block
+                    @inbounds I₀ = indices[j]
+                    fill_with_zeros_serial!(block)
+                    for k ∈ (a + 1):b
+                        @inbounds l = pointperm[k]
+                        # @assert bd.blockidx[l] == j  # check that point is really in the current block
+                        point_idx = if bd.sort_points === True()
+                            k  # if points have been permuted (may be slightly faster here, but requires permutation in set_points!)
+                        else
+                            l  # if points have not been permuted
+                        end
+                        x⃗ = map(xp -> transform_fold(@inbounds(xp[point_idx])), xp)
+                        vs = map(vp -> @inbounds(vp[l]), vp_all)  # values at the non-uniform point x⃗
+                        vs_new = @inline callback(vs, point_idx)
+                        spread_from_point_blocked!(gs, evalmode, block, x⃗, vs_new, Tuple(I₀))
+                    end
 
-            # Indices of current block including padding
-            Ia = I₀ + oneunit(I₀) - CartesianIndex(Ms)
-            Ib = I₀ + CartesianIndex(block_dims) + CartesianIndex(Ms)
-            inds_split = split_periodic(Ia, Ib, size(first(us_all)))
+                    # Indices of current block including padding
+                    Ia = I₀ + oneunit(I₀) - CartesianIndex(Ms)
+                    Ib = I₀ + CartesianIndex(block_dims) + CartesianIndex(Ms)
+                    inds_split = split_periodic(Ia, Ib, size(first(us_all)))
 
-            # Add data from block to output array.
-            if cpu_use_atomics
-                add_from_block!(us_all, block, inds_split; atomics = Val(true))
-            else
-                # This is executed by only one thread at a time (can be slower for many threads)
-                lock(lck) do
-                    add_from_block!(us_all, block, inds_split; atomics = Val(false))
-                end
-            end
-        end
-    end
+                    # Add data from block to output array.
+                    if cpu_use_atomics
+                        add_from_block!(us_all, block, inds_split; atomics = Val(true))
+                    else
+                        # This is executed by only one thread at a time (can be slower for many threads)
+                        lock(lck) do
+                            add_from_block!(us_all, block, inds_split; atomics = Val(false))
+                        end
+                    end
+                end  # b > a
+            end  # @no_escape
+        end  # @spawn
+    end  # @sync
 
     us_all
 end

@@ -17,7 +17,6 @@ struct BlockDataCPU{
     sort_points :: SortPoints
 
     buffers :: Buffers            # length = nthreads
-    blocks_per_thread :: Vector{Int}  # maps a set of blocks i_start:i_end to a thread (length = nthreads + 1)
     indices :: Indices    # index associated to each block (length = num_blocks)
 
     function BlockDataCPU(
@@ -33,10 +32,9 @@ struct BlockDataCPU{
         Nt = length(buffers)
         blockidx = similar(npoints_per_block, 0)
         pointperm = similar(npoints_per_block, 0)
-        blocks_per_thread = similar(blockidx, Nt + 1)
         new{Z, N, Nc, I, T, typeof(buffers), Indices, S}(
             Δxs, nblocks_per_dir, block_dims, npoints_per_block, blockidx, pointperm, sort,
-            buffers, blocks_per_thread, indices,
+            buffers, indices,
         )
     end
 end
@@ -154,11 +152,6 @@ function set_points_impl!(
     @assert cumulative_npoints_per_block[begin] == 0
     @assert cumulative_npoints_per_block[end] == Np
 
-    # Determine how many blocks each thread will manage. The idea is that, if the point
-    # distribution is inhomogeneous, then more threads are dedicated to areas where points
-    # are concentrated, improving load balance.
-    map_blocks_to_threads!(bd.blocks_per_thread, cumulative_npoints_per_block)
-
     @timeit timer "(2) Sort" begin
         sortperm_cpu!(
             pointperm, cumulative_npoints_per_block, blockidx, xp, Δxs,
@@ -188,39 +181,3 @@ function set_points_impl!(
 
     nothing
 end
-
-function map_blocks_to_threads!(blocks_per_thread, cumulative_npoints_per_block)
-    Np = last(cumulative_npoints_per_block)  # total number of points
-    Nt = length(blocks_per_thread) - 1       # number of threads
-    Np_per_thread = Np / Nt  # target number of points per thread
-    blocks_per_thread[begin] = 0
-    @assert cumulative_npoints_per_block[begin] == 0
-    n = firstindex(cumulative_npoints_per_block) - 1
-    nblocks = length(cumulative_npoints_per_block) - 1
-    Base.require_one_based_indexing(cumulative_npoints_per_block)
-    for i ∈ 1:Nt
-        npoints_in_current_thread = 0
-        stop = false
-        while npoints_in_current_thread < Np_per_thread
-            n += 1
-            if n > nblocks
-                stop = true
-                break
-            end
-            npoints_in_block = cumulative_npoints_per_block[n + 1] - cumulative_npoints_per_block[n]
-            npoints_in_current_thread += npoints_in_block
-        end
-        if stop
-            blocks_per_thread[begin + i] = nblocks  # this thread ends at the last block (inclusive)
-            for j ∈ (i + 1):Nt
-                blocks_per_thread[begin + j] = nblocks  # this thread does no work (starts and ends at the last block)
-            end
-            break
-        else
-            blocks_per_thread[begin + i] = n  # this thread ends at block `n` (inclusive)
-        end
-    end
-    blocks_per_thread[end] = nblocks  # make sure the last block is included
-    blocks_per_thread
-end
-
