@@ -83,6 +83,14 @@ function fill_with_zeros_serial!(us_all::NTuple{C, A}) where {C, A <: DenseArray
     us_all
 end
 
+to_real_array_cpu(u::Array{<:Real}) = u
+
+function to_real_array_cpu(u::Array{Complex{T}}) where {T <: Real}
+    # reinterpret(reshape, T, u)  # this is inefficient!
+    p = convert(Ptr{T}, pointer(u))
+    unsafe_wrap(Array, p, (2, size(u)...))::Array{T}
+end
+
 function spread_from_points!(
         ::CPU,
         callback::Callback,
@@ -102,54 +110,56 @@ function spread_from_points!(
     Base.require_one_based_indexing(indices)
     lck = ReentrantLock()
 
-    js = eachindex(IndexLinear(), indices)  # block indices (= 1:nblocks)
+    block_inds = eachindex(IndexLinear(), indices)  # block indices (= 1:nblocks)
 
-    @sync for j ∈ js  # iterate over blocks
-        Threads.@spawn begin  # spawn a parallel task working on a single block
-            @inline
-            buf = Bumper.default_buffer()  # task-local buffer
-            @no_escape buf begin
-                block = ntuple(Val(C)) do component
-                    @alloc(Z, block_dims_padded...)
-                end
-                a = @inbounds bd.cumulative_npoints_per_block[j]
-                b = @inbounds bd.cumulative_npoints_per_block[j + 1]
-                if b > a  # if there are points in this block (otherwise there's nothing to do)
-                    # Iterate over all points in the current block
-                    @inbounds I₀ = indices[j]
-                    fill_with_zeros_serial!(block)
-                    for k ∈ (a + 1):b
-                        @inbounds l = pointperm[k]
-                        # @assert bd.blockidx[l] == j  # check that point is really in the current block
-                        point_idx = if bd.sort_points === True()
-                            k  # if points have been permuted (may be slightly faster here, but requires permutation in set_points!)
-                        else
-                            l  # if points have not been permuted
-                        end
-                        x⃗ = map(xp -> transform_fold(@inbounds(xp[point_idx])), xp)
-                        vs = map(vp -> @inbounds(vp[l]), vp_all)  # values at the non-uniform point x⃗
-                        vs_new = @inline callback(vs, point_idx)
-                        spread_from_point_blocked!(gs, evalmode, block, x⃗, vs_new, Tuple(I₀))
-                    end
+    # Reinterpret output array as real-valued array if it's complex.
+    # This is needed if we're using atomics on complex data.
+    us_real = map(to_real_array_cpu, us_all)
 
-                    # Indices of current block including padding
-                    Ia = I₀ + oneunit(I₀) - CartesianIndex(Ms)
-                    Ib = I₀ + CartesianIndex(block_dims) + CartesianIndex(Ms)
-                    inds_split = split_periodic(Ia, Ib, size(first(us_all)))
-
-                    # Add data from block to output array.
-                    if cpu_use_atomics
-                        add_from_block!(us_all, block, inds_split; atomics = Val(true))
+    scheduler = DynamicScheduler(chunking = false)  # disable chunking to improve load balancing
+    tforeach(block_inds; scheduler) do block_idx  # iterate over blocks
+        @inline
+        buf = Bumper.default_buffer()  # task-local buffer
+        @no_escape buf begin
+            block = ntuple(Val(C)) do component
+                @alloc(Z, block_dims_padded...)
+            end
+            a = @inbounds bd.cumulative_npoints_per_block[block_idx]
+            b = @inbounds bd.cumulative_npoints_per_block[block_idx + 1]
+            if b > a  # if there are points in this block (otherwise there's nothing to do)
+                # Iterate over all points in the current block
+                @inbounds I₀ = indices[block_idx]
+                fill_with_zeros_serial!(block)
+                for i ∈ (a + 1):b
+                    @inbounds l = pointperm[i]
+                    j = if bd.sort_points === True()
+                        i  # if points have been permuted (may be slightly faster here, but requires permutation in set_points!)
                     else
-                        # This is executed by only one thread at a time (can be slower for many threads)
-                        lock(lck) do
-                            add_from_block!(us_all, block, inds_split; atomics = Val(false))
-                        end
+                        l  # if points have not been permuted
                     end
-                end  # b > a
-            end  # @no_escape
-        end  # @spawn
-    end  # @sync
+                    x⃗ = map(xp -> transform_fold(@inbounds(xp[j])), xp)
+                    vs = map(vp -> @inbounds(vp[l]), vp_all)  # values at the non-uniform point x⃗
+                    vs_new = @inline callback(vs, j)
+                    spread_from_point_blocked!(gs, evalmode, block, x⃗, vs_new, Tuple(I₀))
+                end
+
+                # Indices of current block including padding
+                Ia = I₀ + oneunit(I₀) - CartesianIndex(Ms)
+                Ib = I₀ + CartesianIndex(block_dims) + CartesianIndex(Ms)
+                inds_split = split_periodic(Ia, Ib, size(first(us_all)))
+
+                # Add data from block to output array.
+                if cpu_use_atomics
+                    add_from_block!(us_real, block, inds_split; atomics = Val(true))
+                else
+                    # This is executed by only one thread at a time (can be slower for many threads)
+                    lock(lck) do
+                        add_from_block!(us_real, block, inds_split; atomics = Val(false))
+                    end
+                end
+            end  # b > a
+        end  # @no_escape
+    end  # tforeach
 
     us_all
 end
@@ -192,29 +202,29 @@ end
     nothing
 end
 
-# @atomic doesn't directly work with complex numbers, so we need to separately add the real
-# and imaginary parts.
-@inline function cpu_add_atomic!(us::AbstractArray{Complex{T}}, js::Tuple, w::Complex) where {T}
+@inline function cpu_add_atomic!(us::AbstractArray{<:Real}, js::Tuple, w::Complex)
     @inbounds begin
-        vs = reinterpret(reshape, T, us)
-        Atomix.@atomic :monotonic vs[1, js...] += real(w)
-        Atomix.@atomic :monotonic vs[2, js...] += imag(w)
+        Atomix.@atomic :monotonic us[1, js...] += real(w)
+        Atomix.@atomic :monotonic us[2, js...] += imag(w)
     end
     nothing
 end
 
 function _add_from_block!(
-        us::AbstractArray{T, D},
-        ws::AbstractArray{T, D},
+        us::AbstractArray{T},
+        ws::AbstractArray{Z, D},
         inds_wrapped::NTuple{D, NTuple{2, UnitRange}};
         atomics::Val,
-    ) where {T, D}
+    ) where {T, Z, D}
     if @generated
         loop_core = quote
             n += 1
             js = @ntuple $D j
             if atomics === Val(true)
                 cpu_add_atomic!(us, js, ws[n])  # us[j_1, j_2, ..., j_D] += ws[n]
+            elseif Z <: Complex
+                us[1, js...] += real(ws[n])  # us[j_1, j_2, ..., j_D] += ws[n]
+                us[2, js...] += imag(ws[n])  # us[j_1, j_2, ..., j_D] += ws[n]
             else
                 us[js...] += ws[n]  # us[j_1, j_2, ..., j_D] += ws[n]
             end

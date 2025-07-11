@@ -107,47 +107,45 @@ function interpolate!(
     block_dims_padded = @. block_dims + 2 * Ms
     Base.require_one_based_indexing(indices)
 
-    js = eachindex(IndexLinear(), indices)  # block indices (= 1:nblocks)
+    block_inds = eachindex(IndexLinear(), indices)  # block indices (= 1:nblocks)
 
-    @sync for j in js
-        Threads.@spawn begin
-            buf = Bumper.default_buffer()  # task-local buffer
-            @no_escape buf begin
-                @inline
-                block = ntuple(Val(C)) do component
-                    @inline
-                    @alloc(Z, block_dims_padded...)
-                end
-                @inbounds a = bd.cumulative_npoints_per_block[j]
-                @inbounds b = bd.cumulative_npoints_per_block[j + 1]
-                if b > a  # if there are points in this block (otherwise there's nothing to do)
-                    # Indices of current block including padding
-                    @inbounds I₀ = indices[j]
-                    Ia = I₀ + oneunit(I₀) - CartesianIndex(Ms)
-                    Ib = I₀ + CartesianIndex(block_dims) + CartesianIndex(Ms)
-                    inds_split = split_periodic(Ia, Ib, size(first(us_all)))
-                    copy_to_block!(block, us_all, inds_split)
+    scheduler = DynamicScheduler(chunking = false)  # disable chunking to improve load balancing
+    tforeach(block_inds; scheduler) do block_idx  # iterate over blocks
+        buf = Bumper.default_buffer()  # task-local buffer
+        @no_escape buf begin
+            @inline
+            block = ntuple(Val(C)) do component
+                @alloc(Z, block_dims_padded...)
+            end
+            @inbounds a = bd.cumulative_npoints_per_block[block_idx]
+            @inbounds b = bd.cumulative_npoints_per_block[block_idx + 1]
+            if b > a  # if there are points in this block (otherwise there's nothing to do)
+                # Indices of current block including padding
+                @inbounds I₀ = indices[block_idx]
+                Ia = I₀ + oneunit(I₀) - CartesianIndex(Ms)
+                Ib = I₀ + CartesianIndex(block_dims) + CartesianIndex(Ms)
+                inds_split = split_periodic(Ia, Ib, size(first(us_all)))
+                copy_to_block!(block, us_all, inds_split)
 
-                    # Iterate over all points in the current block
-                    for k ∈ (a + 1):b
-                        @inbounds l = pointperm[k]
-                        # @assert bd.blockidx[l] == j  # check that point is really in the current block
-                        point_idx = if bd.sort_points === True()
-                            k  # if points have been permuted (may be slightly faster here, but requires permutation in set_points!)
-                        else
-                            l  # if points have not been permuted
-                        end
-                        x⃗ = map(xp -> transform_fold(@inbounds(xp[point_idx])), xp)
-                        vs = interpolate_blocked(gs, evalmode, block, x⃗, Tuple(I₀))  # non-uniform values at point x⃗
-                        vs_new = @inline callback(vs, point_idx)
-                        for (vp, v) ∈ zip(vp_all, vs_new)
-                            @inbounds vp[l] = v
-                        end
+                # Iterate over all points in the current block
+                for i ∈ (a + 1):b
+                    @inbounds l = pointperm[i]
+                    # @assert bd.blockidx[l] == block_idx  # check that point is really in the current block
+                    j = if bd.sort_points === True()
+                        i  # if points have been permuted (may be slightly faster here, but requires permutation in set_points!)
+                    else
+                        l  # if points have not been permuted
                     end
-                end  # b > a
-            end  # @no_escape
-        end  # @spawn
-    end  # @sync
+                    x⃗ = map(xp -> transform_fold(@inbounds(xp[j])), xp)
+                    vs = interpolate_blocked(gs, evalmode, block, x⃗, Tuple(I₀))  # non-uniform values at point x⃗
+                    vs_new = @inline callback(vs, j)
+                    for (vp, v) ∈ zip(vp_all, vs_new)
+                        @inbounds vp[l] = v
+                    end
+                end
+            end  # b > a
+        end  # @no_escape
+    end  # tforeach
 
     vp_all
 end
