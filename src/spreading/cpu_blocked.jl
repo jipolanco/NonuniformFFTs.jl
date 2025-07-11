@@ -90,16 +90,13 @@ function spread_from_points!(
         bd::BlockDataCPU,
         gs,
         evalmode::EvaluationMode,
-        us_all::NTuple{C, AbstractArray},
+        us_all::NTuple{C, AbstractArray},  # we assume this is completely set to zero
         xp::NTuple{D, AbstractVector},
         vp_all::NTuple{C, AbstractVector};
         cpu_use_atomics::Bool = false,
     ) where {F <: Function, Callback <: Function, C, D}
     (; block_dims, pointperm, buffers, indices,) = bd
     Ms = map(Kernels.half_support, gs)
-    for us ∈ us_all
-        fill!(us, zero(eltype(us)))
-    end
     Nt = length(buffers)  # usually equal to the number of threads
     # nblocks = length(indices)
     Base.require_one_based_indexing(buffers)
