@@ -5,6 +5,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Slightly modify CPU parallelisation strategy to improve load balancing.
+
 ## [v0.8.2] - 2025-07-08
 
 ### Added

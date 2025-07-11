@@ -3,7 +3,7 @@ struct BlockDataCPU{
         Z, N, Nc,
         I <: Integer,
         T,  # = real(Z)
-        Buffers <: AbstractVector{<:NTuple{Nc, AbstractArray{Z, N}}},
+        Buffers <: Channel{<:NTuple{Nc, AbstractArray{Z, N}}},
         Indices <: CartesianIndices{N},
         SortPoints <: StaticBool,
     } <: AbstractBlockData
@@ -15,9 +15,7 @@ struct BlockDataCPU{
     blockidx  :: Vector{Int}  # linear index of block associated to each point (length = Np)
     pointperm :: Vector{Int}  # index permutation for sorting points according to their block (length = Np)
     sort_points :: SortPoints
-
-    buffers :: Buffers            # length = nthreads
-    blocks_per_thread :: Vector{Int}  # maps a set of blocks i_start:i_end to a thread (length = nthreads + 1)
+    buffers_chnl :: Buffers    # length = nthreads
     indices :: Indices    # index associated to each block (length = num_blocks)
 
     function BlockDataCPU(
@@ -25,18 +23,15 @@ struct BlockDataCPU{
             nblocks_per_dir::NTuple{N, I},
             block_dims::NTuple{N, I},
             npoints_per_block::Vector{Int},
-            buffers::AbstractVector{<:NTuple{Nc, AbstractArray{Z, N}}},
+            buffers_chnl::Channel{<:NTuple{Nc, AbstractArray{Z, N}}},
             indices::Indices,
             sort::S,
         ) where {Z <: Number, Nc, N, I, T, Indices, S}
         @assert T === real(Z)
-        Nt = length(buffers)
         blockidx = similar(npoints_per_block, 0)
         pointperm = similar(npoints_per_block, 0)
-        blocks_per_thread = similar(blockidx, Nt + 1)
-        new{Z, N, Nc, I, T, typeof(buffers), Indices, S}(
-            Δxs, nblocks_per_dir, block_dims, npoints_per_block, blockidx, pointperm, sort,
-            buffers, blocks_per_thread, indices,
+        new{Z, N, Nc, I, T, typeof(buffers_chnl), Indices, S}(
+            Δxs, nblocks_per_dir, block_dims, npoints_per_block, blockidx, pointperm, sort, buffers_chnl, indices,
         )
     end
 end
@@ -59,8 +54,10 @@ function BlockDataCPU(
     dims = block_dims .+ 2M  # include padding for values outside of block (TODO: include padding in original block_dims? requires minimal block_size in each direction)
     Nt = Threads.nthreads()
     # Nt = ifelse(Nt == 1, zero(Nt), Nt)  # this disables blocking if running on single thread
-    buffers = map(1:Nt) do _
-        ntuple(_ -> Array{Z}(undef, dims), num_transforms)  # one buffer per transform (or "component")
+    buffers_chnl = Channel{NTuple{Nc, Array{Z, D}}}(Nt)
+    foreach(1:Nt) do _
+        buf = ntuple(_ -> Array{Z}(undef, dims), num_transforms)  # one buffer per transform (or "component")
+        put!(buffers_chnl, buf)
     end
     indices_tup = map(Ñs, block_dims) do N, B
         range(0, N - 1; step = B)
@@ -68,7 +65,7 @@ function BlockDataCPU(
     indices = CartesianIndices(indices_tup)
     BlockDataCPU(
         Δxs, nblocks_per_dir, block_dims, cumulative_npoints_per_block,
-        buffers, indices,
+        buffers_chnl, indices,
         sort_points,
     )
 end
@@ -119,9 +116,6 @@ function set_points_impl!(
         backend::CPU, point_transform_fold::F, bd::BlockDataCPU, points_ref::Ref, timer;
         synchronise,
     ) where {F <: Function}
-    # This technically never happens, but we might use it as a way to disable blocking.
-    isempty(bd.buffers) && return set_points_impl!(backend, point_transform_fold, NullBlockData(), points_ref, timer; synchronise)
-
     (;
         Δxs, cumulative_npoints_per_block, nblocks_per_dir, block_dims,
         blockidx, pointperm, sort_points,
@@ -154,11 +148,6 @@ function set_points_impl!(
     @assert cumulative_npoints_per_block[begin] == 0
     @assert cumulative_npoints_per_block[end] == Np
 
-    # Determine how many blocks each thread will manage. The idea is that, if the point
-    # distribution is inhomogeneous, then more threads are dedicated to areas where points
-    # are concentrated, improving load balance.
-    map_blocks_to_threads!(bd.blocks_per_thread, cumulative_npoints_per_block)
-
     @timeit timer "(2) Sort" begin
         sortperm_cpu!(
             pointperm, cumulative_npoints_per_block, blockidx, xp, Δxs,
@@ -188,39 +177,3 @@ function set_points_impl!(
 
     nothing
 end
-
-function map_blocks_to_threads!(blocks_per_thread, cumulative_npoints_per_block)
-    Np = last(cumulative_npoints_per_block)  # total number of points
-    Nt = length(blocks_per_thread) - 1       # number of threads
-    Np_per_thread = Np / Nt  # target number of points per thread
-    blocks_per_thread[begin] = 0
-    @assert cumulative_npoints_per_block[begin] == 0
-    n = firstindex(cumulative_npoints_per_block) - 1
-    nblocks = length(cumulative_npoints_per_block) - 1
-    Base.require_one_based_indexing(cumulative_npoints_per_block)
-    for i ∈ 1:Nt
-        npoints_in_current_thread = 0
-        stop = false
-        while npoints_in_current_thread < Np_per_thread
-            n += 1
-            if n > nblocks
-                stop = true
-                break
-            end
-            npoints_in_block = cumulative_npoints_per_block[n + 1] - cumulative_npoints_per_block[n]
-            npoints_in_current_thread += npoints_in_block
-        end
-        if stop
-            blocks_per_thread[begin + i] = nblocks  # this thread ends at the last block (inclusive)
-            for j ∈ (i + 1):Nt
-                blocks_per_thread[begin + j] = nblocks  # this thread does no work (starts and ends at the last block)
-            end
-            break
-        else
-            blocks_per_thread[begin + i] = n  # this thread ends at block `n` (inclusive)
-        end
-    end
-    blocks_per_thread[end] = nblocks  # make sure the last block is included
-    blocks_per_thread
-end
-

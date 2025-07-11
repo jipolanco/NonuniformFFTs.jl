@@ -5,10 +5,10 @@ function interpolate_blocked(
         x⃗::NTuple{D},
         I₀::NTuple{D},
     ) where {D, C}
-    @assert C > 0
+    # @assert C > 0
     map(Base.require_one_based_indexing, us)
     Ns = size(first(us))
-    @assert all(u -> size(u) === Ns, us)
+    # @assert all(u -> size(u) === Ns, us)
 
     # Evaluate 1D kernels.
     gs_eval = map((g, x) -> Kernels.evaluate_kernel(evalmode, g, x), gs, x⃗)
@@ -90,6 +90,8 @@ function interpolate_from_arrays_blocked(
     end
 end
 
+# We use channels (buffers_chnl) to keep a per-thread local buffer.
+# See examples in https://juliafolds2.github.io/OhMyThreads.jl/stable/literate/tls/tls/#The-safe-way:-Channel
 function interpolate!(
         backend::CPU,
         callback::Callback,
@@ -101,49 +103,45 @@ function interpolate!(
         us_all::NTuple{C, AbstractArray},
         xp::NTuple{D, AbstractVector},
     ) where {F <: Function, Callback <: Function, C, D}
-    (; block_dims, pointperm, buffers, indices,) = bd
+    (; block_dims, buffers_chnl, pointperm, indices,) = bd
     Ms = map(Kernels.half_support, gs)
-    Nt = length(buffers)  # usually equal to the number of threads
-    # nblocks = length(indices)
-    Base.require_one_based_indexing(buffers)
     Base.require_one_based_indexing(indices)
 
-    Threads.@threads for i ∈ 1:Nt
-        # j_start = (i - 1) * nblocks ÷ Nt + 1
-        # j_end = i * nblocks ÷ Nt
-        j_start = bd.blocks_per_thread[i] + 1
-        j_end = bd.blocks_per_thread[i + 1]
-        block = buffers[i]
-        @inbounds for j ∈ j_start:j_end
-            a = bd.cumulative_npoints_per_block[j]
-            b = bd.cumulative_npoints_per_block[j + 1]
-            a == b && continue  # no points in this block (otherwise b > a)
+    block_inds = eachindex(IndexLinear(), indices)  # block indices (= 1:nblocks)
 
+    scheduler = DynamicScheduler(chunking = false)  # disable chunking to improve load balancing
+    tforeach(block_inds; scheduler) do block_idx  # iterate over blocks
+        @inline
+        @inbounds a = bd.cumulative_npoints_per_block[block_idx]
+        @inbounds b = bd.cumulative_npoints_per_block[block_idx + 1]
+        if b > a  # if there are points in this block (otherwise there's nothing to do)
             # Indices of current block including padding
-            I₀ = indices[j]
+            block = take!(buffers_chnl)  # take a buffer from the list of buffers
+            @inbounds I₀ = indices[block_idx]
             Ia = I₀ + oneunit(I₀) - CartesianIndex(Ms)
             Ib = I₀ + CartesianIndex(block_dims) + CartesianIndex(Ms)
             inds_split = split_periodic(Ia, Ib, size(first(us_all)))
             copy_to_block!(block, us_all, inds_split)
 
             # Iterate over all points in the current block
-            for k ∈ (a + 1):b
-                l = pointperm[k]
-                # @assert bd.blockidx[l] == j  # check that point is really in the current block
-                point_idx = if bd.sort_points === True()
-                    k  # if points have been permuted (may be slightly faster here, but requires permutation in set_points!)
+            for i ∈ (a + 1):b
+                @inbounds l = pointperm[i]
+                # @assert bd.blockidx[l] == block_idx  # check that point is really in the current block
+                j = if bd.sort_points === True()
+                    i  # if points have been permuted (may be slightly faster here, but requires permutation in set_points!)
                 else
                     l  # if points have not been permuted
                 end
-                x⃗ = map(xp -> transform_fold(@inbounds(xp[point_idx])), xp)
-                vs = interpolate_blocked(gs, evalmode, block, x⃗, Tuple(I₀)) :: NTuple{C}  # non-uniform values at point x⃗
-                vs_new = @inline callback(vs, point_idx)
+                x⃗ = map(xp -> transform_fold(@inbounds(xp[j])), xp)
+                vs = interpolate_blocked(gs, evalmode, block, x⃗, Tuple(I₀))  # non-uniform values at point x⃗
+                vs_new = @inline callback(vs, j)
                 for (vp, v) ∈ zip(vp_all, vs_new)
                     @inbounds vp[l] = v
                 end
             end
-        end
-    end
+            put!(buffers_chnl, block)  # return the buffer to the list of buffers
+        end  # b > a
+    end  # tforeach
 
     vp_all
 end
@@ -174,18 +172,18 @@ function _copy_to_block!(
         ex_loop = _generate_split_loop_expr(D, :inds_wrapped, loop_core)
         quote
             number_of_indices_per_dimension = @ntuple($D, i -> sum(length, inds_wrapped[i]))
-            @assert size(ws) == number_of_indices_per_dimension
+            # @assert size(ws) == number_of_indices_per_dimension
             Base.require_one_based_indexing(ws)
             Base.require_one_based_indexing(us)
             n = 0
             @inbounds begin
                 $ex_loop
             end
-            @assert n == length(ws)
+            # @assert n == length(ws)
             ws
         end
     else
-        @assert size(ws) == map(tup -> sum(length, tup), inds_wrapped)
+        # @assert size(ws) == map(tup -> sum(length, tup), inds_wrapped)
         Base.require_one_based_indexing(ws)
         Base.require_one_based_indexing(us)
         iters = map(enumerate ∘ Iterators.flatten, inds_wrapped)

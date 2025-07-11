@@ -83,6 +83,16 @@ function fill_with_zeros_serial!(us_all::NTuple{C, A}) where {C, A <: DenseArray
     us_all
 end
 
+to_real_array_cpu(u::Array{<:Real}) = u
+
+function to_real_array_cpu(u::Array{Complex{T}}) where {T <: Real}
+    # reinterpret(reshape, T, u)  # this is inefficient!
+    p = convert(Ptr{T}, pointer(u))
+    unsafe_wrap(Array, p, (2, size(u)...))::Array{T}
+end
+
+# We use channels (buffers_chnl) to keep a per-thread local buffer.
+# See examples in https://juliafolds2.github.io/OhMyThreads.jl/stable/literate/tls/tls/#The-safe-way:-Channel
 function spread_from_points!(
         ::CPU,
         callback::Callback,
@@ -90,47 +100,42 @@ function spread_from_points!(
         bd::BlockDataCPU,
         gs,
         evalmode::EvaluationMode,
-        us_all::NTuple{C, AbstractArray},
+        us_all::NTuple{C, AbstractArray},  # we assume this is completely set to zero
         xp::NTuple{D, AbstractVector},
         vp_all::NTuple{C, AbstractVector};
         cpu_use_atomics::Bool = false,
     ) where {F <: Function, Callback <: Function, C, D}
-    (; block_dims, pointperm, buffers, indices,) = bd
+    (; block_dims, buffers_chnl, pointperm, indices,) = bd
     Ms = map(Kernels.half_support, gs)
-    for us ∈ us_all
-        fill!(us, zero(eltype(us)))
-    end
-    Nt = length(buffers)  # usually equal to the number of threads
-    # nblocks = length(indices)
-    Base.require_one_based_indexing(buffers)
     Base.require_one_based_indexing(indices)
     lck = ReentrantLock()
 
-    Threads.@threads for i ∈ 1:Nt
-        # j_start = (i - 1) * nblocks ÷ Nt + 1
-        # j_end = i * nblocks ÷ Nt
-        j_start = bd.blocks_per_thread[i] + 1
-        j_end = bd.blocks_per_thread[i + 1]
-        block = buffers[i]
-        @inbounds for j ∈ j_start:j_end
-            a = bd.cumulative_npoints_per_block[j]
-            b = bd.cumulative_npoints_per_block[j + 1]
-            a == b && continue  # no points in this block (otherwise b > a)
+    block_inds = eachindex(IndexLinear(), indices)  # block indices (= 1:nblocks)
 
+    # Reinterpret output array as real-valued array if it's complex.
+    # This is needed if we're using atomics on complex data.
+    us_real = map(to_real_array_cpu, us_all)
+
+    scheduler = DynamicScheduler(chunking = false)  # disable chunking to improve load balancing
+    tforeach(block_inds; scheduler) do block_idx  # iterate over blocks
+        @inline
+        a = @inbounds bd.cumulative_npoints_per_block[block_idx]
+        b = @inbounds bd.cumulative_npoints_per_block[block_idx + 1]
+        if b > a  # if there are points in this block (otherwise there's nothing to do)
             # Iterate over all points in the current block
-            I₀ = indices[j]
+            block = take!(buffers_chnl)  # take a buffer from the list of buffers
+            @inbounds I₀ = indices[block_idx]
             fill_with_zeros_serial!(block)
-            for k ∈ (a + 1):b
-                l = pointperm[k]
-                # @assert bd.blockidx[l] == j  # check that point is really in the current block
-                point_idx = if bd.sort_points === True()
-                    k  # if points have been permuted (may be slightly faster here, but requires permutation in set_points!)
+            for i ∈ (a + 1):b
+                @inbounds l = pointperm[i]
+                j = if bd.sort_points === True()
+                    i  # if points have been permuted (may be slightly faster here, but requires permutation in set_points!)
                 else
                     l  # if points have not been permuted
                 end
-                x⃗ = map(xp -> transform_fold(@inbounds(xp[point_idx])), xp)
+                x⃗ = map(xp -> transform_fold(@inbounds(xp[j])), xp)
                 vs = map(vp -> @inbounds(vp[l]), vp_all)  # values at the non-uniform point x⃗
-                vs_new = @inline callback(vs, point_idx)
+                vs_new = @inline callback(vs, j)
                 spread_from_point_blocked!(gs, evalmode, block, x⃗, vs_new, Tuple(I₀))
             end
 
@@ -141,15 +146,16 @@ function spread_from_points!(
 
             # Add data from block to output array.
             if cpu_use_atomics
-                add_from_block!(us_all, block, inds_split; atomics = Val(true))
+                add_from_block!(us_real, block, inds_split; atomics = Val(true))
             else
                 # This is executed by only one thread at a time (can be slower for many threads)
                 lock(lck) do
-                    add_from_block!(us_all, block, inds_split; atomics = Val(false))
+                    add_from_block!(us_real, block, inds_split; atomics = Val(false))
                 end
             end
-        end
-    end
+            put!(buffers_chnl, block)  # return the buffer to the list of buffers
+        end  # b > a
+    end  # tforeach
 
     us_all
 end
@@ -192,29 +198,29 @@ end
     nothing
 end
 
-# @atomic doesn't directly work with complex numbers, so we need to separately add the real
-# and imaginary parts.
-@inline function cpu_add_atomic!(us::AbstractArray{Complex{T}}, js::Tuple, w::Complex) where {T}
+@inline function cpu_add_atomic!(us::AbstractArray{<:Real}, js::Tuple, w::Complex)
     @inbounds begin
-        vs = reinterpret(reshape, T, us)
-        Atomix.@atomic :monotonic vs[1, js...] += real(w)
-        Atomix.@atomic :monotonic vs[2, js...] += imag(w)
+        Atomix.@atomic :monotonic us[1, js...] += real(w)
+        Atomix.@atomic :monotonic us[2, js...] += imag(w)
     end
     nothing
 end
 
 function _add_from_block!(
-        us::AbstractArray{T, D},
-        ws::AbstractArray{T, D},
+        us::AbstractArray{T},
+        ws::AbstractArray{Z, D},
         inds_wrapped::NTuple{D, NTuple{2, UnitRange}};
         atomics::Val,
-    ) where {T, D}
+    ) where {T, Z, D}
     if @generated
         loop_core = quote
             n += 1
             js = @ntuple $D j
             if atomics === Val(true)
                 cpu_add_atomic!(us, js, ws[n])  # us[j_1, j_2, ..., j_D] += ws[n]
+            elseif Z <: Complex
+                us[1, js...] += real(ws[n])  # us[j_1, j_2, ..., j_D] += ws[n]
+                us[2, js...] += imag(ws[n])  # us[j_1, j_2, ..., j_D] += ws[n]
             else
                 us[js...] += ws[n]  # us[j_1, j_2, ..., j_D] += ws[n]
             end
@@ -222,18 +228,18 @@ function _add_from_block!(
         ex_loop = _generate_split_loop_expr(D, :inds_wrapped, loop_core)
         quote
             number_of_indices_per_dimension = @ntuple($D, i -> sum(length, inds_wrapped[i]))
-            @assert size(ws) == number_of_indices_per_dimension
+            # @assert size(ws) == number_of_indices_per_dimension
             Base.require_one_based_indexing(ws)
             Base.require_one_based_indexing(us)
             n = 0
             @inbounds begin
                 $ex_loop
             end
-            @assert n == length(ws)
+            # @assert n == length(ws)
             us
         end
     else
-        @assert size(ws) == map(tup -> sum(length, tup), inds_wrapped)
+        # @assert size(ws) == map(tup -> sum(length, tup), inds_wrapped)
         Base.require_one_based_indexing(ws)
         Base.require_one_based_indexing(us)
         iters = map(enumerate ∘ Iterators.flatten, inds_wrapped)

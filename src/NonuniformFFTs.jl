@@ -7,6 +7,7 @@ using GPUArraysCore: AbstractGPUArray, AbstractGPUVector
 using KernelAbstractions: KernelAbstractions as KA, CPU, GPU, @kernel, @index, @Const,
     @groupsize, @localmem, @synchronize, @uniform
 using Atomix: Atomix
+using OhMyThreads: OhMyThreads, tforeach, DynamicScheduler
 using FFTW: FFTW
 using LinearAlgebra: mul!
 using TimerOutputs: TimerOutput, @timeit
