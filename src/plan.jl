@@ -200,7 +200,7 @@ the order of ``10^{-7}`` for `Float64` or `ComplexF64` data.
 - `kernel_evalmode`: method used for kernel evaluation.
   The default is [`FastApproximation`](@ref) on CPU, which will attempt to use a fast
   approximation method which greatly speeds up kernel evaluation.
-  On NVIDIA GPUs the default is [`Direct`](@ref), as the fast approximation method is not
+  On GPUs the default is [`Direct`](@ref), since the fast approximation method is not
   necessarily faster.
 
 - `block_size`: the block size (in number of elements) when using block partitioning or when
