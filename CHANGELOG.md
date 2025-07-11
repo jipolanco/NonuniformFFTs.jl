@@ -5,6 +5,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Fix multithreaded CPU performance issues with complex-valued data. These issues probably
+  appeared in v0.8.2 when the option to use atomic operations was added.
+
 ## [v0.8.2] - 2025-07-08
 
 ### Added
