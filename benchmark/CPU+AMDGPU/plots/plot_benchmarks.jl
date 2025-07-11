@@ -28,7 +28,7 @@ function plot_from_file!(ax::Axis, filename; nufft_type, zorder = nothing, kws..
     l
 end
 
-function plot_benchmark(::Type{T}, results_dir; nufft_type = 1, save_svg = false,) where {T <: Number}
+function plot_benchmark(::Type{T}, results_dir; nufft_type = 1, atomics = false, save_svg = false,) where {T <: Number}
     Ns = (256, 256, 256)
     N = first(Ns)
     Ngrid = prod(Ns)
@@ -76,7 +76,13 @@ function plot_benchmark(::Type{T}, results_dir; nufft_type = 1, save_svg = false
     first_points_gpu = Point2{Float64}[]
     last_points_gpu = Point2{Float64}[]
 
-    l = plot_from_file!(ax, "$results_dir/NonuniformFFTs_$(N)_$(T)_CPU_atomics.dat"; label = "NonuniformFFTs CPU", kws_nonuniform..., kws_cpu..., kws_all...)
+    cpu_suffix = if atomics
+        "_atomics"
+    else
+        ""
+    end
+
+    l = plot_from_file!(ax, "$results_dir/NonuniformFFTs_$(N)_$(T)_CPU$(cpu_suffix).dat"; label = "NonuniformFFTs CPU", kws_nonuniform..., kws_cpu..., kws_all...)
     push!(first_points_cpu, l[1][][1])  # get first datapoint in line
 
     l = plot_from_file!(ax, "$results_dir/NonuniformFFTs_$(N)_$(T)_ROCBackend_global_memory.dat"; label = "NonuniformFFTs GPU", kws_nonuniform..., kws_gpu..., kws_all...)
@@ -87,8 +93,8 @@ function plot_benchmark(::Type{T}, results_dir; nufft_type = 1, save_svg = false
     push!(first_points_gpu, l[1][][1])  # get first datapoint in line
     push!(last_points_gpu, l[1][][end])  # get last datapoint in line
 
-    # l = plot_from_file!(ax, "$results_dir/FINUFFT_$(N)_$(Z)_CPU.dat"; label = "FINUFFT CPU", kws_finufft..., kws_cpu..., kws_all...)
-    # push!(first_points_cpu, l[1][][1])  # get first datapoint in line
+    l = plot_from_file!(ax, "$results_dir/FINUFFT_$(N)_$(Z)_CPU.dat"; label = "FINUFFT CPU", kws_finufft..., kws_cpu..., kws_all...)
+    push!(first_points_cpu, l[1][][1])  # get first datapoint in line
 
     # l = plot_from_file!(ax, "$results_dir/CuFINUFFT_$(N)_$(Z)_global_memory.dat"; label = "CuFINUFFT GPU", kws_finufft..., kws_gpu..., kws_all...)
     # push!(first_points_gpu, l[1][][1])  # get first datapoint in line
@@ -132,14 +138,18 @@ function plot_benchmark(::Type{T}, results_dir; nufft_type = 1, save_svg = false
     Legend(fig[1, 2][2, 1], ax; framevisible = false, rowgap = 8, labelsize = 14)
 
     if save_svg
-        save("benchmark_$(T)_type$(nufft_type).svg", fig; backend = CairoMakie)
+        save("benchmark_$(T)_type$(nufft_type)$(cpu_suffix).svg", fig; backend = CairoMakie)
     end
 
     fig
 end
 
-for T ∈ (Float64, ComplexF64), nufft_type ∈ (1, 2)
-    plot_benchmark(T, "../results.MI300A_adastra"; nufft_type, save_svg = true)
+##
+
+results_dir = "../results.MI300A_adastra"
+
+for T ∈ (Float64, ComplexF64), nufft_type ∈ (1, 2), atomics ∈ (false, true)
+    plot_benchmark(T, results_dir; nufft_type, atomics, save_svg = true)
 end
 
-fig = plot_benchmark(ComplexF64, "../results.MI300A_adastra"; nufft_type = 1)
+fig = plot_benchmark(ComplexF64, results_dir; nufft_type = 1, atomics = true)
