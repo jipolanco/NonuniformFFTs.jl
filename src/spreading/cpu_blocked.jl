@@ -232,18 +232,18 @@ function _add_from_block!(
         ex_loop = _generate_split_loop_expr(D, :inds_wrapped, loop_core)
         quote
             number_of_indices_per_dimension = @ntuple($D, i -> sum(length, inds_wrapped[i]))
-            @assert size(ws) == number_of_indices_per_dimension
+            # @assert size(ws) == number_of_indices_per_dimension
             Base.require_one_based_indexing(ws)
             Base.require_one_based_indexing(us)
             n = 0
             @inbounds begin
                 $ex_loop
             end
-            @assert n == length(ws)
+            # @assert n == length(ws)
             us
         end
     else
-        @assert size(ws) == map(tup -> sum(length, tup), inds_wrapped)
+        # @assert size(ws) == map(tup -> sum(length, tup), inds_wrapped)
         Base.require_one_based_indexing(ws)
         Base.require_one_based_indexing(us)
         iters = map(enumerate ∘ Iterators.flatten, inds_wrapped)

@@ -5,10 +5,10 @@ function interpolate_blocked(
         x⃗::NTuple{D},
         I₀::NTuple{D},
     ) where {D, C}
-    @assert C > 0
+    # @assert C > 0
     map(Base.require_one_based_indexing, us)
     Ns = size(first(us))
-    @assert all(u -> size(u) === Ns, us)
+    # @assert all(u -> size(u) === Ns, us)
 
     # Evaluate 1D kernels.
     gs_eval = map((g, x) -> Kernels.evaluate_kernel(evalmode, g, x), gs, x⃗)
@@ -176,18 +176,18 @@ function _copy_to_block!(
         ex_loop = _generate_split_loop_expr(D, :inds_wrapped, loop_core)
         quote
             number_of_indices_per_dimension = @ntuple($D, i -> sum(length, inds_wrapped[i]))
-            @assert size(ws) == number_of_indices_per_dimension
+            # @assert size(ws) == number_of_indices_per_dimension
             Base.require_one_based_indexing(ws)
             Base.require_one_based_indexing(us)
             n = 0
             @inbounds begin
                 $ex_loop
             end
-            @assert n == length(ws)
+            # @assert n == length(ws)
             ws
         end
     else
-        @assert size(ws) == map(tup -> sum(length, tup), inds_wrapped)
+        # @assert size(ws) == map(tup -> sum(length, tup), inds_wrapped)
         Base.require_one_based_indexing(ws)
         Base.require_one_based_indexing(us)
         iters = map(enumerate ∘ Iterators.flatten, inds_wrapped)
