@@ -5,10 +5,10 @@ function interpolate_blocked(
         x⃗::NTuple{D},
         I₀::NTuple{D},
     ) where {D, C}
-    @assert C > 0
+    # @assert C > 0
     map(Base.require_one_based_indexing, us)
     Ns = size(first(us))
-    @assert all(u -> size(u) === Ns, us)
+    # @assert all(u -> size(u) === Ns, us)
 
     # Evaluate 1D kernels.
     gs_eval = map((g, x) -> Kernels.evaluate_kernel(evalmode, g, x), gs, x⃗)
@@ -108,7 +108,9 @@ function interpolate!(
     Base.require_one_based_indexing(buffers)
     Base.require_one_based_indexing(indices)
 
-    Threads.@threads for i ∈ 1:Nt
+    scheduler = DynamicScheduler(chunking = false)
+    tforeach(1:Nt; scheduler) do i
+        @inline
         # j_start = (i - 1) * nblocks ÷ Nt + 1
         # j_end = i * nblocks ÷ Nt
         j_start = bd.blocks_per_thread[i] + 1

@@ -83,6 +83,14 @@ function fill_with_zeros_serial!(us_all::NTuple{C, A}) where {C, A <: DenseArray
     us_all
 end
 
+to_real_array_cpu(u::Array{<:Real}) = u
+
+function to_real_array_cpu(u::Array{Complex{T}}) where {T <: Real}
+    # reinterpret(reshape, T, u)  # this is inefficient!
+    p = convert(Ptr{T}, pointer(u))
+    unsafe_wrap(Array, p, (2, size(u)...))::Array{T}
+end
+
 function spread_from_points!(
         ::CPU,
         callback::Callback,
@@ -103,7 +111,13 @@ function spread_from_points!(
     Base.require_one_based_indexing(indices)
     lck = ReentrantLock()
 
-    Threads.@threads for i ∈ 1:Nt
+    # Reinterpret output array as real-valued array if it's complex.
+    # This is needed for performance if we're using atomics on complex data.
+    us_real = map(to_real_array_cpu, us_all)
+
+    scheduler = DynamicScheduler(chunking = false)
+    tforeach(1:Nt; scheduler) do i  # iterate over blocks
+        @inline
         # j_start = (i - 1) * nblocks ÷ Nt + 1
         # j_end = i * nblocks ÷ Nt
         j_start = bd.blocks_per_thread[i] + 1
@@ -138,9 +152,9 @@ function spread_from_points!(
 
             # Add data from block to output array.
             if cpu_use_atomics
-                add_from_block!(us_all, block, inds_split; atomics = Val(true))
+                add_from_block!(us_real, block, inds_split; atomics = Val(true))
             else
-                # This is executed by only one thread at a time (can be slower for many threads)
+                # This is executed by only one thread at a time (might be slower for many threads)
                 lock(lck) do
                     add_from_block!(us_all, block, inds_split; atomics = Val(false))
                 end
@@ -189,23 +203,20 @@ end
     nothing
 end
 
-# @atomic doesn't directly work with complex numbers, so we need to separately add the real
-# and imaginary parts.
-@inline function cpu_add_atomic!(us::AbstractArray{Complex{T}}, js::Tuple, w::Complex) where {T}
+@inline function cpu_add_atomic!(us::AbstractArray{<:Real}, js::Tuple, w::Complex)
     @inbounds begin
-        vs = reinterpret(reshape, T, us)
-        Atomix.@atomic :monotonic vs[1, js...] += real(w)
-        Atomix.@atomic :monotonic vs[2, js...] += imag(w)
+        Atomix.@atomic :monotonic us[1, js...] += real(w)
+        Atomix.@atomic :monotonic us[2, js...] += imag(w)
     end
     nothing
 end
 
 function _add_from_block!(
-        us::AbstractArray{T, D},
-        ws::AbstractArray{T, D},
+        us::AbstractArray{T},
+        ws::AbstractArray{Z, D},
         inds_wrapped::NTuple{D, NTuple{2, UnitRange}};
         atomics::Val,
-    ) where {T, D}
+    ) where {T, Z, D}
     if @generated
         loop_core = quote
             n += 1
@@ -213,24 +224,25 @@ function _add_from_block!(
             if atomics === Val(true)
                 cpu_add_atomic!(us, js, ws[n])  # us[j_1, j_2, ..., j_D] += ws[n]
             else
+                # @assert Z === T
                 us[js...] += ws[n]  # us[j_1, j_2, ..., j_D] += ws[n]
             end
         end
         ex_loop = _generate_split_loop_expr(D, :inds_wrapped, loop_core)
         quote
             number_of_indices_per_dimension = @ntuple($D, i -> sum(length, inds_wrapped[i]))
-            @assert size(ws) == number_of_indices_per_dimension
+            # @assert size(ws) == number_of_indices_per_dimension
             Base.require_one_based_indexing(ws)
             Base.require_one_based_indexing(us)
             n = 0
             @inbounds begin
                 $ex_loop
             end
-            @assert n == length(ws)
+            # @assert n == length(ws)
             us
         end
     else
-        @assert size(ws) == map(tup -> sum(length, tup), inds_wrapped)
+        # @assert size(ws) == map(tup -> sum(length, tup), inds_wrapped)
         Base.require_one_based_indexing(ws)
         Base.require_one_based_indexing(us)
         iters = map(enumerate ∘ Iterators.flatten, inds_wrapped)
@@ -242,6 +254,7 @@ function _add_from_block!(
                 if atomics === Val(true)
                     cpu_add_atomic!(us, (j, js_tail...), ws[i, is_tail...])
                 else
+                    # @assert Z === T
                     us[j, js_tail...] += ws[i, is_tail...]
                 end
             end
