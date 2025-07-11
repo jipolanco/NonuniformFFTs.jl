@@ -1,6 +1,9 @@
 # CPU only
 struct BlockDataCPU{
-        T, N, I <: Integer,
+        Z, N, Nc,
+        I <: Integer,
+        T,  # = real(Z)
+        Buffers <: Channel{<:NTuple{Nc, AbstractArray{Z, N}}},
         Indices <: CartesianIndices{N},
         SortPoints <: StaticBool,
     } <: AbstractBlockData
@@ -12,6 +15,7 @@ struct BlockDataCPU{
     blockidx  :: Vector{Int}  # linear index of block associated to each point (length = Np)
     pointperm :: Vector{Int}  # index permutation for sorting points according to their block (length = Np)
     sort_points :: SortPoints
+    buffers_chnl :: Buffers    # length = nthreads
     indices :: Indices    # index associated to each block (length = num_blocks)
 
     function BlockDataCPU(
@@ -19,20 +23,24 @@ struct BlockDataCPU{
             nblocks_per_dir::NTuple{N, I},
             block_dims::NTuple{N, I},
             npoints_per_block::Vector{Int},
+            buffers_chnl::Channel{<:NTuple{Nc, AbstractArray{Z, N}}},
             indices::Indices,
             sort::S,
-        ) where {N, I, T <: AbstractFloat, Indices, S}
+        ) where {Z <: Number, Nc, N, I, T, Indices, S}
+        @assert T === real(Z)
         blockidx = similar(npoints_per_block, 0)
         pointperm = similar(npoints_per_block, 0)
-        new{T, N, I, Indices, S}(
-            Δxs, nblocks_per_dir, block_dims, npoints_per_block, blockidx, pointperm, sort, indices,
+        new{Z, N, Nc, I, T, typeof(buffers_chnl), Indices, S}(
+            Δxs, nblocks_per_dir, block_dims, npoints_per_block, blockidx, pointperm, sort, buffers_chnl, indices,
         )
     end
 end
 
 function BlockDataCPU(
-        ::Type{Z}, block_dims_in::Dims{D}, Ñs::Dims{D}, ::HalfSupport{M}, sort_points::StaticBool,
-    ) where {Z <: Number, D, M}
+        ::Type{Z}, block_dims_in::Dims{D}, Ñs::Dims{D}, ::HalfSupport{M}, num_transforms::Val{Nc},
+        sort_points::StaticBool,
+    ) where {Z <: Number, D, M, Nc}
+    @assert Nc > 0
     # Reduce block size if the actual dataset is too small.
     # The block size must satisfy B ≤ N - M (this is assumed in spreading/interpolation).
     block_dims = map(Ñs, block_dims_in) do N, B
@@ -43,12 +51,22 @@ function BlockDataCPU(
     L = T(2) * π  # domain period
     Δxs = map(N -> L / N, Ñs)  # grid step (oversampled grid)
     cumulative_npoints_per_block = Vector{Int}(undef, prod(nblocks_per_dir) + 1)
+    dims = block_dims .+ 2M  # include padding for values outside of block (TODO: include padding in original block_dims? requires minimal block_size in each direction)
+    Nt = Threads.nthreads()
+    # Nt = ifelse(Nt == 1, zero(Nt), Nt)  # this disables blocking if running on single thread
+    buffers_chnl = Channel{NTuple{Nc, Array{Z, D}}}(Nt)
+    foreach(1:Nt) do _
+        buf = ntuple(_ -> Array{Z}(undef, dims), num_transforms)  # one buffer per transform (or "component")
+        put!(buffers_chnl, buf)
+    end
     indices_tup = map(Ñs, block_dims) do N, B
         range(0, N - 1; step = B)
     end
     indices = CartesianIndices(indices_tup)
     BlockDataCPU(
-        Δxs, nblocks_per_dir, block_dims, cumulative_npoints_per_block, indices, sort_points,
+        Δxs, nblocks_per_dir, block_dims, cumulative_npoints_per_block,
+        buffers_chnl, indices,
+        sort_points,
     )
 end
 

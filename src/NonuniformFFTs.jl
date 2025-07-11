@@ -3,7 +3,6 @@ module NonuniformFFTs
 using AbstractFFTs: AbstractFFTs
 using AbstractNFFTs: AbstractNFFTs, AbstractNFFTPlan
 using Adapt: Adapt, adapt
-using Bumper: Bumper, @no_escape, @alloc
 using GPUArraysCore: AbstractGPUArray, AbstractGPUVector
 using KernelAbstractions: KernelAbstractions as KA, CPU, GPU, @kernel, @index, @Const,
     @groupsize, @localmem, @synchronize, @uniform
