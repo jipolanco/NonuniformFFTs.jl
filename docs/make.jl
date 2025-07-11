@@ -3,17 +3,24 @@ using DocumenterCitations
 using Downloads: Downloads
 using NonuniformFFTs
 
+function copy_svg_images(dstdir, srcdir)
+    mkpath(dstdir)
+    for fname ∈ readdir(srcdir)
+        endswith(".svg")(fname) || continue
+        srcfile = joinpath(srcdir, fname)
+        dstfile = joinpath(dstdir, fname)
+        @info "Copying $srcfile -> $dstfile"
+        cp(srcfile, dstfile; force = true)
+    end
+end
+
 # Copy benchmark results to docs/src/benchmarks/
 srcdir = relpath(joinpath(@__DIR__, "..", "benchmark", "CPU+CUDA", "plots"))
-dstdir = relpath(joinpath(@__DIR__, "src", "img"))
-mkpath(dstdir)
-for fname ∈ readdir(srcdir)
-    endswith(".svg")(fname) || continue
-    srcfile = joinpath(srcdir, fname)
-    dstfile = joinpath(dstdir, fname)
-    @info "Copying $srcfile -> $dstfile"
-    cp(srcfile, dstfile; force = true)
-end
+dstdir = relpath(joinpath(@__DIR__, "src", "img", "CUDA"))
+copy_svg_images(dstdir, srcdir)
+srcdir = relpath(joinpath(@__DIR__, "..", "benchmark", "CPU+AMDGPU", "plots"))
+dstdir = relpath(joinpath(@__DIR__, "src", "img", "AMDGPU"))
+copy_svg_images(dstdir, srcdir)
 
 # Bibliography
 bib = CitationBibliography(joinpath(@__DIR__, "src", "refs.bib"); style = :authoryear)
