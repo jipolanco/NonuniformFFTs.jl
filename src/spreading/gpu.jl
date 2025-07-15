@@ -107,21 +107,21 @@ end
     nothing
 end
 
+# Note: we must return the updated value, since this function is also used in blocking/gpu.jl.
 @inline function _atomic_add!(u::AbstractArray{T}, v::T, inds::Tuple) where {T <: Real}
     # The :monotonic is really needed to get decent performance on AMDGPU.
     # On CUDA it doesn't seem to make a difference.
     @inbounds Atomix.@atomic :monotonic u[inds...] += v
-    nothing
 end
 
 # Atomix.@atomic currently fails for complex data (https://github.com/JuliaGPU/KernelAbstractions.jl/issues/497),
 # so the output must be a real array `u`.
 @inline function _atomic_add!(u::AbstractArray{T}, v::Complex{T}, inds::Tuple) where {T <: Real}
     @inbounds begin
-        Atomix.@atomic :monotonic u[1, inds...] += real(v)
-        Atomix.@atomic :monotonic u[2, inds...] += imag(v)
+        a = Atomix.@atomic :monotonic u[1, inds...] += real(v)
+        b = Atomix.@atomic :monotonic u[2, inds...] += imag(v)
+        Complex(a, b)  # for consistency with real case, we return the updated value
     end
-    nothing
 end
 
 to_real_array(u::AbstractArray{T}) where {T <: Real} = u
