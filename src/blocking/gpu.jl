@@ -38,6 +38,9 @@ with_blocking(::BlockDataGPU) = true
 get_batch_size(bd::BlockDataGPU) = get_batch_size(bd.batch_size)
 get_batch_size(::Val{Np}) where {Np} = Np
 
+# This is overriden by OpenCLBackend, as OpenCL seems to only include atomics for Int32.
+int_type_for_atomics(::KA.Backend) = Int  # Int32 doesn't seem to be faster
+
 function BlockDataGPU(
         ::Type{Z},
         backend::KA.Backend, block_dims::Dims{D}, Ñs::Dims{D}, h::HalfSupport{M},
@@ -59,7 +62,7 @@ function BlockDataGPU(
         # error is not thrown.
         _, Np = block_dims_gpu_shmem(backend, Z, Ñs, h, batch_size; warn = false)
     end
-    IntType = Int  # Int32 doesn't seem to be faster
+    IntType = int_type_for_atomics(backend)
     nblocks_per_dir = IntType.(map(cld, Ñs, block_dims))  # basically equal to ceil(Ñ / block_dim)
     L = T(2) * π  # domain period
     Δxs = map(N -> L / N, Ñs)  # grid step (oversampled grid)

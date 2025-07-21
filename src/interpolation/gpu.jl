@@ -91,8 +91,8 @@ function interpolate!(
         block_dims_val, batch_size_actual = block_dims_gpu_shmem(backend, Z, size(us[1]), HalfSupport(M), bd.batch_size)  # this is usually a compile-time constant...
         @assert Val(batch_size_actual) == bd.batch_size
         block_dims = Val(block_dims_val)  # ...which means this doesn't require a dynamic dispatch
-        @assert block_dims_val === bd.block_dims
-        let ngroups = bd.nblocks_per_dir  # this is the required number of workgroups (number of blocks in CUDA)
+        @assert block_dims_val === Int.(bd.block_dims)
+        let ngroups = Int.(bd.nblocks_per_dir)  # this is the required number of workgroups (number of blocks in CUDA)
             block_dims_padded = @. block_dims_val + 2M - 1  # dimensions of shared memory array
             shmem_size = block_dims_padded
             groupsize = groupsize_interp_gpu_shmem(backend)
