@@ -9,11 +9,11 @@ using LinearAlgebra: LinearAlgebra, Adjoint
 using Adapt: adapt
 import AbstractNFFTs: plan_nfft, AbstractNFFTBackend
 
-struct NonuniformFFTBackend <: AbstractNFFTs.AbstractNFFTBackend end
+struct NonuniformFFTsBackend <: AbstractNFFTs.AbstractNFFTBackend end
 activate!() = AbstractNFFTs.set_active_backend!(NonuniformFFTs)
-backend() = NonuniformFFTBackend()
+backend() = NonuniformFFTsBackend()
 
-export plan_nfft, NonuniformFFTBackend  # reexport AbstractNFFTs.plan_nfft
+export plan_nfft, NonuniformFFTsBackend  # reexport AbstractNFFTs.plan_nfft
 
 
 # This is a wrapper type allowing to define an interface which is compatible with
@@ -191,7 +191,7 @@ function _split_accuracy_params(; kws...)
 end
 
 function AbstractNFFTs.plan_nfft(
-        ::NonuniformFFTBackend,
+        ::NonuniformFFTsBackend,
         ::Type{Q}, xp::AbstractMatrix{T}, Ns::Dims{D};
         kwargs...,
     ) where {Q, T, D}
