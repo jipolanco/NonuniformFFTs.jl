@@ -23,13 +23,13 @@ jobs:
         experimental: [false]
         julia-version:
           - '1.10'
-          - '1.11'
+          - '1.12'
         os:
           - ubuntu-latest
         julia-arch:
           - x64
         include:
-          - julia-version: '1.11'
+          - julia-version: '1.12'
             julia-arch: aarch64
             os: ubuntu-24.04-arm
             experimental: true
