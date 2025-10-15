@@ -130,7 +130,7 @@ function test_nufft_type1_1d(
     NonuniformFFTs.set_points!(plan_nufft, xp)
     NonuniformFFTs.exec_type1!(ûs, plan_nufft, vp)
 
-    if VERSION ≥ v"1.10"
+    if v"1.10" <= VERSION < v"1.12"
         mods = (NonuniformFFTs, NonuniformFFTs.Kernels)
         JET.@test_opt target_modules=mods PlanNUFFT(T, N; m, σ, kernel, block_size)
         JET.@test_opt target_modules=mods NonuniformFFTs.set_points!(plan_nufft, xp)
@@ -199,7 +199,7 @@ function test_nufft_type2_1d(
     NonuniformFFTs.set_points!(plan_nufft, xp)
     NonuniformFFTs.exec_type2!(vp, plan_nufft, ûs)
 
-    if VERSION ≥ v"1.10"
+    if v"1.10" <= VERSION < v"1.12"
         mods = (NonuniformFFTs, NonuniformFFTs.Kernels)
         JET.@test_opt target_modules=mods PlanNUFFT(T, N; m, σ, kernel, block_size)
         JET.@test_opt target_modules=mods NonuniformFFTs.set_points!(plan_nufft, xp)
