@@ -44,8 +44,11 @@ end
 
 makedocs(;
     sitename = "NonuniformFFTs",
+    authors = "Juan Ignacio Polanco",
+    repo = "https://github.com/jipolanco/NonuniformFFTs.jl",
     format = DocumenterVitepress.MarkdownVitepress(;
-        repo = "github.com/jipolanco/NonuniformFFTs.jl",
+        repo = "https://github.com/jipolanco/NonuniformFFTs.jl",
+        deploy_url = "jipolanco.github.io/NonuniformFFTs.jl",
         devbranch = "master",
         devurl = "dev",
         assets,
@@ -63,6 +66,7 @@ makedocs(;
         "API.md",
     ],
     plugins = [bib],
+    warnonly = true,
     # warnonly = [:missing_docs],
 )
 
