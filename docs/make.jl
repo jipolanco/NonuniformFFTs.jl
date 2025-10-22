@@ -78,9 +78,6 @@ makedocs(;
 
 DocumenterVitepress.deploydocs(
     repo = "github.com/jipolanco/NonuniformFFTs.jl",
-    target = joinpath(@__DIR__, "build"),
-    branch = "gh-pages",
     devbranch = "master",
-    forcepush = true,
     push_preview = true,
 )
