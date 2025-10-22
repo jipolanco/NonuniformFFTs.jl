@@ -45,7 +45,6 @@ end
 makedocs(;
     sitename = "NonuniformFFTs",
     authors = "Juan Ignacio Polanco",
-    repo = "https://github.com/jipolanco/NonuniformFFTs.jl",
     format = DocumenterVitepress.MarkdownVitepress(;
         repo = "https://github.com/jipolanco/NonuniformFFTs.jl",
         deploy_url = "jipolanco.github.io/NonuniformFFTs.jl",
