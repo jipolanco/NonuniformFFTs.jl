@@ -68,15 +68,11 @@ at large point densities.
 
 #### Type-1 transforms
 
-```@raw html
-<img width="100%" src="../img/CUDA/benchmark_ComplexF64_type1_atomics.svg">
-```
+![](img/CUDA/benchmark_ComplexF64_type1_atomics.svg)
 
 #### [Type-2 transforms](@id benchmarks-complex-cuda-type2)
 
-```@raw html
-<img width="100%" src="../img/CUDA/benchmark_ComplexF64_type2_atomics.svg">
-```
+![](img/CUDA/benchmark_ComplexF64_type2_atomics.svg)
 
 ### Real non-uniform data
 
@@ -93,15 +89,11 @@ In the plots below, the (Cu)FINUFFT curves are exactly the same as in the
 
 #### Type-1 transforms
 
-```@raw html
-<img width="100%" src="../img/CUDA/benchmark_Float64_type1_atomics.svg">
-```
+![](img/CUDA/benchmark_Float64_type1_atomics.svg)
 
 #### Type-2 transforms
 
-```@raw html
-<img width="100%" src="../img/CUDA/benchmark_Float64_type2_atomics.svg">
-```
+![](img/CUDA/benchmark_Float64_type2_atomics.svg)
 
 ### FINUFFT set-up
 
@@ -158,26 +150,18 @@ This is something to take into account when using NonuniformFFTs.jl on AMD GPUs.
 
 #### Type-1 transforms
 
-```@raw html
-<img width="100%" src="../img/AMDGPU/benchmark_ComplexF64_type1_atomics.svg">
-```
+![](img/AMDGPU/benchmark_ComplexF64_type1_atomics.svg)
 
 #### Type-2 transforms
 
-```@raw html
-<img width="100%" src="../img/AMDGPU/benchmark_ComplexF64_type2_atomics.svg">
-```
+![](img/AMDGPU/benchmark_ComplexF64_type2_atomics.svg)
 
 ### Real non-uniform data
 
 #### Type-1 transforms
 
-```@raw html
-<img width="100%" src="../img/AMDGPU/benchmark_Float64_type1_atomics.svg">
-```
+![](img/AMDGPU/benchmark_Float64_type1_atomics.svg)
 
 #### Type-2 transforms
 
-```@raw html
-<img width="100%" src="../img/AMDGPU/benchmark_Float64_type2_atomics.svg">
-```
+![](img/AMDGPU/benchmark_Float64_type2_atomics.svg)

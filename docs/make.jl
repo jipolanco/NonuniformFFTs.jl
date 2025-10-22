@@ -1,4 +1,5 @@
 using Documenter
+using DocumenterVitepress
 using DocumenterCitations
 using Downloads: Downloads
 using NonuniformFFTs
@@ -43,10 +44,16 @@ end
 
 makedocs(;
     sitename = "NonuniformFFTs",
-    format = Documenter.HTML(;
-        prettyurls = true,
+    format = DocumenterVitepress.MarkdownVitepress(;
+        repo = "github.com/jipolanco/NonuniformFFTs.jl",
+        devbranch = "master",
+        devurl = "dev",
         assets,
     ),
+    # format = Documenter.HTML(;
+    #     prettyurls = true,
+    #     assets,
+    # ),
     modules = [NonuniformFFTs],
     pages = [
         "index.md",
@@ -59,8 +66,17 @@ makedocs(;
     # warnonly = [:missing_docs],
 )
 
-deploydocs(
+# Documenter.deploydocs(
+#     repo = "github.com/jipolanco/NonuniformFFTs.jl",
+#     forcepush = true,
+#     push_preview = true,
+# )
+
+DocumenterVitepress.deploydocs(
     repo = "github.com/jipolanco/NonuniformFFTs.jl",
+    target = joinpath(@__DIR__, "build"),
+    branch = "gh-pages",
+    devbranch = "master",
     forcepush = true,
     push_preview = true,
 )
