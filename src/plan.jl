@@ -121,8 +121,8 @@ exec_type1!(output, plan, input; callbacks = callbacks)  # use callback in type-
 
 ## Callback on uniform data
 
-Define a callback function that multiplies each uniform point by ``|\\bm{k}|^2`` (where
-``\\bm{k}`` can represent a Fourier wavevector):
+Define a callback function that multiplies each uniform point by ``|\\boldsymbol{k}|^2`` (where
+``\\boldsymbol{k}`` can represent a Fourier wavevector):
 
 ```julia
 using AbstractFFTs: fftfreq

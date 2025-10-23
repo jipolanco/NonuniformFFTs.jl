@@ -74,6 +74,8 @@ makedocs(;
 #     push_preview = true,
 # )
 
+# DocumenterVitepress.dev_docs("build")  # use this to see docs locally
+
 DocumenterVitepress.deploydocs(
     repo = "github.com/jipolanco/NonuniformFFTs.jl",
     devbranch = "master",

@@ -1,10 +1,5 @@
 # Benchmarks
 
-```@contents
-Pages = ["benchmarks.md"]
-Depth = 2:4
-```
-
 ## Introduction
 
 The benchmarks consist in type-1 and type-2 NUFFTs on a uniform 3D grid of

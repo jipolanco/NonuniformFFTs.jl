@@ -16,9 +16,9 @@ https://github.com/vuejs/vitepress/blob/main/src/client/theme-default/styles/var
 
 :root {
 /* Typography */
---vp-font-family-base: "Barlow", "Inter var experimental", "Inter var",
+--vp-font-family-base: "IBM Plex Sans", "Fira Sans", "Barlow", "Inter var experimental", "Inter var",
   -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu,
-  Cantarell, "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif;
+  Cantarell, "Droid Sans", "Helvetica Neue", sans-serif;
 
 /* Code Snippet font */
 --vp-font-family-mono: JuliaMono-Regular, monospace;
