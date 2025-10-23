@@ -26,18 +26,18 @@ copy_svg_images(dstdir, srcdir)
 # Bibliography
 bib = CitationBibliography(joinpath(@__DIR__, "src", "refs.bib"); style = :authoryear)
 
-assets = [
-    asset("assets/citations.css"; islocal = true),
-    asset("assets/benchmarks.css"; islocal = true),
-]
+# assets = [
+#     asset("assets/citations.css"; islocal = true),
+#     asset("assets/benchmarks.css"; islocal = true),
+# ]
 
 # Try to download latest version of simpleanalytics script.
 try
-    script = "assets/sa.js"
+    script = "public/assets/sa.js"
     dst = joinpath(@__DIR__, "src", script)
     Downloads.download("https://scripts.simpleanalyticscdn.com/latest.js", dst)
-    attributes = Dict(:async => "", Symbol("data-collect-dnt") => "true")
-    push!(assets, asset(script; attributes, islocal = true))
+    # attributes = Dict(:async => "", Symbol("data-collect-dnt") => "true")
+    # push!(assets, asset(script; attributes, islocal = true))
 catch e
     @warn "Failed downloading asset" e
 end
@@ -49,7 +49,7 @@ makedocs(;
         repo = "github.com/jipolanco/NonuniformFFTs.jl",
         devbranch = "master",
         devurl = "dev",
-        assets,
+        # assets,
     ),
     # format = Documenter.HTML(;
     #     prettyurls = true,

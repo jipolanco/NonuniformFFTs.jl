@@ -160,3 +160,10 @@ This is something to take into account when using NonuniformFFTs.jl on AMD GPUs.
 #### Type-2 transforms
 
 ![](img/AMDGPU/benchmark_Float64_type2_atomics.svg)
+
+## Bibliography
+
+```@bibliography
+Pages = ["benchmarks.md"]
+Canonical = false
+```

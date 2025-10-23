@@ -1,3 +1,4 @@
+/* Not sure this file is actually used with DocumenterVitepress + DocumenterCitations */
 .citation dl {
   display: grid;
   grid-template-columns: max-content auto; }
