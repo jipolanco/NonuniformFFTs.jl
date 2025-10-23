@@ -33,7 +33,7 @@ bib = CitationBibliography(joinpath(@__DIR__, "src", "refs.bib"); style = :autho
 
 # Try to download latest version of simpleanalytics script.
 try
-    script = "public/assets/sa.js"
+    script = "public/sa.js"
     dst = joinpath(@__DIR__, "src", script)
     Downloads.download("https://scripts.simpleanalyticscdn.com/latest.js", dst)
     # attributes = Dict(:async => "", Symbol("data-collect-dnt") => "true")
@@ -73,6 +73,8 @@ makedocs(;
 #     forcepush = true,
 #     push_preview = true,
 # )
+
+@show readdir("build/1")
 
 # DocumenterVitepress.dev_docs("build")  # use this to see docs locally
 
