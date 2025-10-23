@@ -74,7 +74,8 @@ makedocs(;
 #     push_preview = true,
 # )
 
-@show readdir("build/1")
+@show readdir(joinpath(@__DIR__, "build"))
+@show readdir(joinpath(@__DIR__, "build", "1"))
 
 # DocumenterVitepress.dev_docs("build")  # use this to see docs locally
 
