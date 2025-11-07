@@ -5,6 +5,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.9.0] - 2025-11-07
+
+### Added
+
+- Support backend-based AbstractNFFTs interface (introduced in AbstractNFFTs.jl v0.9).
+
 ## [v0.8.4] - 2025-07-21
 
 ### Added
