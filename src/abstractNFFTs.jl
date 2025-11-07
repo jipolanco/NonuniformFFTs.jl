@@ -7,9 +7,9 @@
 
 using LinearAlgebra: LinearAlgebra, Adjoint
 using Adapt: adapt
-import AbstractNFFTs: plan_nfft, AbstractNFFTBackend
+using AbstractNFFTs: plan_nfft, AbstractNFFTBackend
 
-struct NonuniformFFTsBackend <: AbstractNFFTs.AbstractNFFTBackend end
+struct NonuniformFFTsBackend <: AbstractNFFTBackend end
 activate!() = AbstractNFFTs.set_active_backend!(NonuniformFFTs)
 backend() = NonuniformFFTsBackend()
 
