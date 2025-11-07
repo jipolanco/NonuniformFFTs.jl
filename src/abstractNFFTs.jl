@@ -7,9 +7,47 @@
 
 using LinearAlgebra: LinearAlgebra, Adjoint
 using Adapt: adapt
-using AbstractNFFTs: plan_nfft
+using AbstractNFFTs: plan_nfft, with, AbstractNFFTBackend
 
-export plan_nfft  # reexport AbstractNFFTs.plan_nfft
+export plan_nfft, with  # reexport from AbstractNFFTs
+
+struct NonuniformFFTsBackend <: AbstractNFFTBackend end
+
+"""
+    NonuniformFFTs.activate!()
+
+Sets NonuniformFFTs.jl as the active AbstractNFFTs backend.
+
+# Typical usage
+
+```julia
+using NonuniformFFTs, AbstractNFFTs
+NonuniformFFTs.activate!()
+u = nfft_adjoint(...)  # performs an adjoint NFFT (type 1 NUFFT) using NonuniformFFTs.jl
+v = nfft(...)          # performs a NFFT (type 2 NUFFT) using NonuniformFFTs.jl
+plan = plan_nfft(...)  # creates a NonuniformFFTs plan
+```
+"""
+activate!() = AbstractNFFTs.set_active_backend!(NonuniformFFTs)
+
+"""
+    NonuniformFFTs.backend() -> NonuniformFFTsBackend
+
+Returns the AbstractNFFTs backend associated to NonuniformFFTs.jl.
+
+# Typical usage
+
+```julia
+using NonuniformFFTs, AbstractNFFTs
+with(nfft_backend => NonuniformFFTs.backend()) do
+    u = nfft_adjoint(...)  # performs an adjoint NFFT (type 1 NUFFT) using NonuniformFFTs.jl
+    v = nfft(...)          # performs a NFFT (type 2 NUFFT) using NonuniformFFTs.jl
+    plan = plan_nfft(...)  # creates a NonuniformFFTs plan
+end
+```
+"""
+backend() = NonuniformFFTsBackend()
+
 
 # This is a wrapper type allowing to define an interface which is compatible with
 # AbstractNFFTs.jl. It is not exported to avoid clashes with NFFT.jl.
@@ -39,15 +77,23 @@ Moreover, for compatibility reasons, most keyword arguments from the NFFT.jl pac
 also accepted as detailed below.
 
 This type of plan can also be created via the
-[`AbstractNFFTs.plan_nfft`](https://juliamath.github.io/NFFT.jl/v0.13.5/abstract/#Plan-Interface)
-function.
+[`AbstractNFFTs.plan_nfft`](https://juliamath.github.io/NFFT.jl/dev/abstract/#Plan-Interface)
+function. For example:
+
+```julia
+using NonuniformFFTs
+Np, N = 8, 16
+xp = range(-0.4, 0.4; length = Np)
+plan = plan_nfft(xp, N)
+```
 
 This constructor creates a plan which assumes complex-valued non-uniform data.
-For real-valued data, the [`PlanNUFFT`](@ref) constructor should be used instead.
+For real-valued data, the [`PlanNUFFT`](@ref) constructor (which is not compatible with the
+AbstractNFFTs.jl interface) should be used instead.
 
 # Compatibility with NFFT.jl
 
-Most of the [parameters](https://juliamath.github.io/NFFT.jl/stable/overview/#Parameters)
+Most of the [parameters](https://juliamath.github.io/NFFT.jl/dev/overview/#Parameters)
 supported by the NFFT.jl package are also supported by this constructor.
 The currently supported parameters are `reltol`, `m`, `σ`, `window`, `blocking`, `sortNodes` and `fftflags`.
 
@@ -154,8 +200,12 @@ Base.@constprop :aggressive function NFFTPlan(
         fftflags = FFTW.ESTIMATE, blocking = true, sortNodes = false,
         window = default_kernel(KA.get_backend(xp)),
         fftshift = true,  # for compatibility with NFFT.jl
+        precompute = nothing,  # ignored by NonuniformFFTs.jl, for compatibility with NFFT.jl
         kws...,
     ) where {T <: AbstractFloat}
+    if !isnothing(precompute)
+        @warn "Precompute flags are not supported by the NonuniformFFTs backend and will be ignored."
+    end
     # Note: the NFFT.jl package uses an odd window size, w = 2m + 1.
     # Here we use an even window size w = 2m, which should result in a slightly lower
     # accuracy for the same m.
@@ -186,6 +236,7 @@ function _split_accuracy_params(; kws...)
 end
 
 function AbstractNFFTs.plan_nfft(
+        ::NonuniformFFTsBackend,
         ::Type{Q}, xp::AbstractMatrix{T}, Ns::Dims{D};
         kwargs...,
     ) where {Q, T, D}

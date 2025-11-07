@@ -2,8 +2,9 @@
 
 using Test
 using Random: Random
-using NonuniformFFTs
-using NFFT: NFFT, size_in, size_out
+using AbstractNFFTs
+using NonuniformFFTs: NonuniformFFTs
+using NFFT: NFFT
 
 function compare_with_nfft(Ns; Np = 1000)
     rng = Random.Xoshiro(43)
@@ -15,8 +16,23 @@ function compare_with_nfft(Ns; Np = 1000)
     reltol = 1e-9
     window = :kaiser_bessel
 
-    p = NonuniformFFTs.NFFTPlan(xp, Ns; reltol, window,)
-    p_nfft = NFFT.NFFTPlan(xp, Ns; reltol, window,)
+    # Test construction using `with` syntax.
+    p = with(nfft_backend => NonuniformFFTs.backend()) do
+        plan_nfft(xp, Ns; reltol, window)
+    end
+    @test p isa NonuniformFFTs.NFFTPlan
+
+    p_nfft = with(nfft_backend => NFFT.backend()) do
+        plan_nfft(xp, Ns; reltol, window)
+    end
+    @test p_nfft isa NFFT.NFFTPlan
+
+    # Test construction using activate!.
+    NonuniformFFTs.activate!()
+    @test plan_nfft(xp, Ns; reltol, window) isa NonuniformFFTs.NFFTPlan
+
+    NFFT.activate!()
+    @test plan_nfft(xp, Ns; reltol, window) isa NFFT.NFFTPlan
 
     @test startswith(repr(p), "NonuniformFFTs.NFFTPlan{$T, $d} wrapping a PlanNUFFT:")  # test pretty-printing
 
@@ -28,10 +44,18 @@ function compare_with_nfft(Ns; Np = 1000)
     us_nfft = adjoint(p_nfft) * vp
     @test us ≈ us_nfft
 
+    with(nfft_backend => NonuniformFFTs.backend()) do
+        @test nfft_adjoint(xp, Ns, vp) ≈ us rtol=reltol
+    end
+
     # Test type-2 (forward) transform
     wp = p * us
     wp_nfft = p_nfft * us
     @test wp ≈ wp_nfft
+
+    with(nfft_backend => NonuniformFFTs.backend()) do
+        @test nfft(xp, us) ≈ wp rtol=reltol
+    end
 
     nothing
 end

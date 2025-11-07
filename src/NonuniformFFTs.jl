@@ -501,4 +501,8 @@ end
     end
 end
 
+function __init__()
+    activate!()
+end
+
 end

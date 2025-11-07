@@ -8,7 +8,6 @@ CurrentModule = NonuniformFFTs
 
 ```@docs
 PlanNUFFT
-NFFTPlan
 ```
 
 ## Setting non-uniform points
@@ -50,6 +49,14 @@ BSplineKernel
 ```@docs
 Direct
 FastApproximation
+```
+
+## AbstractNFFTs interface
+
+```@docs
+activate!
+backend
+NFFTPlan
 ```
 
 ## Internals

@@ -97,7 +97,7 @@ In particular, this means that:
   Conversely, type-2 NUFFTs (uniform to non-uniform) are defined with a plus sign, equivalently to the backward DFT in FFTW3.
 
 For compatibility with other packages such as [NFFT.jl](https://github.com/JuliaMath/NFFT.jl), these conventions are *not*
-applied when the [AbstractNFFTs.jl interface](@ref AbstractNFFTs-interface) is used.
+applied when the [AbstractNFFTs.jl interface](@ref AbstractNFFTs-interface-examples) is used.
 In this specific case, modes are assumed to be ordered in increasing order, and
 the opposite sign convention is used for Fourier transforms.
 

@@ -181,15 +181,15 @@ exec_type1!(ûs, plan_nufft, vp)
 exec_type2!(vp, plan_nufft, ûs)
 ```
 
-## [AbstractNFFTs.jl interface](@id AbstractNFFTs-interface)
+## [AbstractNFFTs.jl interface](@id AbstractNFFTs-interface-examples)
 
-This package also implements the [AbstractNFFTs.jl](https://juliamath.github.io/NFFT.jl/stable/abstract/)
+This package also implements the [AbstractNFFTs.jl](https://juliamath.github.io/NFFT.jl/dev/abstract/)
 interface as an alternative API for constructing plans and evaluating transforms.
 This can be useful for comparing with similar packages such as [NFFT.jl](https://github.com/JuliaMath/NFFT.jl).
 
 For this, a [`NFFTPlan`](@ref NonuniformFFTs.NFFTPlan) constructor (alternative to [`PlanNUFFT`](@ref)) is provided which
 supports most of the parameters supported by [NFFT.jl](https://github.com/JuliaMath/NFFT.jl).
-Alternatively, once NonuniformFFTs.jl has been loaded, the [`plan_nfft`](https://juliamath.github.io/NFFT.jl/v0.13.5/api/#AbstractNFFTs.plan_nfft-Union{Tuple{D},%20Tuple{T},%20Tuple{Type{%3C:Array},%20Matrix{T},%20Tuple{Vararg{Int64,%20D}},%20Vararg{Any}}}%20where%20{T,%20D})
+Alternatively, once NonuniformFFTs.jl has been loaded, the [`plan_nfft`](https://juliamath.github.io/NFFT.jl/dev/api/)
 function from AbstractNFFTs.jl also generates a `NFFTPlan`.
 For compatibility with NFFT.jl, the plan generated via this interface **does not
 follow the same [conventions](@ref nufft-conventions)** followed by `PlanNUFFT` plans.
@@ -230,8 +230,7 @@ vp = randn(Complex{T}, Np)       # random values at points (must be complex)
 
 # Create plan for data of type Complex{T}. Note that we pass the points `xp` as
 # a first argument, which calls an AbstractNFFTs-compatible constructor.
-p = NonuniformFFTs.NFFTPlan(xp, Ns)
-# p = plan_nfft(xp, Ns)  # this is also possible
+p = plan_nfft(xp, Ns)
 
 # Getting the expected dimensions of input and output data.
 AbstractNFFTs.size_in(p)   # (256, 256)
