@@ -200,8 +200,12 @@ Base.@constprop :aggressive function NFFTPlan(
         fftflags = FFTW.ESTIMATE, blocking = true, sortNodes = false,
         window = default_kernel(KA.get_backend(xp)),
         fftshift = true,  # for compatibility with NFFT.jl
+        precompute = nothing,  # ignored by NonuniformFFTs.jl, for compatibility with NFFT.jl
         kws...,
     ) where {T <: AbstractFloat}
+    if !isnothing(precompute)
+        @warn "Precompute flags are not supported by the NonuniformFFTs backend and will be ignored."
+    end
     # Note: the NFFT.jl package uses an odd window size, w = 2m + 1.
     # Here we use an even window size w = 2m, which should result in a slightly lower
     # accuracy for the same m.
