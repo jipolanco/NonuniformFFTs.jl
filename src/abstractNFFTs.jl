@@ -7,13 +7,13 @@
 
 using LinearAlgebra: LinearAlgebra, Adjoint
 using Adapt: adapt
-using AbstractNFFTs: plan_nfft, AbstractNFFTBackend
+using AbstractNFFTs: plan_nfft, with, AbstractNFFTBackend
+
+export plan_nfft, with, NonuniformFFTsBackend  # reexport AbstractNFFTs.plan_nfft
 
 struct NonuniformFFTsBackend <: AbstractNFFTBackend end
 activate!() = AbstractNFFTs.set_active_backend!(NonuniformFFTs)
 backend() = NonuniformFFTsBackend()
-
-export plan_nfft, NonuniformFFTsBackend  # reexport AbstractNFFTs.plan_nfft
 
 
 # This is a wrapper type allowing to define an interface which is compatible with
