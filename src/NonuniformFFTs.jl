@@ -502,7 +502,7 @@ end
 end
 
 function __init__()
-  activate!()
+    activate!()
 end
 
 end
