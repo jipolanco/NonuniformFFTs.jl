@@ -17,3 +17,7 @@ StructArrays = "09ab397b-f2b6-538f-b94a-2f83cf4a842a"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 TimerOutputs = "a759f4b9-e2f1-59dc-863e-4aeb61b1ea8f"
 pocl_jll = "627d6b7a-bbe6-5189-83e7-98cc0a5aeadd"
+
+[sources]
+NonuniformFFTs = {path = ".."}
+OpenCL = {rev = "jip/atomic_float", url = "https://github.com/jipolanco/OpenCL.jl.git"}

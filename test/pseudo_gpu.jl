@@ -1,26 +1,16 @@
-# Test GPU code using CPU arrays. By default everything is run on the CPU.
-#
-# We define a minimal custom array type, so that it runs the kernels the GPU would run
-# instead of using the alternative CPU branches.
-# We also tried to use JLArrays instead, but we need scalar indexing which is disallowed by
-# JLArray (since it's supposed to mimic GPU arrays). Even with allowscalar(true), kernels
-# seem to fail for other reasons.
+# Test GPU code using CPU arrays. By default everything is run on the CPU using OpenCL.jl.
+
+# We test with OpenCL on CPU, but this requires a modified version of the OpenCL.jl
+# sources to enable support for float atomics (see Project.toml). Also, note that the
+# LocalPreferences.toml file sets default_memory_backend = "svm" (unified memory by
+# default), which is needed for FFTs to work (using FFTW).
 #
 # To test an actual GPU backend, set the environment variable JULIA_GPU_BACKEND before
 # launching this script. Possible values are:
-#  - PseudoGPU (default)
 #  - CUDA
 #  - AMDGPU
 # The required packages (e.g. CUDA.jl) will automatically be installed in the current
 # environment.
-
-# We also test with OpenCL on CPU, but this requires a modified version of the OpenCL.jl
-# sources to enable support for float atomics. Also, note that the LocalPreferences.toml
-# file sets default_memory_backend = "svm" (unified memory by default), which is needed for
-# FFTs to work (using FFTW).
-@info "Installing custom version of OpenCL.jl with support for float atomics"
-using Pkg
-Pkg.add(url="https://github.com/jipolanco/OpenCL.jl.git", rev="jip/atomic_float")
 
 using NonuniformFFTs
 using KernelAbstractions: KernelAbstractions as KA
@@ -34,47 +24,13 @@ using Test
 
 # Allow testing on actual GPU arrays if the right environment variable is passed (and the
 # right package is installed).
-const GPU_BACKEND = get(ENV, "JULIA_GPU_BACKEND", "PseudoGPU")
+const GPU_BACKEND = get(ENV, "JULIA_GPU_BACKEND", "none")
 
 # ================================================================================ #
 
-# Definition of custom "GPU" array type and custom KA backend.
-
-struct PseudoGPUArray{T, N} <: AbstractGPUArray{T, N}
-    data :: Array{T, N}  # actually on the CPU
-end
-Base.size(u::PseudoGPUArray) = size(u.data)
-Base.@propagate_inbounds Base.getindex(u::PseudoGPUArray, i...) = @inbounds u.data[i...]
-Base.@propagate_inbounds Base.setindex!(u::PseudoGPUArray, v, i...) = @inbounds u.data[i...] = v
-Base.resize!(u::PseudoGPUArray, n) = resize!(u.data, n)
-Base.pointer(u::PseudoGPUArray, i::Integer = 1) = pointer(u.data, i)
-Base.unsafe_convert(::Type{Ptr{T}}, u::PseudoGPUArray{T}) where {T} = pointer(u)
-Base.similar(u::PseudoGPUArray, ::Type{T}, dims::Dims) where {T} =
-    PseudoGPUArray(similar(u.data, T, dims))
-
-struct PseudoGPUBackend <: KA.GPU end
-KA.isgpu(::PseudoGPUBackend) = false  # needed to be considered as a CPU backend by KA
-KA.get_backend(::PseudoGPUArray) = PseudoGPUBackend()
-KA.allocate(::PseudoGPUBackend, ::Type{T}, dims::Tuple) where {T} = PseudoGPUArray(KA.allocate(KA.CPU(), T, dims))
-KA.synchronize(::PseudoGPUBackend) = nothing
-Adapt.adapt_storage(::Type{<:PseudoGPUArray}, u::Array) = PseudoGPUArray(copy(u)) # simulate host → device copy (making sure arrays are not aliased)
-Adapt.adapt_storage(::PseudoGPUBackend, u::PseudoGPUArray) = u
-Adapt.adapt_storage(::PseudoGPUBackend, u) = adapt(PseudoGPUArray, u)
-
-# Convert kernel to standard CPU kernel (relies on KA internals...)
-function (kernel::KA.Kernel{PseudoGPUBackend, GroupSize, NDRange, Fun})(args...; kws...) where {GroupSize, NDRange, Fun}
-    kernel_cpu = KA.Kernel{KA.CPU, GroupSize, NDRange, Fun}(KA.CPU(), kernel.f)
-    kernel_cpu(args...; kws...)
-end
-
-# ================================================================================ #
-
-array_type(::PseudoGPUBackend) = PseudoGPUArray
 array_type(::OpenCLBackend) = CLArray
 
-@static if GPU_BACKEND == "PseudoGPU"
-    const GPUBackend = PseudoGPUBackend
-elseif GPU_BACKEND == "CUDA"
+@static if GPU_BACKEND == "CUDA"
     using Pkg; Pkg.add("CUDA")
     using CUDA
     const GPUBackend = CUDABackend
@@ -85,10 +41,15 @@ elseif GPU_BACKEND == "AMDGPU"
     const GPUBackend = ROCBackend
     array_type(::ROCBackend) = ROCArray
 else
-    error("unknown value of JULIA_GPU_BACKEND: $GPU_BACKEND")
+    const GPUBackend = nothing
 end
 
-@info "GPU tests - using:" GPU_BACKEND GPUBackend
+if GPUBackend === nothing
+    const tested_backends = (OpenCLBackend(),)
+else
+    const tested_backends = (GPUBackend(), OpenCLBackend())
+    @info "GPU tests - using:" GPU_BACKEND GPUBackend
+end
 
 function run_plan(
         p::PlanNUFFT, xp_init::Tuple, vp_init::NTuple{Nc, AbstractVector};
@@ -239,6 +200,6 @@ function test_gpu(backend::KA.Backend)
     nothing
 end
 
-@testset "GPU implementation (using $backend backend)" for backend in (GPUBackend(), OpenCLBackend())
+@testset "GPU implementation (using $backend)" for backend in tested_backends
     test_gpu(backend)
 end
