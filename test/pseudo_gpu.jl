@@ -22,6 +22,13 @@ using OpenCL, pocl_jll
 using Random
 using Test
 
+# Print OpenCL information
+OpenCL.versioninfo()
+@show cl.platform()
+@show cl.device()
+println("Extensions:")
+show(stdout, MIME"text/plain"(), cl.device().extensions)
+
 # Allow testing on actual GPU arrays if the right environment variable is passed (and the
 # right package is installed).
 const GPU_BACKEND = get(ENV, "JULIA_GPU_BACKEND", "none")
