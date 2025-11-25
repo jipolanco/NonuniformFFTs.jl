@@ -19,6 +19,8 @@ jobs:
       JULIA_NUM_THREADS: 2
       # https://portablecl.org/docs/html/using.html#tuning-pocl-behavior-with-env-variables
       POCL_CPU_MAX_CU_COUNT: 2  # limit number of CPU threads used by OpenCLBackend (based on POCL)
+      POCL_DEBUG: error,warning,general
+      POCL_DEVICES: cpu-minimal
       POCL_AFFINITY: 1  # not sure if this is useful
     strategy:
       fail-fast: true
