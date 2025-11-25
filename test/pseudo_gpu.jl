@@ -12,14 +12,6 @@
 # The required packages (e.g. CUDA.jl) will automatically be installed in the current
 # environment.
 
-@static if VERSION < v"1.11"
-    # The [sources] section of Project.toml was added in Julia 1.11.
-    # For previous versions, we can install dependencies manually here.
-    using Pkg: Pkg
-    Pkg.add(rev = "jip/atomic_float", url = "https://github.com/jipolanco/OpenCL.jl.git")  # OpenCL.jl
-    Pkg.add(rev = "jip/atomic_float", subdir = "lib/intrinsics", url = "https://github.com/jipolanco/OpenCL.jl.git")  # SPIRVIntrinsics.jl
-end
-
 using NonuniformFFTs
 using KernelAbstractions: KernelAbstractions as KA
 using AbstractFFTs: fftfreq
@@ -217,5 +209,8 @@ function test_gpu(backend::KA.Backend)
 end
 
 @testset "GPU implementation (using $backend)" for backend in tested_backends
+    if backend === OpenCLBackend() && VERSION < v"1.11"  # OpenCL backend doesn't work on Julia 1.10 (I haven't tested on 1.11)
+        continue
+    end
     test_gpu(backend)
 end
