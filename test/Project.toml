@@ -12,6 +12,7 @@ NonuniformFFTs = "cd96f58b-6017-4a02-bb9e-f4d81626177f"
 OpenCL = "08131aa3-fb12-5dee-8b74-c09406e224a2"
 Pkg = "44cfe95a-1eb2-52ea-b672-e2afdf69b78f"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
+SPIRVIntrinsics = "71d1d633-e7e8-4a92-83a1-de8814b09ba8"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 StructArrays = "09ab397b-f2b6-538f-b94a-2f83cf4a842a"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
@@ -21,3 +22,4 @@ pocl_jll = "627d6b7a-bbe6-5189-83e7-98cc0a5aeadd"
 [sources]
 NonuniformFFTs = {path = ".."}
 OpenCL = {rev = "jip/atomic_float", url = "https://github.com/jipolanco/OpenCL.jl.git"}
+SPIRVIntrinsics = {rev = "jip/atomic_float", subdir = "lib/intrinsics", url = "https://github.com/jipolanco/OpenCL.jl.git"}

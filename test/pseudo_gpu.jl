@@ -26,8 +26,9 @@ using Test
 OpenCL.versioninfo()
 @show cl.platform()
 @show cl.device()
-println("Extensions:")
+println(stdout, "Extensions:")
 show(stdout, MIME"text/plain"(), cl.device().extensions)
+println(stdout)
 
 # Allow testing on actual GPU arrays if the right environment variable is passed (and the
 # right package is installed).
