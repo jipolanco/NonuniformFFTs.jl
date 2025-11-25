@@ -52,11 +52,15 @@ else
     const GPUBackend = nothing
 end
 
-if GPUBackend === nothing
-    const tested_backends = (OpenCLBackend(),)
-else
-    const tested_backends = (GPUBackend(), OpenCLBackend())
+const tested_backends = Any[]
+
+if GPUBackend !== nothing
+    push!(tested_backends, GPUBackend())
     @info "GPU tests - using:" GPU_BACKEND GPUBackend
+end
+
+if VERSION ≥ v"1.12"
+    push!(tested_backends, OpenCLBackend())
 end
 
 function run_plan(
@@ -209,8 +213,5 @@ function test_gpu(backend::KA.Backend)
 end
 
 @testset "GPU implementation (using $backend)" for backend in tested_backends
-    if backend === OpenCLBackend() && VERSION < v"1.11"  # OpenCL backend doesn't work on Julia 1.10 (I haven't tested on 1.11)
-        continue
-    end
     test_gpu(backend)
 end
