@@ -13,7 +13,7 @@
 # environment.
 
 using NonuniformFFTs
-using ThreadPinning: ThreadPinning  # this might help pinning threads used by pocl_jll
+using ThreadPinning: ThreadPinning
 using KernelAbstractions: KernelAbstractions as KA
 using AbstractFFTs: fftfreq
 using AbstractNFFTs: AbstractNFFTs
@@ -23,6 +23,8 @@ using OpenCL, pocl_jll
 using Random
 using Test
 
+# This might help pinning threads used by pocl_jll. It really seems to be needed to avoid
+# crashes on github CI.
 ThreadPinning.pinthreads(:cores)
 
 # Print OpenCL information
