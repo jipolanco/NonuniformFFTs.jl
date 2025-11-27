@@ -19,12 +19,12 @@ end
 @info "Running tests on $(Threads.nthreads()) threads"
 
 @testset "NonuniformFFTs.jl" begin
+    @includetest "pseudo_gpu.jl"
     @includetest "errors.jl"
     @includetest "approx_window_functions.jl"
     @includetest "accuracy.jl"
     @includetest "multidimensional.jl"
     @includetest "callbacks.jl"
-    @includetest "pseudo_gpu.jl"
     @includetest "abstractNFFTs.jl"
     @includetest "uniform_points.jl"
     @includetest "near_2pi.jl"

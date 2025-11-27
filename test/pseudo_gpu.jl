@@ -1,87 +1,72 @@
-# Test GPU code using CPU arrays. By default everything is run on the CPU.
-#
-# We define a minimal custom array type, so that it runs the kernels the GPU would run
-# instead of using the alternative CPU branches.
-# We also tried to use JLArrays instead, but we need scalar indexing which is disallowed by
-# JLArray (since it's supposed to mimic GPU arrays). Even with allowscalar(true), kernels
-# seem to fail for other reasons.
+# Test GPU code using CPU arrays. By default everything is run on the CPU using OpenCL.jl.
+
+# We test with OpenCL on CPU, but this requires a modified version of the OpenCL.jl
+# sources to enable support for float atomics (see Project.toml). Also, note that the
+# LocalPreferences.toml file sets default_memory_backend = "svm" (unified memory by
+# default), which is needed for FFTs to work (using FFTW).
 #
 # To test an actual GPU backend, set the environment variable JULIA_GPU_BACKEND before
 # launching this script. Possible values are:
-#  - PseudoGPU (default)
 #  - CUDA
 #  - AMDGPU
 # The required packages (e.g. CUDA.jl) will automatically be installed in the current
 # environment.
 
-
-# TODO:
-# - use new JLBackend in the latest GPUArrays
-
 using NonuniformFFTs
+using ThreadPinning: ThreadPinning
 using KernelAbstractions: KernelAbstractions as KA
 using AbstractFFTs: fftfreq
 using AbstractNFFTs: AbstractNFFTs
 using Adapt: Adapt, adapt
 using GPUArraysCore: AbstractGPUArray
+using OpenCL, pocl_jll
 using Random
 using Test
 
+# This might help pinning threads used by pocl_jll. It really seems to be needed to avoid
+# crashes on github CI.
+ThreadPinning.pinthreads(:cores)
+
+# Print OpenCL information
+OpenCL.versioninfo()
+@show cl.platform()
+@show cl.device()
+println(stdout, "Extensions:")
+show(stdout, MIME"text/plain"(), cl.device().extensions)
+println(stdout)
+
 # Allow testing on actual GPU arrays if the right environment variable is passed (and the
 # right package is installed).
-const GPU_BACKEND = get(ENV, "JULIA_GPU_BACKEND", "PseudoGPU")
+const GPU_BACKEND = get(ENV, "JULIA_GPU_BACKEND", "none")
 
 # ================================================================================ #
 
-# Definition of custom "GPU" array type and custom KA backend.
+array_type(::OpenCLBackend) = CLArray
 
-struct PseudoGPUArray{T, N} <: AbstractGPUArray{T, N}
-    data :: Array{T, N}  # actually on the CPU
-end
-Base.size(u::PseudoGPUArray) = size(u.data)
-Base.@propagate_inbounds Base.getindex(u::PseudoGPUArray, i...) = @inbounds u.data[i...]
-Base.@propagate_inbounds Base.setindex!(u::PseudoGPUArray, v, i...) = @inbounds u.data[i...] = v
-Base.resize!(u::PseudoGPUArray, n) = resize!(u.data, n)
-Base.pointer(u::PseudoGPUArray, i::Integer = 1) = pointer(u.data, i)
-Base.unsafe_convert(::Type{Ptr{T}}, u::PseudoGPUArray{T}) where {T} = pointer(u)
-Base.similar(u::PseudoGPUArray, ::Type{T}, dims::Dims) where {T} =
-    PseudoGPUArray(similar(u.data, T, dims))
-
-struct PseudoGPU <: KA.GPU end
-KA.isgpu(::PseudoGPU) = false  # needed to be considered as a CPU backend by KA
-KA.get_backend(::PseudoGPUArray) = PseudoGPU()
-KA.allocate(::PseudoGPU, ::Type{T}, dims::Tuple) where {T} = PseudoGPUArray(KA.allocate(KA.CPU(), T, dims))
-KA.synchronize(::PseudoGPU) = nothing
-Adapt.adapt_storage(::Type{<:PseudoGPUArray}, u::Array) = PseudoGPUArray(copy(u)) # simulate host → device copy (making sure arrays are not aliased)
-Adapt.adapt_storage(::PseudoGPU, u::PseudoGPUArray) = u
-Adapt.adapt_storage(::PseudoGPU, u) = adapt(PseudoGPUArray, u)
-
-# Convert kernel to standard CPU kernel (relies on KA internals...)
-function (kernel::KA.Kernel{PseudoGPU, GroupSize, NDRange, Fun})(args...; kws...) where {GroupSize, NDRange, Fun}
-    kernel_cpu = KA.Kernel{KA.CPU, GroupSize, NDRange, Fun}(KA.CPU(), kernel.f)
-    kernel_cpu(args...; kws...)
-end
-
-# ================================================================================ #
-
-@static if GPU_BACKEND == "PseudoGPU"
-    const GPUBackend = PseudoGPU
-    const GPUArrayType = PseudoGPUArray
-elseif GPU_BACKEND == "CUDA"
+@static if GPU_BACKEND == "CUDA"
     using Pkg; Pkg.add("CUDA")
     using CUDA
     const GPUBackend = CUDABackend
-    const GPUArrayType = CuArray
+    array_type(::CUDABackend) = CuArray
 elseif GPU_BACKEND == "AMDGPU"
     using Pkg; Pkg.add("AMDGPU")
     using AMDGPU
     const GPUBackend = ROCBackend
-    const GPUArrayType = ROCArray
+    array_type(::ROCBackend) = ROCArray
 else
-    error("unknown value of JULIA_GPU_BACKEND: $GPU_BACKEND")
+    const GPUBackend = nothing
 end
 
-@info "GPU tests - using:" GPU_BACKEND GPUBackend GPUArrayType
+const tested_backends = Any[]
+
+if GPUBackend !== nothing
+    push!(tested_backends, GPUBackend())
+    @info "GPU tests - using:" GPU_BACKEND GPUBackend
+end
+
+if VERSION ≥ v"1.12"
+    push!(tested_backends, OpenCLBackend())
+end
 
 function run_plan(
         p::PlanNUFFT, xp_init::Tuple, vp_init::NTuple{Nc, AbstractVector};
@@ -115,6 +100,7 @@ end
 
 function compare_with_cpu(
         ::Type{T}, dims;
+        backend = GPUBackend(),
         Np = prod(dims), ntransforms::Val{Nc} = Val(1),
         callbacks_type1 = NUFFTCallbacks(),
         callbacks_type2 = NUFFTCallbacks(),
@@ -127,17 +113,25 @@ function compare_with_cpu(
     xp_init = ntuple(_ -> [rand(rng, Tr) * Tr(2π) for _ ∈ 1:Np], D)  # non-uniform points in [0, 2π]ᵈ
     vp_init = ntuple(_ -> randn(rng, T, Np), ntransforms)
 
-    @inferred test_inference_block_dims_shmem(GPUBackend(), T, dims, HalfSupport(4))
+    @inferred test_inference_block_dims_shmem(backend, T, dims, HalfSupport(4))
 
     params = (; m = HalfSupport(4), kernel = KaiserBesselKernel(), σ = 1.5, ntransforms, kws...)
     p_cpu = @inferred PlanNUFFT(T, dims; params..., backend = CPU())
-    p_gpu = @inferred PlanNUFFT(T, dims; params..., backend = GPUBackend())
+    p_gpu = if backend isa OpenCLBackend
+        PlanNUFFT(T, dims; params..., backend = backend)  # not fully inferred (the M is not inferred in CLArray{T, N, M})
+    else
+        @inferred PlanNUFFT(T, dims; params..., backend = backend)
+    end
 
     # Test that plan_nfft interface works.
     @testset "AbstractNFFTs.plan_nfft" begin
         xmat = hcat(xp_init...)'  # matrix of dimensions (D, Np)
-        p_nfft = @inferred AbstractNFFTs.plan_nfft(GPUArrayType, xmat, dims)
-        @test p_nfft.p.backend isa GPUBackend
+        p_nfft = if backend isa OpenCLBackend
+            AbstractNFFTs.plan_nfft(array_type(backend), xmat, dims)
+        else
+            @inferred AbstractNFFTs.plan_nfft(array_type(backend), xmat, dims)
+        end
+        @test typeof(p_nfft.p.backend) === typeof(backend)
         # Test without the initial argument (type of array)
         p_nfft_cpu = @inferred AbstractNFFTs.plan_nfft(xmat, dims)
         @test p_nfft_cpu.p.backend isa CPU
@@ -146,8 +140,8 @@ function compare_with_cpu(
     r_cpu = run_plan(p_cpu, xp_init, vp_init; callbacks_type1, callbacks_type2)
     r_gpu = run_plan(
         p_gpu, xp_init, vp_init;
-        callbacks_type1 = adapt(GPUBackend(), callbacks_type1),
-        callbacks_type2 = adapt(GPUBackend(), callbacks_type2),
+        callbacks_type1 = adapt(backend, callbacks_type1),
+        callbacks_type2 = adapt(backend, callbacks_type2),
     )
 
     # The differences of the order of 1e-7 (= roughly the expected accuracy given the
@@ -179,30 +173,30 @@ struct NonuniformCallbackMultiplyByWeights{Weights <: AbstractArray} <: Function
 end
 (f::NonuniformCallbackMultiplyByWeights)(v, n) = oftype(v, @inbounds(v .* f.weights[n]))
 
-@testset "GPU implementation (using $GPU_BACKEND backend)" begin
+function test_gpu(backend::KA.Backend)
     dims = (35, 64, 40)
     @testset "T = $T" for T ∈ (Float32, ComplexF32)
-        compare_with_cpu(T, dims)
+        compare_with_cpu(T, dims; backend)
     end
     @testset "sort_points = $sort_points" for sort_points ∈ (False(), True())
-        compare_with_cpu(Float64, dims; sort_points)
+        compare_with_cpu(Float64, dims; backend, sort_points)
     end
     @testset "No blocking" begin  # spatial sorting disabled
-        compare_with_cpu(ComplexF64, dims; block_size = nothing)
+        compare_with_cpu(ComplexF64, dims; backend, block_size = nothing)
     end
     @testset "gpu_method = :shared_memory" begin
-        @testset "Float32" compare_with_cpu(Float32, dims; gpu_method = :shared_memory)
-        @testset "ComplexF32" compare_with_cpu(ComplexF32, dims; gpu_method = :shared_memory)
+        @testset "Float32" compare_with_cpu(Float32, dims; backend, gpu_method = :shared_memory)
+        @testset "ComplexF32" compare_with_cpu(ComplexF32, dims; backend, gpu_method = :shared_memory)
     end
     @testset "Multiple transforms" begin
         ntransforms = Val(2)
-        @testset "Global memory" compare_with_cpu(Float32, dims; ntransforms, gpu_method = :global_memory)
-        @testset "Shared memory" compare_with_cpu(Float32, dims; ntransforms, gpu_method = :shared_memory)
+        @testset "Global memory" compare_with_cpu(Float32, dims; backend, ntransforms, gpu_method = :global_memory)
+        @testset "Shared memory" compare_with_cpu(Float32, dims; backend, ntransforms, gpu_method = :shared_memory)
     end
     @testset "Callbacks" begin
         Np = prod(dims) ÷ 2
         ks = map(N -> fftfreq(N, N), dims)
-        weights = rand(Xoshiro(42), Np)  # note: this needs to be moved to the GPU for GPU transforms (we use A# dapt for this)
+        weights = rand(Xoshiro(42), Np)  # note: this needs to be moved to the GPU for GPU transforms (we use Adapt for this)
         nonuniform = NonuniformCallbackMultiplyByWeights(weights)
         uniform = let ks = ks
             @inline function (w, idx)
@@ -216,8 +210,13 @@ end
             nonuniform,
             uniform,
         )
-        @testset "Global memory" compare_with_cpu(ComplexF32, dims; Np, callbacks_type1 = callbacks, callbacks_type2 = callbacks, gpu_method = :global_memory)
-        @testset "Shared memory" compare_with_cpu(ComplexF32, dims; Np, callbacks_type1 = callbacks, callbacks_type2 = callbacks, gpu_method = :shared_memory)
-        @testset "Shared memory (ntransforms = 2)" compare_with_cpu(ComplexF32, dims; Np, ntransforms = Val(2), callbacks_type1 = callbacks, callbacks_type2 = callbacks, gpu_method = :shared_memory)
+        @testset "Global memory" compare_with_cpu(ComplexF32, dims; backend, Np, callbacks_type1 = callbacks, callbacks_type2 = callbacks, gpu_method = :global_memory)
+        @testset "Shared memory" compare_with_cpu(ComplexF32, dims; backend, Np, callbacks_type1 = callbacks, callbacks_type2 = callbacks, gpu_method = :shared_memory)
+        @testset "Shared memory (ntransforms = 2)" compare_with_cpu(ComplexF32, dims; backend, Np, ntransforms = Val(2), callbacks_type1 = callbacks, callbacks_type2 = callbacks, gpu_method = :shared_memory)
     end
+    nothing
+end
+
+@testset "GPU implementation (using $backend)" for backend in tested_backends
+    test_gpu(backend)
 end
