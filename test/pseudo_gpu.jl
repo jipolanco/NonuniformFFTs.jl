@@ -13,6 +13,7 @@
 # environment.
 
 using NonuniformFFTs
+using ThreadPinning: ThreadPinning  # this might help pinning threads used by pocl_jll
 using KernelAbstractions: KernelAbstractions as KA
 using AbstractFFTs: fftfreq
 using AbstractNFFTs: AbstractNFFTs
@@ -21,6 +22,8 @@ using GPUArraysCore: AbstractGPUArray
 using OpenCL, pocl_jll
 using Random
 using Test
+
+ThreadPinning.pinthreads(:cores)
 
 # Print OpenCL information
 OpenCL.versioninfo()
