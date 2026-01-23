@@ -1,0 +1,68 @@
+# https://github.com/marketplace/actions/continuous-benchmark
+# Example:
+# - https://github.com/benchmark-action/github-action-benchmark/blob/master/.github/workflows/julia.yml
+# - https://github.com/benchmark-action/github-action-benchmark/blob/master/examples/julia/fib.jl
+name: Continuous benchmark
+
+on:
+  push:
+    branches:
+      - master
+
+permissions:
+  contents: write
+  deployments: write
+
+jobs:
+  benchmark:
+    name: Run benchmark
+    runs-on: ${{ matrix.os }}
+    env:
+      JULIA_NUM_THREADS: 4
+    strategy:
+      fail-fast: false
+      matrix:
+        julia-version:
+          - '1.12'
+        os:
+          - ubuntu-latest
+        arch:
+          - x64
+    steps:
+      - uses: actions/checkout@v6
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: ${{ matrix.julia-version }}
+          arch: ${{ matrix.arch }}
+      - uses: julia-actions/cache@v2
+      - uses: julia-actions/julia-buildpkg@v1
+      - name: Run benchmark
+        run: |
+          cd benchmark
+          julia --project --color=yes -e '
+            using Pkg
+            Pkg.instantiate()
+            include("benchmarks.jl")
+            @info "Tuning benchmark suite"
+            tune!(SUITE)
+            @info "Running benchmarks"
+            results = run(SUITE; verbose = true)
+            @info "Saving results"
+            BenchmarkTools.save("output.json", median(results))
+          '
+
+      - name: Store benchmark result
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          name: Julia benchmark result
+          tool: 'julia'
+          output-file-path: benchmark/output.json
+          benchmark-data-dir-path: "bench"
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: true
+          # Show alert with commit comment on detecting possible performance regression
+          alert-threshold: '200%'
+          comment-on-alert: true
+          fail-on-alert: false
+          alert-comment-cc-users: '@jipolanco'
+

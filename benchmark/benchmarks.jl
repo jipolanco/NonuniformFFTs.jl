@@ -8,6 +8,7 @@ using BenchmarkTools
 
 using ThreadPinning
 pinthreads(:cores)
+threadinfo()
 
 # Create benchmark suite for AirspeedVelocity.jl (benchmarks on github CI)
 const SUITE = BenchmarkGroup()
