@@ -1,6 +1,13 @@
 [deps]
+Adapt = "79e6a3ab-5dfb-504d-930d-738a2a938a0e"
 BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
 FFTW = "7a1cc6ca-52ef-59f5-83cd-3a7055c09341"
+KernelAbstractions = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
 NonuniformFFTs = "cd96f58b-6017-4a02-bb9e-f4d81626177f"
+OpenCL = "08131aa3-fb12-5dee-8b74-c09406e224a2"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 ThreadPinning = "811555cd-349b-4f26-b7bc-1f208b848042"
+pocl_jll = "627d6b7a-bbe6-5189-83e7-98cc0a5aeadd"
+
+[sources]
+OpenCL = {rev = "jip/atomic_float", url = "https://github.com/jipolanco/OpenCL.jl.git"}
