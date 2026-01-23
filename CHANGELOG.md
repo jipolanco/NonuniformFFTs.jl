@@ -5,6 +5,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.9.1] - 2026-01-23
+
+### Changed
+
+- Tune parameters of `KaiserBesselKernel` and `BackwardsKaiserBesselKernel` to
+  improve NUFFT accuracy. This leads to a very slight improvement, more
+  noticeable for KB (which was a bit less accurate than BKB).
+
 ## [v0.9.0] - 2025-11-07
 
 ### Added
