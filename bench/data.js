@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1769162938013,
+  "lastUpdate": 1769164418755,
   "repoUrl": "https://github.com/jipolanco/NonuniformFFTs.jl",
   "entries": {
     "Julia benchmark result": [
@@ -142,6 +142,78 @@ window.BENCHMARK_DATA = {
           {
             "name": "CPU: Ns = (128, 128, 128), ρ = 1.0, σ = 1.5, m = HalfSupport(4)/no atomics/ComplexF64 Type 2",
             "value": 480352434,
+            "unit": "ns",
+            "extra": "gctime=0\nmemory=28992\nallocs=230\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "juan-ignacio.polanco@cnrs.fr",
+            "name": "Juan Ignacio Polanco",
+            "username": "jipolanco"
+          },
+          "committer": {
+            "email": "juan-ignacio.polanco@cnrs.fr",
+            "name": "Juan Ignacio Polanco",
+            "username": "jipolanco"
+          },
+          "distinct": true,
+          "id": "c9f40346e59ba9f7d2e3d21760944a06e7c621e1",
+          "message": "v0.9.1",
+          "timestamp": "2026-01-23T11:30:53+01:00",
+          "tree_id": "4ca410aadea70f5fbbbe8cb4e689548bd85a1f44",
+          "url": "https://github.com/jipolanco/NonuniformFFTs.jl/commit/c9f40346e59ba9f7d2e3d21760944a06e7c621e1"
+        },
+        "date": 1769164416900,
+        "tool": "julia",
+        "benches": [
+          {
+            "name": "CPU: Ns = (128, 128, 128), ρ = 1.0, σ = 1.5, m = HalfSupport(4)/atomics/ComplexF64 Type 1",
+            "value": 494026863.5,
+            "unit": "ns",
+            "extra": "gctime=0\nmemory=38160\nallocs=240\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          },
+          {
+            "name": "CPU: Ns = (128, 128, 128), ρ = 1.0, σ = 1.5, m = HalfSupport(4)/atomics/Float64 Type 2",
+            "value": 365437246,
+            "unit": "ns",
+            "extra": "gctime=0\nmemory=28992\nallocs=230\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          },
+          {
+            "name": "CPU: Ns = (128, 128, 128), ρ = 1.0, σ = 1.5, m = HalfSupport(4)/atomics/Float64 Type 1",
+            "value": 300469148,
+            "unit": "ns",
+            "extra": "gctime=0\nmemory=29568\nallocs=233\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          },
+          {
+            "name": "CPU: Ns = (128, 128, 128), ρ = 1.0, σ = 1.5, m = HalfSupport(4)/atomics/ComplexF64 Type 2",
+            "value": 468149037,
+            "unit": "ns",
+            "extra": "gctime=0\nmemory=28992\nallocs=230\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          },
+          {
+            "name": "CPU: Ns = (128, 128, 128), ρ = 1.0, σ = 1.5, m = HalfSupport(4)/no atomics/ComplexF64 Type 1",
+            "value": 421701531,
+            "unit": "ns",
+            "extra": "gctime=0\nmemory=38160\nallocs=240\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          },
+          {
+            "name": "CPU: Ns = (128, 128, 128), ρ = 1.0, σ = 1.5, m = HalfSupport(4)/no atomics/Float64 Type 2",
+            "value": 367036357.5,
+            "unit": "ns",
+            "extra": "gctime=0\nmemory=28992\nallocs=230\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          },
+          {
+            "name": "CPU: Ns = (128, 128, 128), ρ = 1.0, σ = 1.5, m = HalfSupport(4)/no atomics/Float64 Type 1",
+            "value": 268133047,
+            "unit": "ns",
+            "extra": "gctime=0\nmemory=29568\nallocs=233\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          },
+          {
+            "name": "CPU: Ns = (128, 128, 128), ρ = 1.0, σ = 1.5, m = HalfSupport(4)/no atomics/ComplexF64 Type 2",
+            "value": 467633463,
             "unit": "ns",
             "extra": "gctime=0\nmemory=28992\nallocs=230\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
           }
