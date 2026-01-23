@@ -39,10 +39,14 @@ By default, the shape parameter is chosen to be [1]
 ```
 
 where ``M`` is the kernel half-width and ``σ`` the oversampling factor.
-Moreover, ``γ = 0.980`` is an empirical "safety factor", similarly to the one used by
-FINUFFT [2], which slightly improves accuracy.
+Moreover ``γ`` is a prefactor which slightly improves accuracy.
+Following Beatty et al. (IEEE Trans. Med. Imag. 2005, eq. (5)), we set it to
 
-This default value can be overriden by explicitly passing a ``β`` value.
+```math
+γ = \sqrt{1 - \frac{0.8}{M^2 (2 - 1/σ)^2} }.
+```
+
+The default value of ``β`` can be overriden by explicitly passing a `β` value.
 
 """ *
 """
@@ -87,7 +91,7 @@ More precisely, the evaluation points will be ``x_i = x - δ + i Δx``, where th
 For the purposes of computing NUFFTs, the optimal shape parameter is
 
 ```math
-β = M π \\left( 2 - \\frac{1}{σ} \\right)
+β = γ M π \\left( 2 - \\frac{1}{σ} \\right)
 ```
 
 where ``σ ≥ 1`` is the NUFFT oversampling parameter.
@@ -145,8 +149,12 @@ function optimal_kernel(kernel::KaiserBesselKernel, h::HalfSupport{M}, Δx, σ; 
     β = if kernel.β === nothing
         # Set the optimal kernel shape parameter given the wanted support M and the oversampling
         # factor σ. See Potts & Steidl 2003, eq. (5.12).
-        γ = 0.980  # empirical "safety factor" which slightly improves accuracy, as in FINUFFT (where γ = 0.976)
-        T(M * π * (2 - 1 / σ) * γ)
+        # The γ factor slightly improves accuracy and corresponds to the choice of Beatty et
+        # al. 2005 ("Rapid gridding reconstruction with a minimal oversampling ratio"), and
+        # is also expected to be used in FINUFFT since v2.5.0.
+        a = M * (2 - 1 / σ)
+        γ = sqrt(1 - 0.8 / a^2)
+        T(π * a * γ)
     else
         T(kernel.β)
     end

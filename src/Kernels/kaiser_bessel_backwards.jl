@@ -43,10 +43,17 @@ By default, the shape parameter is chosen to be [1]
 ```
 
 where ``M`` is the kernel half-width and ``σ`` the oversampling factor.
-Moreover, ``γ = 0.995`` is an empirical "safety factor", similarly to the one used by
+Moreover, ``γ`` is an empirical "safety factor", similarly to the one used by
 FINUFFT [2], which slightly improves accuracy.
+Empirically we set it to
 
-This default value can be overriden by explicitly passing a ``β`` value.
+```math
+γ = \max\left\{0.995, \sqrt{1 - \frac{0.3}{M^2 (2 - 1/σ)^2} } \right\},
+```
+
+similarly to the choice in [`KaiserBesselKernel`](@ref).
+
+The default value of ``β`` can be overriden by explicitly passing a `β` value.
 
 """ *
 """
@@ -116,8 +123,11 @@ function optimal_kernel(kernel::BackwardsKaiserBesselKernel, h::HalfSupport{M}, 
     β = if kernel.β === nothing
         # Set the optimal kernel shape parameter given the wanted support M and the oversampling
         # factor σ. See Potts & Steidl 2003, eq. (5.12).
-        γ = 0.995  # empirical "safety factor" which slightly improves accuracy, as in FINUFFT (where γ = 0.976)
-        T(M * π * (2 - 1 / σ) * γ)
+        a = M * (2 - 1 / σ)
+        # Beatty-like expression (see KaiserBesselKernel) only seems to improve accuracy for values above 0.995 (empirical),
+        # which is roughly when M ≥ 5 for σ ∈ [1, 2].
+        γ = max(0.995, sqrt(1 - 0.3 / a^2))
+        T(π * a * γ)
     else
         T(kernel.β)
     end
