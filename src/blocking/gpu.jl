@@ -112,10 +112,7 @@ function set_points_impl!(
     end
 
     @timeit timer "(2) Cumulative sum" begin
-        # Note: the Julia docs state that this can fail if the accumulation is done in
-        # place. With CUDA, this doesn't seem to be a problem, but we could allocate a
-        # separate array if it becomes an issue.
-        cumsum!(cumulative_npoints_per_block, cumulative_npoints_per_block)
+        AK.accumulate!(+, cumulative_npoints_per_block; init = zero(eltype(cumulative_npoints_per_block)))
         maybe_synchronise(backend, synchronise)
     end
 

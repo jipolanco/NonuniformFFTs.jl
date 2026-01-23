@@ -3,9 +3,13 @@ uuid = "cd96f58b-6017-4a02-bb9e-f4d81626177f"
 authors = ["Juan Ignacio Polanco <juan-ignacio.polanco@cnrs.fr>"]
 version = "0.9.1"
 
+[workspace]
+projects = ["test", "docs", "benchmark"]
+
 [deps]
 AbstractFFTs = "621f4979-c628-5d54-868e-fcf4e3e8185c"
 AbstractNFFTs = "7f219486-4aa7-41d6-80a7-e08ef20ceed7"
+AcceleratedKernels = "6a4ca0a5-0e36-4168-a932-d9be78d558f1"
 Adapt = "79e6a3ab-5dfb-504d-930d-738a2a938a0e"
 Atomix = "a9b6321e-bd34-4604-b9c9-b65b8de01458"
 Bessels = "0e736298-9ec6-45e8-9647-e4fc86a2fe38"
@@ -33,6 +37,7 @@ NonuniformFFTsStructArraysExt = ["StructArrays"]
 AMDGPU = "1.0.5, 2"
 AbstractFFTs = "1.5.0"
 AbstractNFFTs = "0.9"
+AcceleratedKernels = "0.4.3"
 Adapt = "4.0.4"
 Atomix = "0.1.0, 1"
 Bessels = "0.2"
@@ -48,6 +53,3 @@ StaticArrays = "1.7"
 StructArrays = "0.6, 0.7"
 TimerOutputs = "0.5"
 julia = "1.10"
-
-[workspace]
-projects = ["test", "docs", "benchmark"]
