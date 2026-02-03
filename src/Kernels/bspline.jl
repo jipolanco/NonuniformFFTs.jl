@@ -17,7 +17,7 @@ The order ``n`` of the B-spline is directly related to the kernel half-width ``M
 A B-spline of order ``n`` may be defined via its Fourier transform:
 
 ```math
-ϕ̂(k) = Δx \operatorname{sinc}^n \left( \frac{k Δx}{2} \right)
+\hat{ϕ}(k) = Δx \operatorname{sinc}^n \left( \frac{k Δx}{2} \right)
 ```
 
 where ``Δx`` is the spacing of the oversampled grid and ``\operatorname{sinc}``

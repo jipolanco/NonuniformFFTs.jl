@@ -28,7 +28,7 @@ These are sometimes also called the *adjoint* and *direct* NUFFTs, respectively.
 In one dimension, the type-1 NUFFT computed by this package is defined as follows:
 
 ```math
-û(k) = ∑_{j = 1}^{M} v_j \, e^{-i k x_j}
+\hat{u}(k) = ∑_{j = 1}^{M} v_j \, e^{-i k x_j}
 \quad \text{ for } \quad
 k = -\frac{N}{2}, …, \frac{N}{2} - 1
 ```
@@ -42,7 +42,7 @@ Here ``M`` is the number of non-uniform points, and ``N`` is the number of Fouri
 Similarly, the type-2 NUFFT is defined as:
 
 ```math
-v_j = ∑_{k = -N/2}^{N/2 + 1} û(k) \, e^{+i k x_j}
+v_j = ∑_{k = -N/2}^{N/2 + 1} \hat{u}(k) \, e^{+i k x_j}
 ```
 
 for ``x_j ∈ [0, 2π)``.

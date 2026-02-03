@@ -27,7 +27,7 @@ of the first kind and ``β`` is a shape factor.
 # Fourier transform
 
 ```math
-ϕ̂(k) = 2 \frac{\sinh\left( \sqrt{β² - k²} \right)}{\sqrt{β² - k²}}
+\hat{ϕ}(k) = 2 \frac{\sinh\left( \sqrt{β² - k²} \right)}{\sqrt{β² - k²}}
 ```
 
 # Parameter selection

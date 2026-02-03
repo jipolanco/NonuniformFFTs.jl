@@ -2,6 +2,7 @@
     border: 1px solid var(--vp-c-gray-2);
     color: var(--vp-c-text-1);
     overflow: hidden;
+    font-size: 1em;  /* default is 14px (not sure where it's defined) */
 }
 
 .jldocstring.custom-block summary {

@@ -27,7 +27,7 @@ where ``β`` is a shape factor.
 # Fourier transform
 
 ```math
-ϕ̂(k) = I₀ \left( \sqrt{β² - k²} \right)
+\hat{ϕ}(k) = I₀ \left( \sqrt{β² - k²} \right)
 ```
 
 where ``I₀`` is the zeroth-order [modified Bessel

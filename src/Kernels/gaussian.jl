@@ -20,7 +20,7 @@ where ``ℓ`` is the characteristic width of the kernel.
 # Fourier transform
 
 ```math
-ϕ̂(k) = \sqrt{2πℓ²} e^{-ℓ² k² / 2}
+\hat{ϕ}(k) = \sqrt{2πℓ²} e^{-ℓ² k² / 2}
 ```
 
 # Parameter selection
