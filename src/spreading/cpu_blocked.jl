@@ -91,28 +91,6 @@ function to_real_array_cpu(u::Array{Complex{T}}) where {T <: Real}
     unsafe_wrap(Array, p, (2, size(u)...))::Array{T}
 end
 
-# Applies `f` to all blocks surrounding block I (including I itself).
-# Takes periodicity into account.
-function foreach_neighbouring_block(f::F, I::CartesianIndex, indices::CartesianIndices) where {F}
-    # checkbounds(indices, I)
-    blocks = map(_neighbouring_blocks, Tuple(I), axes(indices))
-    for js in Iterators.product(blocks...)
-        J = CartesianIndex(js)
-        # checkbounds(indices, J)
-        @inline f(J)
-    end
-    nothing
-end
-
-function _neighbouring_blocks(i::Int, ax::AbstractUnitRange)
-    # Assume that a block can only write to itself and its nearest neighbours.
-    # This requires the block size to be larger than the spreading kernel half-support M.
-    # (This is imposed by the BlockDataCPU constructor.)
-    l = i == first(ax) ? last(ax) : i - 1  # = i - 1 with periodic folding
-    r = i == last(ax) ? first(ax) : i + 1  # = i + 1 with periodic folding
-    (l, i, r)
-end
-
 function spread_from_points!(
         ::CPU,
         callback::Callback,
@@ -125,14 +103,13 @@ function spread_from_points!(
         vp_all::NTuple{C, AbstractVector};
         cpu_use_atomics::Bool = false,
     ) where {F <: Function, Callback <: Function, C, D}
-    (; block_dims, pointperm, buffers, indices, locks_per_block) = bd
+    (; block_dims, pointperm, buffers, indices,) = bd
     Ms = map(Kernels.half_support, gs)
     Nt = length(buffers)  # usually equal to the number of threads
     # nblocks = length(indices)
     Base.require_one_based_indexing(buffers)
     Base.require_one_based_indexing(indices)
-
-    block_indices = eachindex(IndexCartesian(), indices)  # (1:nblocks_x, 1:nblocks_y, ...)
+    lck = ReentrantLock()
 
     # Reinterpret output array as real-valued array if it's complex.
     # This is needed for performance if we're using atomics on complex data.
@@ -177,19 +154,9 @@ function spread_from_points!(
             if cpu_use_atomics
                 add_from_block!(us_real, block, inds_split; atomics = Val(true))
             else
-                I_block = block_indices[j]
-                try
-                    # Lock this block and neighbouring ones.
-                    # This assumes that block_dims ≥ M (see BlockDataCPU constructor).
-                    # In principle, if we block them from "left to right", there's no chance
-                    # for a deadlock.
-                    foreach_neighbouring_block(J -> lock(locks_per_block[J]), I_block, block_indices)
+                # This is executed by only one thread at a time (might be slower for many threads)
+                lock(lck) do
                     add_from_block!(us_all, block, inds_split; atomics = Val(false))
-                catch e
-                    rethrow(e)
-                finally
-                    # Unlock blocks.
-                    foreach_neighbouring_block(J -> unlock(locks_per_block[J]), I_block, block_indices)
                 end
             end
         end
