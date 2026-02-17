@@ -10,6 +10,10 @@ jobs:
     runs-on: ubuntu-latest
     env:
       JULIA_NUM_THREADS: 4
+      # https://portablecl.org/docs/html/using.html#tuning-pocl-behavior-with-env-variables
+      POCL_CPU_MAX_CU_COUNT: 4  # limit number of CPU threads used by OpenCLBackend (based on POCL)
+      POCL_AFFINITY: 1  # not sure if this is useful
+      POCL_WORK_GROUP_METHOD: cbs  # might help avoid crashes (https://github.com/pocl/pocl/issues/1971#issuecomment-3062532073)
     steps:
       - uses: MilesCranmer/AirspeedVelocity.jl@action-v1
         with:

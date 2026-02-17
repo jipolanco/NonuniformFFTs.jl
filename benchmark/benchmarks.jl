@@ -1,6 +1,13 @@
 # Define BenchmarkTools suite for CI
 # https://discourse.julialang.org/t/easy-github-benchmarking-with-new-airspeedvelocity-jl/129327
 
+# OpenCL: use unified memory by default, so that arrays can be accessed from the CPU
+# (required for FFTW to work on CLArray).
+# We also set this in LocalPreferences.toml, but that file is ignored by AirspeedVelocity
+# (used to benchmark pull requests).
+using Preferences
+Preferences.set_preferences!("OpenCL", "default_memory_backend" => "svm")
+
 using NonuniformFFTs
 using FFTW: FFTW
 using Random: Xoshiro
