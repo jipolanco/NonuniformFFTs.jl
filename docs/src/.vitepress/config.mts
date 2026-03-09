@@ -1,6 +1,7 @@
 import { defineConfig } from 'vitepress'
 import { tabsMarkdownPlugin } from 'vitepress-plugin-tabs'
 import { mathjaxPlugin } from './mathjax-plugin'
+import { juliaReplTransformer } from './julia-repl-transformer'
 import footnote from "markdown-it-footnote";
 import path from 'path'
 
@@ -44,6 +45,7 @@ export default defineConfig({
   ],
   
   markdown: {
+    codeTransformers: [juliaReplTransformer()],
     config(md) {
       md.use(tabsMarkdownPlugin);
       md.use(footnote);
@@ -92,6 +94,7 @@ export default defineConfig({
     },
     nav,
     sidebar: 'REPLACE_ME_DOCUMENTER_VITEPRESS',
+    sidebarDrawer: 'REPLACE_ME_DOCUMENTER_VITEPRESS_SIDEBAR_DRAWER',
     editLink: 'REPLACE_ME_DOCUMENTER_VITEPRESS',
     socialLinks: [
       { icon: 'github', link: 'REPLACE_ME_DOCUMENTER_VITEPRESS' }
