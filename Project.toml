@@ -25,12 +25,13 @@ TimerOutputs = "a759f4b9-e2f1-59dc-863e-4aeb61b1ea8f"
 
 [weakdeps]
 AMDGPU = "21141c5a-9bdb-4563-92ae-f87d6854732e"
-CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
+CUDACore = "bd0ed864-bdfe-4181-a5ed-ce625a5fdea2"
 StructArrays = "09ab397b-f2b6-538f-b94a-2f83cf4a842a"
+cuFFT = "533571aa-0936-420e-b4be-9c66f5f626ca"
 
 [extensions]
 NonuniformFFTsAMDGPUExt = ["AMDGPU"]
-NonuniformFFTsCUDAExt = ["CUDA"]
+NonuniformFFTsCUDAExt = ["CUDACore", "cuFFT"]
 NonuniformFFTsStructArraysExt = ["StructArrays"]
 
 [compat]
@@ -41,7 +42,7 @@ AcceleratedKernels = "0.4.3"
 Adapt = "4.0.4"
 Atomix = "0.1.0, 1"
 Bessels = "0.2"
-CUDA = "5.5, 6"
+CUDACore = "6"
 FFTW = "1.7"
 GPUArraysCore = "0.1.6, 0.2"
 KernelAbstractions = "0.9.34"
@@ -52,4 +53,5 @@ Static = "0.8, 1"
 StaticArrays = "1.7"
 StructArrays = "0.6, 0.7"
 TimerOutputs = "0.5"
+cuFFT = "6"
 julia = "1.10"

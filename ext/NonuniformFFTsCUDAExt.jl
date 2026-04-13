@@ -2,9 +2,8 @@ module NonuniformFFTsCUDAExt
 
 using NonuniformFFTs
 using NonuniformFFTs.Kernels: Kernels
-using CUDA
-using CUDA.CUFFT: CUFFT
-using CUDA: @device_override
+using CUDACore: CUDACore, CUDABackend, DenseCuArray, device, @device_override
+using cuFFT: cuFFT
 
 # This is currently not wrapped in CUDA.jl, probably because besseli0 is not defined by
 # SpecialFunctions.jl either (the more general besseli is defined though).
@@ -28,7 +27,7 @@ NonuniformFFTs.default_kernel_evalmode(::CUDABackend) = Direct()
 # the CUDA API.
 function NonuniformFFTs.available_static_shared_memory(::CUDABackend)
     expected = Int32(48) << 10  # 48 KiB
-    actual = CUDA.attribute(device(), CUDA.DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK)  # generally returns 48KiB
+    actual = CUDACore.attribute(device(), CUDACore.DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK)  # generally returns 48KiB
     expected == actual || @warn(lazy"CUDA device reports non-standard shared memory size: $actual bytes")
     expected
 end
@@ -55,8 +54,8 @@ function NonuniformFFTs._fft_c2r!(
         y::DenseCuArray{T}, p, x::DenseCuArray{Complex{T}},
     ) where {T}
     # Perform plan (this may modify not only y, but also the input x)
-    CUFFT.assert_applicable(p, x, y)
-    CUFFT.unsafe_execute_trailing!(p, x, y)
+    cuFFT.assert_applicable(p, x, y)
+    cuFFT.unsafe_execute_trailing!(p, x, y)
     y
 end
 
