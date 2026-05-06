@@ -6,7 +6,7 @@ using StaticArrays: MVector
         @Const(gs::NTuple{D}),
         @Const(evalmode::EvaluationMode),
         @Const(points::NTuple{D}),
-        @Const(us::NTuple{C}),
+        us::NTuple{C},  # should be Const, but the compiler doesn't like that when C ≥ 32
         @Const(pointperm),
         @Const(prefactor::Real),    # = volume of a grid cell = prod(Δxs)
         transform_fold::F,
@@ -30,7 +30,7 @@ using StaticArrays: MVector
     v⃗ = interpolate_from_arrays_gpu(us, indvals, Ns, prefactor)
     v⃗_new = @inline callback(v⃗, j)
 
-    for n ∈ eachindex(vp, v⃗_new)
+    for n in 1:C
         @inbounds vp[n][j] = v⃗_new[n]
     end
 
@@ -213,7 +213,7 @@ end
         @Const(gs::NTuple{D}),
         @Const(evalmode::EvaluationMode),
         @Const(points::NTuple{D}),
-        @Const(us::NTuple{C, AbstractArray{Z}}),
+        us::NTuple{C, AbstractArray{Z}},  # should be Const, but the compiler doesn't like that when C ≥ 32
         @Const(pointperm),
         @Const(cumulative_npoints_per_block::AbstractVector),
         @Const(prefactor::Real),    # = volume of a grid cell = prod(Δxs)
@@ -314,9 +314,11 @@ end
             else
                 @inbounds pointperm[i]
             end
-            v⃗ = map(vs -> @inbounds(vs[j]), vp)
+            v⃗ = ntuple(Val(C)) do c
+                @inbounds vp[c][j]
+            end
             v⃗_new = @inline callback(v⃗, j)
-            for c in eachindex(vp, v⃗_new)
+            for c in 1:C
                 @inbounds vp[c][j] = v⃗_new[c]
             end
         end

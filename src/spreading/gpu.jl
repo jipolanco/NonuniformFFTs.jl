@@ -4,7 +4,7 @@
         @Const(gs::NTuple{D}),
         @Const(evalmode::EvaluationMode),
         @Const(points::NTuple{D}),
-        @Const(vp::NTuple{C}),
+        vp::NTuple{C},  # should be Const, but the compiler doesn't like that when C ≥ 32
         @Const(pointperm),
         transform_fold::F,
         callback::Callback,
@@ -28,7 +28,9 @@
 
     indvals = get_inds_vals_gpu(transform_fold, gs, evalmode, points, Ns, j)
 
-    v⃗ = map(v -> @inbounds(v[j]), vp)
+    v⃗ = ntuple(Val(C)) do c
+        @inbounds vp[c][j]
+    end
     v⃗_new = @inline callback(v⃗, j)
     spread_onto_arrays_gpu!(us, indvals, v⃗_new, Ns)
 
@@ -237,7 +239,7 @@ end
         @Const(gs::NTuple{D}),
         @Const(evalmode::EvaluationMode),
         @Const(points::NTuple{D}),
-        @Const(vp::NTuple{C, AbstractVector{Z}}),
+        vp::NTuple{C, AbstractVector{Z}},  # should be Const, but the compiler doesn't like that when C ≥ 32
         @Const(pointperm),
         @Const(cumulative_npoints_per_block::AbstractVector),
         ::HalfSupport{M},
@@ -330,10 +332,11 @@ end
                     # relevant for multiple simultaneous transforms (C = ntransforms > 1).
                     # This is needed, for instance, if we wanted to take a vector product
                     # requiring the whole vp[:][j].
-                    let v⃗ = map(v -> @inbounds(v[j]), vp)
-                        v⃗_new = @inline callback(v⃗, j)
-                        vp_sm[p] = v⃗_new[c]  # only keep component `c` of the output value
+                    v⃗ = ntuple(Val(C)) do c′
+                        @inbounds vp[c′][j]
                     end
+                    v⃗_new = @inline callback(v⃗, j)
+                    vp_sm[p] = v⃗_new[c]  # only keep component `c` of the output value
                 end
                 gdata = Kernels.evaluate_kernel(evalmode, g, x)
                 ishift = ishifts_sm[d]
