@@ -140,10 +140,10 @@ function interpolate!(
                     l  # if points have not been permuted
                 end
                 x⃗ = map(xp -> transform_fold(@inbounds(xp[point_idx])), xp)
-                vs = interpolate_blocked(gs, evalmode, block, x⃗, Tuple(I₀)) :: NTuple{C}  # non-uniform values at point x⃗
-                vs_new = @inline callback(vs, point_idx)
+                vs = interpolate_blocked(gs, evalmode, block, x⃗, Tuple(I₀))::NTuple{C}  # non-uniform values at point x⃗
+                vs_new = @inline callback(vs, point_idx)::NTuple{C}
                 for c in 1:C
-                    @inbounds vp_all[c][l] = vs_new[l]
+                    @inbounds vp_all[c][l] = vs_new[c]
                 end
             end
         end
