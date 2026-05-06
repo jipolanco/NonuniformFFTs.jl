@@ -386,15 +386,17 @@ end
 
 @kernel function copy_deconvolve_to_non_oversampled_kernel!(
         callback::F,
-        ŵs_all::NTuple{C}, @Const(ûs_all::NTuple{C}), @Const(index_map), @Const(ϕ̂s), @Const(normfactor),
+        ŵs_all::NTuple{C}, ûs_all::NTuple{C}, @Const(index_map), @Const(ϕ̂s), @Const(normfactor),
     ) where {C, F}
     is = @index(Global, NTuple)                 # output index
     js = map(inbounds_getindex, index_map, is)  # input index
     ϕs_local = map(inbounds_getindex, ϕ̂s, is)   # convolution coefficients (one for each Cartesian direction)
     β = normfactor / prod(ϕs_local)
-    u⃗ = map(ûs -> β * @inbounds(ûs[js...]), ûs_all)::NTuple{C}
+    u⃗ = ntuple(Val(C)) do c
+        @inbounds β * ûs_all[c][js...]
+    end
     u⃗_new = @inline callback(u⃗, is)  # possibly modify value of u⃗
-    for n ∈ eachindex(ŵs_all, u⃗_new)
+    for n in 1:C
         @inbounds ŵs_all[n][is...] = u⃗_new[n]
     end
     nothing
@@ -450,15 +452,17 @@ end
 
 @kernel function copy_deconvolve_to_oversampled_kernel!(
         callback::F,
-        ûs_all::NTuple{C}, @Const(ŵs_all::NTuple{C}), @Const(index_map), @Const(ϕ̂s),
+        ûs_all::NTuple{C}, ŵs_all::NTuple{C}, @Const(index_map), @Const(ϕ̂s),
     ) where {C, F}
     is = @index(Global, NTuple)                 # input index (on non-oversampled grid)
     js = map(inbounds_getindex, index_map, is)  # output index (on oversampled grid)
     ϕs_local = map(inbounds_getindex, ϕ̂s, is)   # convolution coefficients (one for each Cartesian direction)
     β = 1 / prod(ϕs_local)                      # deconvolution factor
-    w⃗ = map(ŵs -> β * @inbounds(ŵs[is...]), ŵs_all)::NTuple{C}
+    w⃗ = ntuple(Val(C)) do c
+        @inbounds β * ŵs_all[c][is...]
+    end
     w⃗_new = @inline callback(w⃗, is)  # possibly modify value of w⃗
-    for n ∈ eachindex(w⃗_new, ûs_all)
+    for n in 1:C
         @inbounds ûs_all[n][js...] = w⃗_new[n]
     end
     nothing
