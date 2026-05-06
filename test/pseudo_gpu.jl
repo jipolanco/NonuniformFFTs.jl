@@ -12,6 +12,10 @@
 # The required packages (e.g. CUDA.jl) will automatically be installed in the current
 # environment.
 
+ENV["POCL_CPU_MAX_CU_COUNT"] = Threads.nthreads()
+ENV["POCL_AFFINITY"] = 1
+ENV["POCL_WORK_GROUP_METHOD"] = "cbs"
+
 using NonuniformFFTs
 using ThreadPinning: ThreadPinning
 using KernelAbstractions: KernelAbstractions as KA
@@ -19,7 +23,6 @@ using AbstractFFTs: fftfreq
 using AbstractNFFTs: AbstractNFFTs
 using Adapt: Adapt, adapt
 using GPUArraysCore: AbstractGPUArray
-using OpenCL, pocl_jll
 using Random
 using Test
 
@@ -27,21 +30,13 @@ using Test
 # crashes on github CI.
 ThreadPinning.pinthreads(:cores)
 
-# Print OpenCL information
-OpenCL.versioninfo()
-@show cl.platform()
-@show cl.device()
-println(stdout, "Extensions:")
-show(stdout, MIME"text/plain"(), cl.device().extensions)
-println(stdout)
-
 # Allow testing on actual GPU arrays if the right environment variable is passed (and the
 # right package is installed).
 const GPU_BACKEND = get(ENV, "JULIA_GPU_BACKEND", "none")
 
 # ================================================================================ #
 
-array_type(::OpenCLBackend) = CLArray
+plan_should_be_inferred(::KA.Backend) = true
 
 @static if GPU_BACKEND == "CUDA"
     using Pkg; Pkg.add("CUDA")
@@ -64,8 +59,21 @@ if GPUBackend !== nothing
     @info "GPU tests - using:" GPU_BACKEND GPUBackend
 end
 
-if VERSION ≥ v"1.12"
+@static if VERSION ≥ v"1.12" && GPUBackend === nothing
+    using OpenCL, pocl_jll
     push!(tested_backends, OpenCLBackend())
+
+    # PlanNUFFT is not fully inferred with OpenCLBackend, so don't check for inference (the M is not inferred in CLArray{T, N, M})
+    plan_should_be_inferred(::OpenCLBackend) = false
+    array_type(::OpenCLBackend) = CLArray
+
+    # Print OpenCL information
+    OpenCL.versioninfo()
+    @show cl.platform()
+    @show cl.device()
+    println(stdout, "Extensions:")
+    show(stdout, MIME"text/plain"(), cl.device().extensions)
+    println(stdout)
 end
 
 function run_plan(
@@ -117,19 +125,19 @@ function compare_with_cpu(
 
     params = (; m = HalfSupport(4), kernel = KaiserBesselKernel(), σ = 1.5, ntransforms, kws...)
     p_cpu = @inferred PlanNUFFT(T, dims; params..., backend = CPU())
-    p_gpu = if backend isa OpenCLBackend
-        PlanNUFFT(T, dims; params..., backend = backend)  # not fully inferred (the M is not inferred in CLArray{T, N, M})
-    else
+    p_gpu = if plan_should_be_inferred(backend)
         @inferred PlanNUFFT(T, dims; params..., backend = backend)
+    else
+        PlanNUFFT(T, dims; params..., backend = backend)  # not fully inferred (the M is not inferred in CLArray{T, N, M})
     end
 
     # Test that plan_nfft interface works.
     @testset "AbstractNFFTs.plan_nfft" begin
         xmat = hcat(xp_init...)'  # matrix of dimensions (D, Np)
-        p_nfft = if backend isa OpenCLBackend
-            AbstractNFFTs.plan_nfft(array_type(backend), xmat, dims)
-        else
+        p_nfft = if plan_should_be_inferred(backend)
             @inferred AbstractNFFTs.plan_nfft(array_type(backend), xmat, dims)
+        else
+            AbstractNFFTs.plan_nfft(array_type(backend), xmat, dims)
         end
         @test typeof(p_nfft.p.backend) === typeof(backend)
         # Test without the initial argument (type of array)
