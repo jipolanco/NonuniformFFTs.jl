@@ -5,12 +5,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.9.4] - 2026-05-06
+
+### Fixed
+
+- Make things work with latest CUDA.jl (v6.1), following [changes to FFT plans](https://github.com/JuliaGPU/CUDA.jl/pull/3052).
+
+- Fix GPU transforms (on CUDA at least) when `ntransforms > 32` (issue [#84](https://github.com/jipolanco/NonuniformFFTs.jl/issues/84)).
+
 ## [v0.9.3] - 2026-05-06
 
 ### Fixed
 
 - Fix performance issues when performing a very large number of simultaneous
-  transforms (`ntransforms ≥ 32`). See [#83](https://github.com/jipolanco/NonuniformFFTs.jl/issues/83).
+  transforms (`ntransforms ≥ 32`). See issue [#83](https://github.com/jipolanco/NonuniformFFTs.jl/issues/83).
 
 ## [v0.9.2] - 2026-04-13
 
