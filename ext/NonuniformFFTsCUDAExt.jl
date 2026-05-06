@@ -55,7 +55,11 @@ function NonuniformFFTs._fft_c2r!(
     ) where {T}
     # Perform plan (this may modify not only y, but also the input x)
     cuFFT.assert_applicable(p, x, y)
-    cuFFT.unsafe_execute_trailing!(p, x, y)
+    @static if isdefined(cuFFT, :unsafe_execute_trailing!)  # CUDA.jl < 6.1
+        cuFFT.unsafe_execute_trailing!(p, x, y)
+    else  # CUDA.jl ≥ 6.1
+        cuFFT.unsafe_execute_external_batches!(p, x, y)
+    end
     y
 end
 
