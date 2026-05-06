@@ -5,6 +5,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.9.3] - 2026-05-06
+
+### Fixed
+
+- Fix performance issues when performing a very large number of simultaneous
+  transforms (`ntransforms ≥ 32`). See [#83](https://github.com/jipolanco/NonuniformFFTs.jl/issues/83).
+
+## [v0.9.2] - 2026-04-13
+
+### Changed
+
+- Require CUDA.jl v6 for CUDA extension.
+  The extension now only depends on CUDACore.jl + cuFFT.jl, instead of the full CUDA.jl.
+
 ## [v0.9.1] - 2026-01-23
 
 ### Changed
