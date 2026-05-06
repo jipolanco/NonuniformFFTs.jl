@@ -6,8 +6,10 @@ function interpolate_blocked(
         I₀::NTuple{D},
     ) where {D, C}
     # @assert C > 0
-    map(Base.require_one_based_indexing, us)
-    Ns = size(first(us))
+    for u in us
+        Base.require_one_based_indexing(u)
+    end
+    # Ns = size(first(us))
     # @assert all(u -> size(u) === Ns, us)
 
     # Evaluate 1D kernels.
@@ -138,10 +140,10 @@ function interpolate!(
                     l  # if points have not been permuted
                 end
                 x⃗ = map(xp -> transform_fold(@inbounds(xp[point_idx])), xp)
-                vs = interpolate_blocked(gs, evalmode, block, x⃗, Tuple(I₀)) :: NTuple{C}  # non-uniform values at point x⃗
-                vs_new = @inline callback(vs, point_idx)
-                for (vp, v) ∈ zip(vp_all, vs_new)
-                    @inbounds vp[l] = v
+                vs = interpolate_blocked(gs, evalmode, block, x⃗, Tuple(I₀))::NTuple{C}  # non-uniform values at point x⃗
+                vs_new = @inline callback(vs, point_idx)::NTuple{C}
+                for c in 1:C
+                    @inbounds vp_all[c][l] = vs_new[c]
                 end
             end
         end

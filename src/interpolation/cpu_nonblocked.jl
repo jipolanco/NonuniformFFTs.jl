@@ -14,10 +14,10 @@ function interpolate!(
     foreach(Base.require_one_based_indexing, vp_all)
     for i ∈ eachindex(x⃗s[1], vp_all[1])  # iterate over all points
         x⃗ = map(xp -> @inbounds(transform_fold(xp[i])), x⃗s)
-        vs = interpolate(gs, evalmode, us, x⃗) :: NTuple{C}  # non-uniform values at point x⃗
-        vs_new = @inline callback(vs, i)
-        for (vp, v) ∈ zip(vp_all, vs_new)
-            @inbounds vp[i] = v
+        vs = interpolate(gs, evalmode, us, x⃗)::NTuple{C}  # non-uniform values at point x⃗
+        vs_new = @inline callback(vs, i)::NTuple{C}
+        for c in 1:C
+            @inbounds vp_all[c][i] = vs_new[c]
         end
     end
     vp_all

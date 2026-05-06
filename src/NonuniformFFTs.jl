@@ -369,10 +369,13 @@ function copy_deconvolve_to_non_oversampled!(
                 js_front = map(inbounds_getindex, index_map_front, Tuple(I_front))
                 ϕ̂_front = map(inbounds_getindex, ϕ̂s_front, Tuple(I_front))
                 β = normfactor / (prod(ϕ̂_front) * ϕ̂_last)   # deconvolution + FFT normalisation factor
-                u⃗ = map(ûs -> β * @inbounds(ûs[js_front..., j_last]), ûs_all)::NTuple{C}
+                J = CartesianIndex(js_front..., j_last)
+                u⃗ = ntuple(Val(C)) do c
+                    @inbounds β * ûs_all[c][J]
+                end
                 u⃗_new = @inline callback(u⃗, Tuple(I))  # possibly modify value of u⃗
-                for (ŵs, û) ∈ zip(ŵs_all, u⃗_new)
-                    ŵs[I] = û
+                for c in 1:C
+                    @inbounds ŵs_all[c][I] = u⃗_new[c]
                 end
             end
         end
@@ -430,10 +433,13 @@ function copy_deconvolve_to_oversampled!(
                 js_front = map(inbounds_getindex, index_map_front, Tuple(I_front))
                 ϕ̂_front = map(inbounds_getindex, ϕ̂s_front, Tuple(I_front))
                 β = 1 / (prod(ϕ̂_front) * ϕ̂_last)  # deconvolution factor
-                w⃗ = map(ŵs -> β * @inbounds(ŵs[I]), ŵs_all)::NTuple{C}
+                w⃗ = ntuple(Val(C)) do c
+                    @inbounds β * ŵs_all[c][I]
+                end
                 w⃗_new = @inline callback(w⃗, Tuple(I))  # possibly modify value of w⃗
-                for (ŵ, ûs) ∈ zip(w⃗_new, ûs_all)
-                    ûs[js_front..., j_last] = ŵ
+                J = CartesianIndex(js_front..., j_last)
+                for c in 1:C
+                    ûs_all[c][J] = w⃗_new[c]
                 end
             end
         end

@@ -55,7 +55,9 @@ function spread_from_points!(
     foreach(Base.require_one_based_indexing, vp_all)
     for i ∈ eachindex(x⃗s[1], vp_all[1])  # iterate over all points
         x⃗ = map(xp -> @inbounds(transform_fold(xp[i])), x⃗s)
-        vs = map(vp -> @inbounds(vp[i]), vp_all)  # non-uniform values at point x⃗
+        vs = ntuple(Val(C)) do c
+            @inbounds vp_all[c][i]  # values at the non-uniform point x⃗
+        end
         vs_new = @inline callback(vs, i)
         spread_from_point!(gs, evalmode, us_all, x⃗, vs_new)
     end

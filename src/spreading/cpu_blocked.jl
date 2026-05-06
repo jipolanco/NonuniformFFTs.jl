@@ -140,7 +140,9 @@ function spread_from_points!(
                     l  # if points have not been permuted
                 end
                 x⃗ = map(xp -> transform_fold(@inbounds(xp[point_idx])), xp)
-                vs = map(vp -> @inbounds(vp[l]), vp_all)  # values at the non-uniform point x⃗
+                vs = ntuple(Val(C)) do c
+                    @inbounds vp_all[c][l]  # values at the non-uniform point x⃗
+                end
                 vs_new = @inline callback(vs, point_idx)
                 spread_from_point_blocked!(gs, evalmode, block, x⃗, vs_new, Tuple(I₀))
             end
