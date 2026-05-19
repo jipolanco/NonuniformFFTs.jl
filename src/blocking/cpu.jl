@@ -5,6 +5,7 @@ struct BlockDataCPU{
         T,  # = real(Z)
         Buffers <: AbstractVector{<:NTuple{Nc, AbstractArray{Z, N}}},
         Indices <: CartesianIndices{N},
+        LockArray <: AbstractArray{<:Base.AbstractLock, N},
         SortPoints <: StaticBool,
     } <: AbstractBlockData
     # The following fields are the same as in BlockDataGPU:
@@ -19,6 +20,7 @@ struct BlockDataCPU{
     buffers :: Buffers            # length = nthreads
     blocks_per_thread :: Vector{Int}  # maps a set of blocks i_start:i_end to a thread (length = nthreads + 1)
     indices :: Indices    # index associated to each block (length = num_blocks)
+    locks_per_block :: LockArray  # fine-grained lock over a region of uniform array (spreading only)
 
     function BlockDataCPU(
             Δxs::NTuple{N, T},
@@ -34,9 +36,12 @@ struct BlockDataCPU{
         blockidx = similar(npoints_per_block, 0)
         pointperm = similar(npoints_per_block, 0)
         blocks_per_thread = similar(blockidx, Nt + 1)
-        new{Z, N, Nc, I, T, typeof(buffers), Indices, S}(
+        # Create one lock per output block.
+        block_indices = eachindex(IndexCartesian(), indices)  # (1:nblocks_x, 1:nblocks_y, ...)
+        locks_per_block = map(_ -> ReentrantLock(), block_indices)
+        new{Z, N, Nc, I, T, typeof(buffers), Indices, typeof(locks_per_block), S}(
             Δxs, nblocks_per_dir, block_dims, npoints_per_block, blockidx, pointperm, sort,
-            buffers, blocks_per_thread, indices,
+            buffers, blocks_per_thread, indices, locks_per_block,
         )
     end
 end
@@ -47,9 +52,12 @@ function BlockDataCPU(
     ) where {Z <: Number, D, M, Nc}
     @assert Nc > 0
     # Reduce block size if the actual dataset is too small.
-    # The block size must satisfy B ≤ N - M (this is assumed in spreading/interpolation).
+    # Conversely, increase it if the block size is smaller than the half-support M (to make
+    # sure that we only spread to closest blocks).
+    # The block size must satisfy M ≤ B ≤ N - M (this is assumed in spreading/interpolation).
     block_dims = map(Ñs, block_dims_in) do N, B
-        min(B, N - M)
+        @assert N >= 2M "oversampled grid should be larger than kernel width"
+        clamp(B, M, N - M)
     end
     nblocks_per_dir = map(cld, Ñs, block_dims)  # basically equal to ceil(Ñ / block_dim)
     T = real(Z)
