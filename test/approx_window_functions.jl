@@ -8,8 +8,9 @@ using Test
 
 function test_kernel(kernel; σ = 1.5, m = HalfSupport(4), N = 256)
     backend = CPU()
-    Δx = 2π / N
-    g = Kernels.optimal_kernel(kernel, m, Δx, σ; backend)
+    T = Float64
+    Δx = 2 * T(π) / N
+    g = Kernels.optimal_kernel(kernel, T, m, N, σ; backend)
     xs = range(0.8, 2.2; length = 1000) .* Δx
 
     for x ∈ xs

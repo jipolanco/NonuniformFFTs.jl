@@ -9,8 +9,8 @@ get_sort_points(bd::AbstractBlockData) = bd.sort_points
 # "Folds" location onto unit cell [0, 2π]ᵈ.
 to_unit_cell_cpu(x⃗::Tuple) = map(to_unit_cell_cpu, x⃗)
 
-function to_unit_cell_cpu(x::Real)
-    L = oftype(x, 2π)
+function to_unit_cell_cpu(x::T) where {T <: AbstractFloat}
+    L = Kernels.domain_period(T)  # = 2π
     while x < 0
         x += L
     end
@@ -23,13 +23,13 @@ end
 # This is faster on GPUs, probably because it's guaranteed to be branchless.
 @inline to_unit_cell_gpu(x⃗::Tuple) = map(to_unit_cell_gpu, x⃗)
 
-@inline function to_unit_cell_gpu(x::Real)
-    twopi = oftype(x, 2) * π
-    r = rem(x, twopi)  # note: rem(x, y) translates to fmodf/fmod on CUDA (see https://github.com/JuliaGPU/CUDA.jl/blob/4067511b2b472be9fb30164d1ed23caa354c1fcb/src/device/intrinsics/math.jl#L370)
+@inline function to_unit_cell_gpu(x::T) where {T <: AbstractFloat}
+    L = Kernels.domain_period(T)  # = 2π
+    r = rem(x, L)  # note: rem(x, y) translates to fmodf/fmod on CUDA (see https://github.com/JuliaGPU/CUDA.jl/blob/4067511b2b472be9fb30164d1ed23caa354c1fcb/src/device/intrinsics/math.jl#L370)
     # This is adapted from Julia's mod implementation (also based on rem), but trying to
     # avoid branches (not sure it improves much).
-    r = ifelse(iszero(r), copysign(r, twopi), r)  # replaces -0.0 -> +0.0
-    ifelse(r < 0, twopi + r, r)
+    r = ifelse(iszero(r), copysign(r, L), r)  # replaces -0.0 -> +0.0
+    ifelse(r < 0, L + r, r)
 end
 
 type_length(::Type{T}) where {T} = length(T)  # usually for SVector

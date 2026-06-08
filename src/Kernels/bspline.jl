@@ -31,9 +31,12 @@ In the implementation, this kernel is evaluated using
 struct BSplineKernel <: AbstractKernel end
 
 """
-    BSplineKernelData(HalfSupport(M), Δx)
+    BSplineKernelData(T, HalfSupport(M), N::Int) where {T <: AbstractFloat}
 
-Constructs a B-spline kernel with half-support `M` for a grid of step `Δx`.
+Constructs a B-spline kernel with half-support `M` for a grid of size `N`.
+
+The domain is assumed to be periodic with period `L = 2π`. The grid spacing is then `Δx =
+L/N`.
 
 The B-spline order is simply `n = 2M`.
 Note that the polynomial degree is `n - 1`.
@@ -49,40 +52,40 @@ struct BSplineKernelData{
         FourierCoefs <: AbstractVector{T},
     } <: AbstractKernelData{BSplineKernel, M, T}
     σ  :: T
+    N  :: Int
     Δt :: T          # knot separation
     gk :: FourierCoefs  # values in uniform Fourier grid
 
-    function BSplineKernelData{M}(σ::T, Δt::T, gk) where {M, T <: AbstractFloat}
-        new{M, T, typeof(gk)}(σ, Δt, gk)
+    function BSplineKernelData{M}(σ::T, N::Int, Δt::T, gk) where {M, T <: AbstractFloat}
+        new{M, T, typeof(gk)}(σ, N, Δt, gk)
     end
 
-    function BSplineKernelData{M}(backend::KA.Backend, Δx::Real) where {M}
-        Δt = Δx
-        T = eltype(Δt)
+    function BSplineKernelData{M, T}(backend::KA.Backend, N::Int) where {M, T}
+        L = domain_period(T)
+        Δt = L / N
         σ = sqrt(T(M) / 6) * Δt
         gk = KA.allocate(backend, T, 0)
-        BSplineKernelData{M}(σ, Δt, gk)
+        BSplineKernelData{M}(σ, N, Δt, gk)
     end
 end
 
 function Adapt.adapt_structure(to, g::BSplineKernelData{M}) where {M}
     BSplineKernelData{M}(
-        g.σ, g.Δt,
+        g.σ, g.N, g.Δt,
         adapt(to, g.gk),
     )
 end
 
-gridstep(g::BSplineKernelData) = g.Δt  # assume Δx = Δt
-
-BSplineKernelData(::HalfSupport{M}, args...) where {M} = BSplineKernelData{M}(args...)
+BSplineKernelData(::Type{T}, ::HalfSupport{M}, args...) where {T <: AbstractFloat, M} =
+    BSplineKernelData{M, T}(args...)
 
 function Base.show(io::IO, ::BSplineKernelData{M}) where {M}
     print(io, "BSplineKernel() with half-support M = $M")
 end
 
 # Here we ignore the oversampling factor, this kernel is not very adjustable...
-optimal_kernel(::BSplineKernel, h::HalfSupport, Δx, σ; backend) =
-    BSplineKernelData(h, backend, Δx)
+optimal_kernel(::BSplineKernel, ::Type{T}, h::HalfSupport, N::Int, σ_oversampling; backend) where {T <: AbstractFloat} =
+    BSplineKernelData(T, h, backend, N)
 
 """
     order(::BSplineKernelData{M})
@@ -96,13 +99,13 @@ order(::BSplineKernelData{M}) where {M} = 2M
 function evaluate_kernel_func(g::BSplineKernelData{M}) where {M}
     # The integral of a single B-spline, using its standard definition, is Δt.
     # This can be shown using the partition of unity property.
-    (; Δt,) = g
+    (; N) = g
     function (x)
-        i, r = point_to_cell(x, Δt)  # assume Δx = Δt
+        i, r = point_to_cell(x, N)
         x′ = i - r  # normalised coordinate, 0 < x′ ≤ 1 (this assumes Δx = Δt)
         # @assert 0 ≤ x′ ≤ 1
         k = 2M  # B-spline order
-        values = bsplines_evaluate_all(x′, Val(k), typeof(Δt))
+        values = bsplines_evaluate_all(x′, Val(k), typeof(x))
         (; i, values,)
     end
 end

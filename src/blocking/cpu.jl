@@ -2,13 +2,12 @@
 struct BlockDataCPU{
         Z, N, Nc,
         I <: Integer,
-        T,  # = real(Z)
         Buffers <: AbstractVector{<:NTuple{Nc, AbstractArray{Z, N}}},
         Indices <: CartesianIndices{N},
         SortPoints <: StaticBool,
     } <: AbstractBlockData
     # The following fields are the same as in BlockDataGPU:
-    Δxs :: NTuple{N, T}  # grid step; the size of a block in units of length is block_dims .* Δxs.
+    Ns :: NTuple{N, Int}  # grid size
     nblocks_per_dir  :: NTuple{N, I}  # number of blocks in each direction
     block_dims  :: NTuple{N, I}        # size of each block (in number of elements)
     cumulative_npoints_per_block :: Vector{Int}    # cumulative sum of number of points in each block (length = 1 + num_blocks, first value is 0)
@@ -21,21 +20,20 @@ struct BlockDataCPU{
     indices :: Indices    # index associated to each block (length = num_blocks)
 
     function BlockDataCPU(
-            Δxs::NTuple{N, T},
+            Ns::Dims{N},
             nblocks_per_dir::NTuple{N, I},
             block_dims::NTuple{N, I},
             npoints_per_block::Vector{Int},
             buffers::AbstractVector{<:NTuple{Nc, AbstractArray{Z, N}}},
             indices::Indices,
             sort::S,
-        ) where {Z <: Number, Nc, N, I, T, Indices, S}
-        @assert T === real(Z)
+        ) where {Z <: Number, Nc, N, I, Indices, S}
         Nt = length(buffers)
         blockidx = similar(npoints_per_block, 0)
         pointperm = similar(npoints_per_block, 0)
         blocks_per_thread = similar(blockidx, Nt + 1)
-        new{Z, N, Nc, I, T, typeof(buffers), Indices, S}(
-            Δxs, nblocks_per_dir, block_dims, npoints_per_block, blockidx, pointperm, sort,
+        new{Z, N, Nc, I, typeof(buffers), Indices, S}(
+            Ns, nblocks_per_dir, block_dims, npoints_per_block, blockidx, pointperm, sort,
             buffers, blocks_per_thread, indices,
         )
     end
@@ -52,9 +50,6 @@ function BlockDataCPU(
         min(B, N - M)
     end
     nblocks_per_dir = map(cld, Ñs, block_dims)  # basically equal to ceil(Ñ / block_dim)
-    T = real(Z)
-    L = T(2) * π  # domain period
-    Δxs = map(N -> L / N, Ñs)  # grid step (oversampled grid)
     cumulative_npoints_per_block = Vector{Int}(undef, prod(nblocks_per_dir) + 1)
     dims = block_dims .+ 2M  # include padding for values outside of block (TODO: include padding in original block_dims? requires minimal block_size in each direction)
     Nt = Threads.nthreads()
@@ -67,7 +62,7 @@ function BlockDataCPU(
     end
     indices = CartesianIndices(indices_tup)
     BlockDataCPU(
-        Δxs, nblocks_per_dir, block_dims, cumulative_npoints_per_block,
+        Ñs, nblocks_per_dir, block_dims, cumulative_npoints_per_block,
         buffers, indices,
         sort_points,
     )
@@ -79,14 +74,14 @@ function assign_blocks_cpu!(
         blockidx::AbstractVector{<:Integer},
         cumulative_npoints_per_block::AbstractVector{<:Integer},
         xp::NTuple{N},
-        Δxs::NTuple{N},
+        Ns::NTuple{N, Int},
         block_dims::NTuple{N},
         nblocks_per_dir::NTuple{N},
         transform_fold::F,
     ) where {N, F}
     Threads.@threads for I ∈ eachindex(xp...)
         y⃗ = unsafe_get_point(transform_fold, xp, I)
-        n = block_index(y⃗, Δxs, block_dims, nblocks_per_dir)
+        n = block_index(y⃗, Ns, block_dims, nblocks_per_dir)
 
         # Note: here index_within_block is the value *after* incrementing (≥ 1).
         S = eltype(cumulative_npoints_per_block)
@@ -101,14 +96,14 @@ function sortperm_cpu!(
         cumulative_npoints_per_block,
         blockidx,
         xp::NTuple{N},
-        Δxs::NTuple{N},
+        Ns::NTuple{N, Int},
         block_dims,
         nblocks_per_dir,
         transform_fold::F,
     ) where {N, F}
     Threads.@threads for I ∈ eachindex(xp...)
         y⃗ = unsafe_get_point(transform_fold, xp, I)
-        n = block_index(y⃗, Δxs, block_dims, nblocks_per_dir)
+        n = block_index(y⃗, Ns, block_dims, nblocks_per_dir)
         @inbounds J = cumulative_npoints_per_block[n] + blockidx[I]
         @inbounds pointperm[J] = I
     end
@@ -123,7 +118,7 @@ function set_points_impl!(
     isempty(bd.buffers) && return set_points_impl!(backend, point_transform_fold, NullBlockData(), points_ref, timer; synchronise)
 
     (;
-        Δxs, cumulative_npoints_per_block, nblocks_per_dir, block_dims,
+        Ns, cumulative_npoints_per_block, nblocks_per_dir, block_dims,
         blockidx, pointperm, sort_points,
     ) = bd
 
@@ -142,7 +137,7 @@ function set_points_impl!(
 
     @timeit timer "(1) Assign blocks" let
         assign_blocks_cpu!(
-            blockidx, cumulative_npoints_per_block, xp, Δxs,
+            blockidx, cumulative_npoints_per_block, xp, Ns,
             block_dims, nblocks_per_dir, point_transform_fold,
         )
     end
@@ -161,7 +156,7 @@ function set_points_impl!(
 
     @timeit timer "(2) Sort" begin
         sortperm_cpu!(
-            pointperm, cumulative_npoints_per_block, blockidx, xp, Δxs,
+            pointperm, cumulative_npoints_per_block, blockidx, xp, Ns,
             block_dims, nblocks_per_dir, point_transform_fold,
         )
     end

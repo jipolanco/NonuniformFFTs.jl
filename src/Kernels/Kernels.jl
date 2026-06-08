@@ -83,7 +83,17 @@ Otherwise, this just returns an empty vector.
 """
 fourier_coefficients(g::AbstractKernelData) = g.gk
 
-gridstep(g::AbstractKernelData) = g.Δx
+# The domain period is fixed to 2π.
+@inline domain_period(::Type{T}) where {T <: AbstractFloat} = 2 * T(π)
+
+@inline gridsize(g::AbstractKernelData) = g.N  # number of grid points
+
+# TODO: precompute this and save it in `g`?
+@inline function gridstep(g::AbstractKernelData{K, M, T}) where {K, M, T}
+    L = domain_period(T)
+    N = gridsize(g)
+    L / N
+end
 
 """
     init_fourier_coefficients!(g::AbstractKernelData, ks::AbstractVector) -> AbstractVector
@@ -106,15 +116,12 @@ function init_fourier_coefficients!(g::AbstractKernelData, ks::AbstractVector)
     gk
 end
 
-# Assign a cell index to a location `x`. This assumes 0 ≤ x < 2π.
+# Assign a cell index to a location `x`. This assumes 0 ≤ x < L = 2π.
 # This also returns x / Δx to avoid recomputing it later.
-@inline function point_to_cell(x, Δx)
-    r = x / Δx
-    i = unsafe_trunc(Int, r)  # assumes r ≥ 0
-    # Increment by 1 (for one-based indexing), except to avoid possible roundoff errors when x
-    # is very close (but slightly smaller) to i * Δx.
-    i += (i * Δx ≤ x)  # this is almost always true (so we increment by 1)
-    # @assert (i - 1) * Δx ≤ x < i * Δx
+@inline function point_to_cell(x::T, N::Int) where {T <: AbstractFloat}
+    L = domain_period(T)
+    r = (x / L) * N  # this order of computation avoids issues near x = L (see test/near_2pi.jl)
+    i = unsafe_trunc(Int, r) + 1  # unsafe_trunc assumes r ≥ 0 (and the +1 is for one-based indexing)
     i, r
 end
 
@@ -122,8 +129,8 @@ end
 @inline evaluate_kernel(g::AbstractKernelData, x₀) = evaluate_kernel_func(g)(x₀)
 
 @inline function evaluate_kernel_direct(g::AbstractKernelData, x)
-    Δx = gridstep(g)
-    i, r = point_to_cell(x, Δx)
+    N = gridsize(g)
+    i, r = point_to_cell(x, N)
     values = _evaluate_kernel_direct(g, i, r)
     (; i, values,)
 end
