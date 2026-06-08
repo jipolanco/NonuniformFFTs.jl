@@ -500,9 +500,8 @@ function _PlanNUFFT(
     σ::T = maximum(Ñs ./ Ns)  # actual oversampling factor
     kernel_data = map(Ns, Ñs) do N, Ñ
         @inline
-        L = T(2π)  # assume 2π period
-        Δx̃ = L / Ñ
-        Kernels.optimal_kernel(kernel, h, Δx̃, Ñ / N; backend)
+        σ_dim::T = Ñ / N
+        Kernels.optimal_kernel(kernel, T, h, Ñ, σ_dim; backend)
     end
     # Precompute Fourier coefficients of the kernels.
     # After doing this, one can call `fourier_coefficients` to get the precomputed

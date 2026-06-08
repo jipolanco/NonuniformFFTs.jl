@@ -78,18 +78,20 @@ struct BackwardsKaiserBesselKernelData{
         M, T <: AbstractFloat, ApproxCoefs <: NTuple,
         FourierCoefs <: AbstractVector{T},
     } <: AbstractKernelData{BackwardsKaiserBesselKernel, M, T}
-    Δx :: T  # grid spacing
+    N  :: Int  # grid size
     σ  :: T  # equivalent kernel width (for comparison with Gaussian)
     w  :: T  # actual kernel half-width (= M * Δx)
     β  :: T  # KB parameter
     cs :: ApproxCoefs  # coefficients of polynomial approximation
     gk :: FourierCoefs
 
-    function BackwardsKaiserBesselKernelData{M}(Δx::T, σ::T, w::T, β::T, cs, gk) where {M, T <: AbstractFloat}
-        new{M, T, typeof(cs), typeof(gk)}(Δx, σ, w, β, cs, gk)
+    function BackwardsKaiserBesselKernelData{M}(N::Int, σ::T, w::T, β::T, cs, gk) where {M, T <: AbstractFloat}
+        new{M, T, typeof(cs), typeof(gk)}(N, σ, w, β, cs, gk)
     end
 
-    function BackwardsKaiserBesselKernelData{M}(backend::KA.Backend, Δx::T, β::T) where {M, T <: AbstractFloat}
+    function BackwardsKaiserBesselKernelData{M}(backend::KA.Backend, N::Int, β::T) where {M, T <: AbstractFloat}
+        L = domain_period(T)
+        Δx = L / N
         w = M * Δx
         σ = sqrt(backwards_kb_equivalent_variance(β)) * w
         gk = KA.allocate(backend, T, 0)
@@ -98,13 +100,13 @@ struct BackwardsKaiserBesselKernelData{
             s = sqrt(1 - x^2)
             sinh(β * s) / (s * oftype(x, π))
         end
-        BackwardsKaiserBesselKernelData{M}(Δx, σ, w, β, cs, gk)
+        BackwardsKaiserBesselKernelData{M}(N, σ, w, β, cs, gk)
     end
 end
 
 function Adapt.adapt_structure(to, g::BackwardsKaiserBesselKernelData{M}) where {M}
     BackwardsKaiserBesselKernelData{M}(
-        g.Δx, g.σ, g.w, g.β,
+        g.N, g.σ, g.w, g.β,
         adapt(to, g.cs),
         adapt(to, g.gk),
     )
@@ -118,8 +120,7 @@ function Base.show(io::IO, g::BackwardsKaiserBesselKernelData{M}) where {M}
     print(io, "BackwardsKaiserBesselKernel(β = $β) with half-support M = $M")
 end
 
-function optimal_kernel(kernel::BackwardsKaiserBesselKernel, h::HalfSupport{M}, Δx, σ; backend) where {M}
-    T = typeof(Δx)
+function optimal_kernel(kernel::BackwardsKaiserBesselKernel, ::Type{T}, h::HalfSupport{M}, N::Int, σ; backend) where {T <: AbstractFloat, M}
     β = if kernel.β === nothing
         # Set the optimal kernel shape parameter given the wanted support M and the oversampling
         # factor σ. See Potts & Steidl 2003, eq. (5.12).
@@ -131,7 +132,7 @@ function optimal_kernel(kernel::BackwardsKaiserBesselKernel, h::HalfSupport{M}, 
     else
         T(kernel.β)
     end
-    BackwardsKaiserBesselKernelData(h, backend, Δx, β)
+    BackwardsKaiserBesselKernelData(h, backend, N, β)
 end
 
 function evaluate_fourier_func(g::BackwardsKaiserBesselKernelData)
@@ -144,9 +145,9 @@ function evaluate_fourier_func(g::BackwardsKaiserBesselKernelData)
 end
 
 function evaluate_kernel_func(g::BackwardsKaiserBesselKernelData{M, T}) where {M, T}
-    (; Δx, cs,) = g
+    (; N, cs,) = g
     function (x)
-        i, r = point_to_cell(x, Δx)  # r = x / Δx
+        i, r = point_to_cell(x, N)  # r = x / Δx
         X = r - T(i - 1)  # = (x - x[i]) / Δx = x / Δx - (i - 1)
         # @assert 0 ≤ X < 1
         values = evaluate_piecewise(X, cs)

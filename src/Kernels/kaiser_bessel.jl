@@ -68,17 +68,20 @@ end
 KaiserBesselKernel() = KaiserBesselKernel(nothing)
 
 """
-    KaiserBesselKernelData(HalfSupport(M), Δx, β)
+    KaiserBesselKernelData(HalfSupport(M), N::Int, β)
 
 Create a [Kaiser–Bessel](https://en.wikipedia.org/wiki/Kaiser_window#Definition) kernel.
 
 The kernel parameters are:
 
 - `M`: the half-support of the kernel (an integer value);
-- `Δx`: the spacing of the (oversampled) grid;
+- `N`: the number of points in the (oversampled) grid;
 - `β`: the Kaiser–Bessel shape parameter.
 
-Here the half-kernel size in "physical" units is ``w = M Δx``.
+The domain is assumed to be periodic with period `L = 2π`. The grid spacing is then `Δx =
+L/N`.
+
+Above, the half-kernel size in "physical" units is ``w = M Δx``.
 This means that if we want to evaluate the kernel around a source location ``x``,
 then the evaluation points will be in ``[x - w, x + w)``.
 
@@ -103,7 +106,7 @@ struct KaiserBesselKernelData{
         M, T <: AbstractFloat, ApproxCoefs <: NTuple,
         FourierCoefs <: AbstractVector{T},
     } <: AbstractKernelData{KaiserBesselKernel, M, T}
-    Δx :: T  # grid spacing
+    N  :: Int  # grid size
     σ  :: T  # equivalent kernel width (for comparison with Gaussian)
     w  :: T  # actual kernel half-width (= M * Δx)
     β  :: T  # KB parameter
@@ -111,11 +114,13 @@ struct KaiserBesselKernelData{
     cs :: ApproxCoefs  # coefficients of polynomial approximation
     gk :: FourierCoefs
 
-    function KaiserBesselKernelData{M}(Δx::T, σ::T, w::T, β::T, β²::T, cs, gk) where {M, T <: AbstractFloat}
-        new{M, T, typeof(cs), typeof(gk)}(Δx, σ, w, β, β², cs, gk)
+    function KaiserBesselKernelData{M}(N::Int, σ::T, w::T, β::T, β²::T, cs, gk) where {M, T <: AbstractFloat}
+        new{M, T, typeof(cs), typeof(gk)}(N, σ, w, β, β², cs, gk)
     end
 
-    function KaiserBesselKernelData{M}(backend::KA.Backend, Δx::T, β::T) where {M, T <: AbstractFloat}
+    function KaiserBesselKernelData{M}(backend::KA.Backend, N::Int, β::T) where {M, T <: AbstractFloat}
+        L = domain_period(T)
+        Δx = L / N
         w = M * Δx
         σ = sqrt(kb_equivalent_variance(β)) * w
         β² = β * β
@@ -124,13 +129,13 @@ struct KaiserBesselKernelData{
         cs = solve_piecewise_polynomial_coefficients(T, Val(M), Val(Npoly)) do x
             Bessels.besseli0(β * sqrt(1 - x^2))
         end
-        KaiserBesselKernelData{M}(Δx, σ, w, β, β², cs, gk)
+        KaiserBesselKernelData{M}(N, σ, w, β, β², cs, gk)
     end
 end
 
 function Adapt.adapt_structure(to, g::KaiserBesselKernelData{M}) where {M}
     KaiserBesselKernelData{M}(
-        g.Δx, g.σ, g.w, g.β, g.β²,
+        g.N, g.σ, g.w, g.β, g.β²,
         adapt(to, g.cs),
         adapt(to, g.gk),
     )
@@ -144,8 +149,7 @@ function Base.show(io::IO, g::KaiserBesselKernelData{M}) where {M}
     print(io, "KaiserBesselKernel(β = $β) with half-support M = $M")
 end
 
-function optimal_kernel(kernel::KaiserBesselKernel, h::HalfSupport{M}, Δx, σ; backend) where {M}
-    T = typeof(Δx)
+function optimal_kernel(kernel::KaiserBesselKernel, ::Type{T}, h::HalfSupport{M}, N::Int, σ; backend) where {T <: AbstractFloat, M}
     β = if kernel.β === nothing
         # Set the optimal kernel shape parameter given the wanted support M and the oversampling
         # factor σ. See Potts & Steidl 2003, eq. (5.12).
@@ -158,7 +162,7 @@ function optimal_kernel(kernel::KaiserBesselKernel, h::HalfSupport{M}, Δx, σ; 
     else
         T(kernel.β)
     end
-    KaiserBesselKernelData(h, backend, Δx, β)
+    KaiserBesselKernelData(h, backend, N, β)
 end
 
 function evaluate_fourier_func(g::KaiserBesselKernelData)
@@ -171,9 +175,9 @@ function evaluate_fourier_func(g::KaiserBesselKernelData)
 end
 
 function evaluate_kernel_func(g::KaiserBesselKernelData{M, T}) where {M, T}
-    (; Δx, cs,) = g
+    (; N, cs,) = g
     function (x)
-        i, r = point_to_cell(x, Δx)
+        i, r = point_to_cell(x, N)
         X = r - T(i - 1)  # = (x - x[i]) / Δx = x / Δx - (i - 1)
         # @assert 0 ≤ X < 1
         values = evaluate_piecewise(X, cs)
