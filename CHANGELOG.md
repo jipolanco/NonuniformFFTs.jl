@@ -5,6 +5,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.9.5] - 2026-06-08
+
+### Fixed
+
+- Fix rare issue when a nonuniform point is very close to the domain endpoint `L` (typically `L = 2π`).
+  During gridding, the point was incorrectly associated to a cell outside of
+  the domain, leading to out-of-bounds array accesses.
+  This issue only occurred with certain uniform grid sizes (for example `N = 400` with oversampling `σ = 1.5`, i.e. `Ñ = σN = 600`).
+  Fixed in [#89](https://github.com/jipolanco/NonuniformFFTs.jl/pull/89).
+
 ## [v0.9.4] - 2026-05-06
 
 ### Fixed
