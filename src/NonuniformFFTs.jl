@@ -178,7 +178,7 @@ function exec_type1!(
 
         @timeit timer "(3) Deconvolution" begin
             R = real(T)
-            normfactor::R = prod(N -> 2π / N, size(first(us)))  # FFT normalisation factor
+            normfactor = convert(R, prod(N -> 2π / N, size(first(us))))  # FFT normalisation factor
             ϕ̂s = map(fourier_coefficients, kernels)
             copy_deconvolve_to_non_oversampled!(backend, callbacks.uniform, ûs_k, ûs, index_map, ϕ̂s, normfactor)  # truncate to original grid + normalise
             maybe_synchronise(p)
