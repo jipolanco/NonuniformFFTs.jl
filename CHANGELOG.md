@@ -5,6 +5,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.9.6] - 2026-07-21
+
+### Added
+
+- Allow TimerOutputs.jl v1.
+
 ## [v0.9.5] - 2026-06-08
 
 ### Fixed
