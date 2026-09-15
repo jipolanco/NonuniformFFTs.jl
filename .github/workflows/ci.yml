@@ -29,20 +29,20 @@ jobs:
         experimental: [false]
         julia-version:
           - '1.10'
-          - '1.12'
+          - '1.13'
         os:
           - ubuntu-latest
         julia-arch:
           - x64
         include:
-          - julia-version: '1.12'
+          - julia-version: '1.13'
             julia-arch: aarch64
             os: ubuntu-24.04-arm
             experimental: true
-          - julia-version: 'pre'
-            julia-arch: x64
-            os: ubuntu-latest
-            experimental: true
+          # - julia-version: 'pre'
+          #   julia-arch: x64
+          #   os: ubuntu-latest
+          #   experimental: true
     steps:
       - uses: actions/checkout@v7
       - uses: julia-actions/setup-julia@v3
