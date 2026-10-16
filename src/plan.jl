@@ -184,6 +184,12 @@ The created plan contains all data needed to perform NUFFTs for non-uniform data
   Note that `CPU` is defined in (and exported by) the `NonuniformFFTs` module (it used to be
   `KernelAbstractions.CPU` before KA 0.10).
 
+Note that the CPU and KA backends follow different paths (they are implemented differently,
+either using Julia threads or KA kernels). When using KernelAbstractions.jl >= 0.10, one can
+pass `backend = POCLBackend()` to run the GPU path on standard CPU arrays (this uses
+OpenCL). This is very convenient for testing GPU code, and it might or might not be faster
+than the default `backend = CPU()`.
+
 ### NUFFT parameters
 
 The following parameters control transform accuracy. The default values give a relative accuracy of
