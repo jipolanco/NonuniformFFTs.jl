@@ -1,39 +1,18 @@
 # Define BenchmarkTools suite for CI
 # https://discourse.julialang.org/t/easy-github-benchmarking-with-new-airspeedvelocity-jl/129327
 
-const BENCH_OPENCL = false
-
-# OpenCL: use unified memory by default, so that arrays can be accessed from the CPU
-# (required for FFTW to work on CLArray).
-# We also set this in LocalPreferences.toml, but that file is ignored by AirspeedVelocity
-# (used to benchmark pull requests).
-using Preferences
-
-if BENCH_OPENCL
-    Preferences.set_preferences!("OpenCL", "default_memory_backend" => "svm")
-    # ENV["POCL_CPU_MAX_CU_COUNT"] = Threads.nthreads()  # limit number of CPU threads used by OpenCLBackend (based on POCL)
-    # ENV["POCL_AFFINITY"] = 1  # not sure if this is useful
-    # ENV["POCL_WORK_GROUP_METHOD"] = "cbs"  # might help avoid crashes (https://github.com/pocl/pocl/issues/1971#issuecomment-3062532073)
-    using OpenCL, pocl_jll
-end
+const BENCH_POCL = true
 
 using NonuniformFFTs
 using FFTW: FFTW
 using Random: Xoshiro
 using BenchmarkTools
 using Adapt: adapt
-using KernelAbstractions: KernelAbstractions as KA
+using KernelAbstractions: KernelAbstractions as KA, POCLBackend
 
 using ThreadPinning
 pinthreads(:cores)
 threadinfo()
-
-if BENCH_OPENCL
-    # Print OpenCL information
-    OpenCL.versioninfo()
-    @show cl.platform()
-    @show cl.device()
-end
 
 function setup_benchmark(::Type{Z}, Ns::Dims, Np; backend = CPU(), σ, m, fftw_flags = FFTW.ESTIMATE, kws...) where {Z}
     D = length(Ns)
@@ -71,13 +50,10 @@ get_subsuite(suite, ::Type{Z}; backend, Ns, ρ, σ, m) where {Z} = suite[string(
 
 ## Define benchmarks
 
-backends = KA.Backend[
-    CPU(),
-    # OpenCLBackend(),
-]
+backends = Any[CPU()]
 
-if BENCH_OPENCL
-    push!(backend, OpenCLBackend())
+if BENCH_POCL
+    push!(backend, POCLBackend())
 end
 
 Ns = (128, 128, 128)
@@ -107,23 +83,23 @@ for backend in backends, Z in (Float64, ComplexF64)
     end
 end
 
-# Check that CPU and OpenCL backends give the same results.
-if BENCH_OPENCL
+# Check that CPU and POCL backends give the same results.
+if BENCH_POCL
     data = setup_benchmark(Float64, Ns, Np; backend = CPU(), σ, m)
     us_cpu = run_type1(data)
     vp_cpu = run_type2(data)
 
-    data = setup_benchmark(Float64, Ns, Np; backend = OpenCLBackend(), σ, m)
-    us_opencl = run_type1(data)
-    vp_opencl = run_type2(data)
+    data = setup_benchmark(Float64, Ns, Np; backend = POCLBackend(), σ, m)
+    us_pocl = run_type1(data)
+    vp_pocl = run_type2(data)
 
-    @show isapprox(us_cpu, Array(us_opencl); rtol = 1e-14)
-    @show isapprox(vp_cpu, Array(vp_opencl); rtol = 1e-14)
+    @show isapprox(us_cpu, Array(us_pocl); rtol = 1e-14)
+    @show isapprox(vp_cpu, Array(vp_pocl); rtol = 1e-14)
 end
 
 # Example interactive usage:
 # @time tune!(SUITE)
 # results_cpu = run(get_subsuite(SUITE, Float64; backend = CPU(), Ns, ρ, σ, m))
-# if BENCH_OPENCL
-#     results_opencl = run(get_subsuite(SUITE, Float64; backend = OpenCLBackend(), Ns, ρ, σ, m))
+# if BENCH_POCL
+#     results_pocl = run(get_subsuite(SUITE, Float64; backend = POCLBackend(), Ns, ρ, σ, m))
 # end
