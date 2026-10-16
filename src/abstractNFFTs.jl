@@ -187,6 +187,10 @@ Base.@constprop :aggressive function convert_window_function(w::Symbol, backend)
     end
 end
 
+# Determine backend based on type of point array
+nfft_get_backend(xp::Array) = CPU()
+nfft_get_backend(xp::AbstractArray) = KA.get_backend(xp)  # assume GPU array type
+
 # Create plan constructor which is compatible with AbstractNFFTs (takes non-uniform points
 # in a matrix as first input).
 # Only complex-to-complex plans can be constructed using this interface.
@@ -198,7 +202,7 @@ end
 Base.@constprop :aggressive function NFFTPlan(
         xp::AbstractMatrix{T}, Ns::Dims;
         fftflags = FFTW.ESTIMATE, blocking = true, sortNodes = false,
-        window = default_kernel(KA.get_backend(xp)),
+        window = default_kernel(nfft_get_backend(xp)),
         fftshift = true,  # for compatibility with NFFT.jl
         precompute = nothing,  # ignored by NonuniformFFTs.jl, for compatibility with NFFT.jl
         kws...,
@@ -211,7 +215,7 @@ Base.@constprop :aggressive function NFFTPlan(
     # accuracy for the same m.
     kws_plan, kws_accuracy = _split_accuracy_params(; kws...)
     m_actual, σ_actual, reltol_actual = AbstractNFFTs.accuracyParams(; kws_accuracy...)
-    backend = KA.get_backend(xp)  # e.g. use GPU backend if xp is a GPU array
+    backend = nfft_get_backend(xp)  # e.g. use GPU backend if xp is a GPU array
     sort_points = sortNodes ? True() : False()  # this is type-unstable (unless constant propagation happens)
     block_size = blocking ? default_block_size(Ns, backend) : nothing  # also type-unstable
     kernel = window isa AbstractKernel ? window : convert_window_function(window, backend)
