@@ -73,7 +73,7 @@ struct GaussianKernelData{
         new{M, T, typeof(gk)}(N, σ, τ, cs, gk)
     end
 
-    function GaussianKernelData{M}(backend::KA.Backend, N::Int, α::T) where {M, T <: AbstractFloat}
+    function GaussianKernelData{M}(backend, N::Int, α::T) where {M, T <: AbstractFloat}
         L = domain_period(T)
         Δx = L / N
         σ = α * Δx

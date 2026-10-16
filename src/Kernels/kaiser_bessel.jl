@@ -118,7 +118,7 @@ struct KaiserBesselKernelData{
         new{M, T, typeof(cs), typeof(gk)}(N, σ, w, β, β², cs, gk)
     end
 
-    function KaiserBesselKernelData{M}(backend::KA.Backend, N::Int, β::T) where {M, T <: AbstractFloat}
+    function KaiserBesselKernelData{M}(backend, N::Int, β::T) where {M, T <: AbstractFloat}
         L = domain_period(T)
         Δx = L / N
         w = M * Δx
