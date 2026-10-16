@@ -1,2 +1,0 @@
-[OpenCL]
-default_memory_backend = "svm"  # unified memory (can be accessed by CPU => works with FFTW)

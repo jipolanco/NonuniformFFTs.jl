@@ -89,7 +89,7 @@ struct BackwardsKaiserBesselKernelData{
         new{M, T, typeof(cs), typeof(gk)}(N, σ, w, β, cs, gk)
     end
 
-    function BackwardsKaiserBesselKernelData{M}(backend::KA.Backend, N::Int, β::T) where {M, T <: AbstractFloat}
+    function BackwardsKaiserBesselKernelData{M}(backend, N::Int, β::T) where {M, T <: AbstractFloat}
         L = domain_period(T)
         Δx = L / N
         w = M * Δx

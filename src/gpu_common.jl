@@ -1,10 +1,11 @@
 # Total amount of shared memory available (in bytes).
 # This might be overridden in package extensions for specific backends.
-available_static_shared_memory(backend::KA.Backend) = Int32(48) << 10  # 48 KiB (usual in CUDA)
+available_static_shared_memory(backend::GPU) = Int32(48) << 10  # 48 KiB (usual in CUDA)
 
 # Minimum size of a batch (in number of non-uniform points) used in the shared-memory
 # implementation of GPU spreading.
-default_gpu_batch_size(backend::KA.Backend) = 16
+default_gpu_batch_size(backend::GPU) = 16
+default_gpu_batch_size(::CPU) = 0  # this value is unused
 
 # Return ndrange parameter to be passed to KA kernels defining shared memory implementations.
 gpu_shmem_ndrange_from_groupsize(groupsize::Integer, ngroups::Tuple) =

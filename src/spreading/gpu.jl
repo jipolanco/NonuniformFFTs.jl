@@ -127,7 +127,19 @@ end
 end
 
 to_real_array(u::AbstractArray{T}) where {T <: Real} = u
-to_real_array(u::AbstractArray{T}) where {T <: Complex} = reinterpret(reshape, real(T), u)  # adds an extra first dimension with size 2
+to_real_array(u::AbstractArray{Z}) where {Z <: Complex} = reinterpret(reshape, real(Z), u)  # adds an extra first dimension with size 2
+
+# Avoid `reinterpret` is `u` is a regular CPU array to avoid getting a
+# Base.ReinterpretArray (slow, and atomics don't work).
+# This is the case if we're using the POCLBackend.
+# The unsafe_wrap is fine here since the wrapped array `u` should always outlive
+# the wrapper.
+function to_real_array(u::Array{Z}) where {Z <: Complex}
+    T = real(Z)
+    p = convert(Ptr{T}, pointer(u))
+    dims = (2, size(u)...)
+    unsafe_wrap(Array, p, dims; own = false)
+end
 
 # GPU implementation.
 # We assume all arrays are already on the GPU.
@@ -138,9 +150,9 @@ function spread_from_points!(
         bd::Union{BlockDataGPU, NullBlockData},
         gs,
         evalmode::EvaluationMode,
-        us::NTuple{C, AbstractGPUArray},
-        xp::NTuple{D, AbstractGPUVector},
-        vp_all::NTuple{C, AbstractGPUVector};
+        us::NTuple{C, AbstractArray},
+        xp::NTuple{D, AbstractVector},
+        vp_all::NTuple{C, AbstractVector};
         cpu_use_atomics = false,  # ignored
     ) where {F <: Function, Callback <: Function, C, D}
     # Note: the dimensions of arrays have already been checked via check_nufft_nonuniform_data.

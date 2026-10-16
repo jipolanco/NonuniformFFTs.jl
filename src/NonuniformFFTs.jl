@@ -3,8 +3,7 @@ module NonuniformFFTs
 using AbstractFFTs: AbstractFFTs
 using AbstractNFFTs: AbstractNFFTs, AbstractNFFTPlan
 using Adapt: Adapt, adapt
-using GPUArraysCore: AbstractGPUArray, AbstractGPUVector
-using KernelAbstractions: KernelAbstractions as KA, CPU, GPU, @kernel, @index, @Const,
+using KernelAbstractions: KernelAbstractions as KA, @kernel, @index, @Const,
     @groupsize, @localmem, @synchronize, @uniform
 using AcceleratedKernels: AcceleratedKernels as AK
 using Atomix: Atomix
@@ -44,16 +43,21 @@ export
     KaiserBesselKernel,
     BackwardsKaiserBesselKernel,
     False, True,
-    CPU,  # from KernelAbstractions
+    CPU,
     set_points!,
     exec_type1!,
     exec_type2!
 
-default_kernel(::KA.Backend) = BackwardsKaiserBesselKernel()
-default_kernel() = default_kernel(CPU())
+include("backends.jl")
+using .Backends: Backend, CPU, GPU
+
+# Default kernel type (can be overridden by specific backends like CUDA).
+default_kernel(::GPU) = BackwardsKaiserBesselKernel()  # GPU + POCLBackend
+default_kernel(::CPU) = BackwardsKaiserBesselKernel()
 
 # Default to direct kernel evaluation (can be overridden by specific backends like CUDA).
-default_kernel_evalmode(::KA.Backend) = FastApproximation()
+default_kernel_evalmode(::GPU) = FastApproximation()  # GPU + POCLBackend
+default_kernel_evalmode(::CPU) = FastApproximation()
 
 default_block_size(::Dims, ::CPU) = 4096  # in number of linear elements
 default_block_size(::Dims, ::GPU) = 1024  # except in 2D and 3D (see below)
@@ -62,9 +66,37 @@ default_block_size(::Dims, ::GPU) = 1024  # except in 2D and 3D (see below)
 default_block_size(::Dims{2}, ::GPU) = (32, 32)
 default_block_size(::Dims{3}, ::GPU) = (16, 16, 4)  # tuned on A100 with 256³ non-oversampled grid, σ = 2 and m = HalfSupport(4)
 
+# Copied from KernelAbstractions.jl v0.9.x (removed in v0.10)
+const CPU_GRAINSIZE = 1024 # Vectorization, 4x unrolling, minimal grain size
+function default_cpu_workgroupsize(ndrange)
+    # if the total kernel is small, don't launch multiple tasks
+    n = prod(ndrange)
+    if iszero(n)
+        # If the ndrange is zero return a workgroupsize of (1, 1,...)
+        return map(one, ndrange)
+    elseif n <= CPU_GRAINSIZE
+        return ndrange
+    else
+        available = Ref(CPU_GRAINSIZE)
+        return ntuple(length(ndrange)) do i
+            dim = ndrange[i]
+            remaining = available[]
+            if remaining == 0
+                return 1
+            elseif remaining <= dim
+                available[] = 0
+                return remaining
+            else
+                available[] = remaining ÷ dim
+                return dim
+            end
+        end
+    end
+end
+
 function default_workgroupsize(backend, ndrange::Dims)
     # This currently assumes 1024 available threads, which might fail in some GPUs.
-    KA.default_cpu_workgroupsize(ndrange)
+    default_cpu_workgroupsize(ndrange)
 end
 
 # Case of 1D kernels on the GPU (typically, kernels which iterate over non-uniform points).
@@ -115,10 +147,30 @@ end
 
 @kernel function fill_with_zeros_kernel!(us::NTuple)
     I = @index(Global, Linear)
-    for u ∈ us
+    for u in us
         @inbounds u[I] = zero(eltype(u))
     end
     nothing
+end
+
+function fill_with_zeros!(backend::GPU, us::NTuple)
+    ndrange = size(us[1])
+    @assert all(u -> size(u) == ndrange, us)  # all arrays have the same size
+    workgroupsize = default_workgroupsize(backend, ndrange)
+    kernel! = fill_with_zeros_kernel!(backend, workgroupsize, ndrange)
+    kernel!(us)
+    us
+end
+
+function fill_with_zeros!(::CPU, us::NTuple)
+    inds = eachindex(us[1])
+    @assert all(u -> eachindex(u) == inds, us)  # all arrays have the same indices
+    Threads.@threads for i in inds
+        for u in us
+            @inbounds u[i] = zero(eltype(u))
+        end
+    end
+    us
 end
 
 """
@@ -159,10 +211,7 @@ function exec_type1!(
         check_nufft_nonuniform_data(p, vp)
 
         @timeit timer "(0) Fill with zeros" let
-            local ndrange = size(us[1])
-            local workgroupsize = default_workgroupsize(backend, ndrange)
-            local kernel! = fill_with_zeros_kernel!(backend, workgroupsize, ndrange)
-            kernel!(us)
+            fill_with_zeros!(backend, us)
             maybe_synchronise(p)
         end
 
@@ -258,10 +307,7 @@ function exec_type2!(
         # TODO: specialise and optimise for 1D case? In that case it might actually be worth
         # it to zero-out only the oversampled region.
         @timeit timer "(0) Fill with zeros" begin
-            local ndrange = size(ûs[1])
-            local workgroupsize = default_workgroupsize(backend, ndrange)
-            local kernel! = fill_with_zeros_kernel!(backend, workgroupsize, ndrange)
-            kernel!(ûs)
+            fill_with_zeros!(backend, ûs)
             maybe_synchronise(p)
         end
 
@@ -482,7 +528,7 @@ end
 # Precompile a small subset of possible static parameter combinations (m, kernel, T, ndims,
 # ntransforms), to avoid huge precompilation times.
 @setup_workload let
-    kernels = [default_kernel()]  # only precompile for default kernel
+    kernels = [default_kernel(CPU())]  # only precompile for default kernel
     ndims_all = (1, 3)
     ms = map(HalfSupport, (4,))
     # Ts = [Float32, Float64, ComplexF32, ComplexF64]

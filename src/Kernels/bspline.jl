@@ -60,7 +60,7 @@ struct BSplineKernelData{
         new{M, T, typeof(gk)}(σ, N, Δt, gk)
     end
 
-    function BSplineKernelData{M, T}(backend::KA.Backend, N::Int) where {M, T}
+    function BSplineKernelData{M, T}(backend, N::Int) where {M, T}
         L = domain_period(T)
         Δt = L / N
         σ = sqrt(T(M) / 6) * Δt

@@ -164,6 +164,4 @@ This is something to take into account when using NonuniformFFTs.jl on AMD GPUs.
 ## Bibliography
 
 ```@bibliography
-Pages = ["benchmarks.md"]
-Canonical = false
 ```

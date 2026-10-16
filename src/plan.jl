@@ -35,7 +35,7 @@ output_field(data::ComplexNUFFTData) = data.us  # output === input
 
 # Case of real data
 function init_plan_data(
-        ::Type{T}, backend::KA.Backend, Ñs::Dims, ks::NTuple, ::Val{Nc};
+        ::Type{T}, backend::Backend, Ñs::Dims, ks::NTuple, ::Val{Nc};
         plan_kwargs,
     ) where {T <: AbstractFloat, Nc}
     @assert Nc ≥ 1
@@ -49,7 +49,7 @@ end
 
 # Case of complex data
 function init_plan_data(
-        ::Type{Complex{T}}, backend::KA.Backend, Ñs::Dims, ks::NTuple, ::Val{Nc};
+        ::Type{Complex{T}}, backend::Backend, Ñs::Dims, ks::NTuple, ::Val{Nc};
         plan_kwargs,
     ) where {T <: AbstractFloat, Nc}
     @assert Nc ≥ 1
@@ -179,8 +179,16 @@ The created plan contains all data needed to perform NUFFTs for non-uniform data
   This is useful if one wants to transform multiple scalar quantities at the same
   non-uniform points.
 
-- `backend::KernelAbstractions.Backend = CPU()`: corresponds to the device type where
+- `backend::Union{NonuniformFFTs.CPU, KernelAbstractions.Backend} = CPU()`: corresponds to the device type where
   everything will be executed. This could be e.g. `CUDABackend()` if CUDA.jl is loaded.
+  Note that `CPU` is defined in (and exported by) the `NonuniformFFTs` module (it used to be
+  `KernelAbstractions.CPU` before KA 0.10).
+
+Note that the CPU and KA backends follow different paths (they are implemented differently,
+either using Julia threads or KA kernels). When using KernelAbstractions.jl >= 0.10, one can
+pass `backend = POCLBackend()` to run the GPU path on standard CPU arrays (this uses
+OpenCL). This is really convenient for testing GPU code, but is likely slower than using the
+default `CPU()` backend.
 
 ### NUFFT parameters
 
@@ -328,7 +336,7 @@ struct PlanNUFFT{
         N,   # number of dimensions
         Nc,  # number of "components" (simultaneous transforms)
         M,   # kernel half-width
-        Backend <: KA.Backend,
+        PlanBackend <: Backend,
         T <: AbstractFloat,  # this is real(Z)
         Kernels <: NTuple{N, AbstractKernelData{<:AbstractKernel, M, T}},
         KernelEvalMode <: EvaluationMode,
@@ -340,7 +348,7 @@ struct PlanNUFFT{
         PointTransform <: Function,
     }
     kernels :: Kernels
-    backend :: Backend  # CPU, GPU, ...
+    backend :: PlanBackend  # CPU, GPU, ...
     kernel_evalmode :: KernelEvalMode
     σ       :: T       # oversampling factor (≥ 1)
     points_ref  :: PointsRef  # "pointer" to non-uniform points (real values)
@@ -450,7 +458,8 @@ end
 
 get_block_dims(::Dims{N}, bdims::NTuple{N}) where {N} = bdims
 
-maybe_synchronise(backend::KA.Backend, synchronise::Bool) = synchronise && KA.synchronize(backend)  # this doesn't do anything on the CPU
+maybe_synchronise(backend::CPU, synchronise::Bool) = nothing  # synchronisation not needed on CPU
+maybe_synchronise(backend::GPU, synchronise::Bool) = synchronise && KA.synchronize(backend)
 maybe_synchronise(p::PlanNUFFT) = maybe_synchronise(p.backend, p.synchronise)
 
 # Generate a function that will be used to transform a point and bring it to the [0, 2π) box.
@@ -471,7 +480,7 @@ function _PlanNUFFT(
         fftw_flags = FFTW.MEASURE,
         fftshift = false,
         sort_points::StaticBool = False(),
-        backend::KA.Backend = CPU(),
+        backend::Backend = CPU(),
         kernel_evalmode::EvaluationMode = default_kernel_evalmode(backend),
         block_size::Union{Integer, Dims{D}, Nothing} = default_block_size(Ns, backend),
         synchronise::Bool = false,
