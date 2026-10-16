@@ -34,7 +34,7 @@ function run_type1(data)
     (; backend, p, xp, vp, ûs_out,) = data
     set_points!(p, xp)
     exec_type1!(ûs_out, p, vp)
-    KA.synchronize(backend)
+    backend isa KA.Backend && KA.synchronize(backend)
     ûs_out
 end
 
@@ -42,7 +42,7 @@ function run_type2(data)
     (; backend, p, xp, vp_out, ûs,) = data
     set_points!(p, xp)
     exec_type2!(vp_out, p, ûs)
-    KA.synchronize(backend)
+    backend isa KA.Backend && KA.synchronize(backend)
     vp_out
 end
 
@@ -53,7 +53,7 @@ get_subsuite(suite, ::Type{Z}; backend, Ns, ρ, σ, m) where {Z} = suite[string(
 backends = Any[CPU()]
 
 if BENCH_POCL
-    push!(backend, POCLBackend())
+    push!(backends, POCLBackend())
 end
 
 Ns = (128, 128, 128)
