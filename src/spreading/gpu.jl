@@ -127,7 +127,19 @@ end
 end
 
 to_real_array(u::AbstractArray{T}) where {T <: Real} = u
-to_real_array(u::AbstractArray{T}) where {T <: Complex} = reinterpret(reshape, real(T), u)  # adds an extra first dimension with size 2
+to_real_array(u::AbstractArray{Z}) where {Z <: Complex} = reinterpret(reshape, real(Z), u)  # adds an extra first dimension with size 2
+
+# Avoid `reinterpret` is `u` is a regular CPU array to avoid getting a
+# Base.ReinterpretArray (slow, and atomics don't work).
+# This is the case if we're using the POCLBackend.
+# The unsafe_wrap is fine here since the wrapped array `u` should always outlive
+# the wrapper.
+function to_real_array(u::Array{Z}) where {Z <: Complex}
+    T = real(Z)
+    p = convert(Ptr{T}, pointer(u))
+    dims = (2, size(u)...)
+    unsafe_wrap(Array, p, dims; own = false)
+end
 
 # GPU implementation.
 # We assume all arrays are already on the GPU.
