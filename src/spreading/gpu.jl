@@ -138,9 +138,9 @@ function spread_from_points!(
         bd::Union{BlockDataGPU, NullBlockData},
         gs,
         evalmode::EvaluationMode,
-        us::NTuple{C, AbstractGPUArray},
-        xp::NTuple{D, AbstractGPUVector},
-        vp_all::NTuple{C, AbstractGPUVector};
+        us::NTuple{C, AbstractArray},
+        xp::NTuple{D, AbstractVector},
+        vp_all::NTuple{C, AbstractVector};
         cpu_use_atomics = false,  # ignored
     ) where {F <: Function, Callback <: Function, C, D}
     # Note: the dimensions of arrays have already been checked via check_nufft_nonuniform_data.

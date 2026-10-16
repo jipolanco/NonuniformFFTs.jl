@@ -3,7 +3,6 @@ module NonuniformFFTs
 using AbstractFFTs: AbstractFFTs
 using AbstractNFFTs: AbstractNFFTs, AbstractNFFTPlan
 using Adapt: Adapt, adapt
-using GPUArraysCore: AbstractGPUArray, AbstractGPUVector
 using KernelAbstractions: KernelAbstractions as KA, @kernel, @index, @Const,
     @groupsize, @localmem, @synchronize, @uniform
 using AcceleratedKernels: AcceleratedKernels as AK
@@ -159,7 +158,7 @@ function fill_with_zeros!(backend::GPU, us::NTuple)
     @assert all(u -> size(u) == ndrange, us)  # all arrays have the same size
     workgroupsize = default_workgroupsize(backend, ndrange)
     kernel! = fill_with_zeros_kernel!(backend, workgroupsize, ndrange)
-    kernel!(ûs)
+    kernel!(us)
     us
 end
 
