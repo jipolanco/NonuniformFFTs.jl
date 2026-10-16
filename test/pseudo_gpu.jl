@@ -1,10 +1,6 @@
-# Test GPU code using CPU arrays. By default everything is run on the CPU using OpenCL.jl.
+# Test GPU code. By default everything is run on the CPU using KernelAbstractions.jl
+# POCLBackend (since KA 0.10).
 
-# We test with OpenCL on CPU, but this requires a modified version of the OpenCL.jl
-# sources to enable support for float atomics (see Project.toml). Also, note that the
-# LocalPreferences.toml file sets default_memory_backend = "svm" (unified memory by
-# default), which is needed for FFTs to work (using FFTW).
-#
 # To test an actual GPU backend, set the environment variable JULIA_GPU_BACKEND before
 # launching this script. Possible values are:
 #  - CUDA
@@ -12,23 +8,22 @@
 # The required packages (e.g. CUDA.jl) will automatically be installed in the current
 # environment.
 
-ENV["POCL_CPU_MAX_CU_COUNT"] = Threads.nthreads()
-ENV["POCL_AFFINITY"] = 1
-ENV["POCL_WORK_GROUP_METHOD"] = "cbs"
+# ENV["POCL_CPU_MAX_CU_COUNT"] = Threads.nthreads()
+# ENV["POCL_AFFINITY"] = 1
+# ENV["POCL_WORK_GROUP_METHOD"] = "cbs"
 
 using NonuniformFFTs
 using ThreadPinning: ThreadPinning
-using KernelAbstractions: KernelAbstractions as KA
+using KernelAbstractions: KernelAbstractions as KA, POCLBackend
 using AbstractFFTs: fftfreq
 using AbstractNFFTs: AbstractNFFTs
 using Adapt: Adapt, adapt
-using GPUArraysCore: AbstractGPUArray
 using Random
 using Test
 
 # This might help pinning threads used by pocl_jll. It really seems to be needed to avoid
 # crashes on github CI.
-ThreadPinning.pinthreads(:cores)
+# ThreadPinning.pinthreads(:cores)
 
 # Allow testing on actual GPU arrays if the right environment variable is passed (and the
 # right package is installed).
@@ -36,7 +31,7 @@ const GPU_BACKEND = get(ENV, "JULIA_GPU_BACKEND", "none")
 
 # ================================================================================ #
 
-plan_should_be_inferred(::KA.Backend) = true
+plan_should_be_inferred(::KA.Backend) = true  # this can be removed, it was useful with OpenCL.jl
 
 @static if GPU_BACKEND == "CUDA"
     using Pkg; Pkg.add("CUDA")
@@ -49,31 +44,8 @@ elseif GPU_BACKEND == "AMDGPU"
     const GPUBackend = ROCBackend
     array_type(::ROCBackend) = ROCArray
 else
-    const GPUBackend = nothing
-end
-
-const tested_backends = Any[]
-
-if GPUBackend !== nothing
-    push!(tested_backends, GPUBackend())
-    @info "GPU tests - using:" GPU_BACKEND GPUBackend
-end
-
-@static if VERSION ≥ v"1.12" && GPUBackend === nothing
-    using OpenCL, pocl_jll
-    push!(tested_backends, OpenCLBackend())
-
-    # PlanNUFFT is not fully inferred with OpenCLBackend, so don't check for inference (the M is not inferred in CLArray{T, N, M})
-    plan_should_be_inferred(::OpenCLBackend) = false
-    array_type(::OpenCLBackend) = CLArray
-
-    # Print OpenCL information
-    OpenCL.versioninfo()
-    @show cl.platform()
-    @show cl.device()
-    println(stdout, "Extensions:")
-    show(stdout, MIME"text/plain"(), cl.device().extensions)
-    println(stdout)
+    const GPUBackend = POCLBackend
+    array_type(::POCLBackend) = Array
 end
 
 function run_plan(
@@ -132,18 +104,18 @@ function compare_with_cpu(
     end
 
     # Test that plan_nfft interface works.
-    @testset "AbstractNFFTs.plan_nfft" begin
-        xmat = hcat(xp_init...)'  # matrix of dimensions (D, Np)
-        p_nfft = if plan_should_be_inferred(backend)
-            @inferred AbstractNFFTs.plan_nfft(array_type(backend), xmat, dims)
-        else
-            AbstractNFFTs.plan_nfft(array_type(backend), xmat, dims)
-        end
-        @test typeof(p_nfft.p.backend) === typeof(backend)
-        # Test without the initial argument (type of array)
-        p_nfft_cpu = @inferred AbstractNFFTs.plan_nfft(xmat, dims)
-        @test p_nfft_cpu.p.backend isa CPU
+    xmat = hcat(xp_init...)'  # matrix of dimensions (D, Np)
+    p_nfft = if plan_should_be_inferred(backend)
+        # We explicitly pass the backend, otherwise CPU and POCLBackend may get confused
+        # (since array_type is Array in both cases)
+        @inferred AbstractNFFTs.plan_nfft(array_type(backend), xmat, dims; backend)
+    else
+        AbstractNFFTs.plan_nfft(array_type(backend), xmat, dims; backend)
     end
+    @test typeof(p_nfft.p.backend) === typeof(backend)
+    # Test without the initial argument (type of array)
+    p_nfft_cpu = @inferred AbstractNFFTs.plan_nfft(xmat, dims; backend = CPU())
+    @test p_nfft_cpu.p.backend isa CPU
 
     r_cpu = run_plan(p_cpu, xp_init, vp_init; callbacks_type1, callbacks_type2)
     r_gpu = run_plan(
@@ -225,6 +197,6 @@ function test_gpu(backend::KA.Backend)
     nothing
 end
 
-@testset "GPU implementation (using $backend)" for backend in tested_backends
-    test_gpu(backend)
+@testset "GPU implementation (using $GPUBackend)" begin
+    test_gpu(GPUBackend())
 end

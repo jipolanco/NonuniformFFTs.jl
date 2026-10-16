@@ -202,7 +202,8 @@ nfft_get_backend(xp::AbstractArray) = KA.get_backend(xp)  # assume GPU array typ
 Base.@constprop :aggressive function NFFTPlan(
         xp::AbstractMatrix{T}, Ns::Dims;
         fftflags = FFTW.ESTIMATE, blocking = true, sortNodes = false,
-        window = default_kernel(nfft_get_backend(xp)),
+        backend = nfft_get_backend(xp),  # this shouldn't be set, it's only useful when testing POCLBackend
+        window = default_kernel(backend),
         fftshift = true,  # for compatibility with NFFT.jl
         precompute = nothing,  # ignored by NonuniformFFTs.jl, for compatibility with NFFT.jl
         kws...,
@@ -210,12 +211,15 @@ Base.@constprop :aggressive function NFFTPlan(
     if !isnothing(precompute)
         @warn "Precompute flags are not supported by the NonuniformFFTs backend and will be ignored."
     end
+    if backend isa KA.Backend
+        KA.get_backend(xp) == backend ||
+            error("`backend = $backend` is incompatible with type of `xp` array ($(typeof(xp)))")
+    end
     # Note: the NFFT.jl package uses an odd window size, w = 2m + 1.
     # Here we use an even window size w = 2m, which should result in a slightly lower
     # accuracy for the same m.
     kws_plan, kws_accuracy = _split_accuracy_params(; kws...)
     m_actual, σ_actual, reltol_actual = AbstractNFFTs.accuracyParams(; kws_accuracy...)
-    backend = nfft_get_backend(xp)  # e.g. use GPU backend if xp is a GPU array
     sort_points = sortNodes ? True() : False()  # this is type-unstable (unless constant propagation happens)
     block_size = blocking ? default_block_size(Ns, backend) : nothing  # also type-unstable
     kernel = window isa AbstractKernel ? window : convert_window_function(window, backend)
