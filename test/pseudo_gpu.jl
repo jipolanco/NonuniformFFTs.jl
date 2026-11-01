@@ -31,8 +31,6 @@ const GPU_BACKEND = get(ENV, "JULIA_GPU_BACKEND", "none")
 
 # ================================================================================ #
 
-plan_should_be_inferred(::KA.Backend) = true  # this can be removed, it was useful with OpenCL.jl
-
 @static if GPU_BACKEND == "CUDA"
     using Pkg; Pkg.add("CUDA")
     using CUDA
@@ -97,21 +95,13 @@ function compare_with_cpu(
 
     params = (; m = HalfSupport(4), kernel = KaiserBesselKernel(), σ = 1.5, ntransforms, kws...)
     p_cpu = @inferred PlanNUFFT(T, dims; params..., backend = CPU())
-    p_gpu = if plan_should_be_inferred(backend)
-        @inferred PlanNUFFT(T, dims; params..., backend = backend)
-    else
-        PlanNUFFT(T, dims; params..., backend = backend)  # not fully inferred (the M is not inferred in CLArray{T, N, M})
-    end
+    p_gpu = @inferred PlanNUFFT(T, dims; params..., backend = backend)
 
     # Test that plan_nfft interface works.
     xmat = hcat(xp_init...)'  # matrix of dimensions (D, Np)
-    p_nfft = if plan_should_be_inferred(backend)
-        # We explicitly pass the backend, otherwise CPU and POCLBackend may get confused
-        # (since array_type is Array in both cases)
-        @inferred AbstractNFFTs.plan_nfft(array_type(backend), xmat, dims; backend)
-    else
-        AbstractNFFTs.plan_nfft(array_type(backend), xmat, dims; backend)
-    end
+    # We explicitly pass the backend, otherwise CPU and POCLBackend may get confused
+    # (since array_type is Array in both cases)
+    p_nfft = @inferred AbstractNFFTs.plan_nfft(array_type(backend), xmat, dims; backend)
     @test typeof(p_nfft.p.backend) === typeof(backend)
     # Test without the initial argument (type of array)
     p_nfft_cpu = @inferred AbstractNFFTs.plan_nfft(xmat, dims; backend = CPU())
@@ -155,7 +145,7 @@ end
 
 function test_gpu(backend::KA.Backend)
     dims = (35, 64, 40)
-    @testset "T = $T" for T ∈ (Float32, ComplexF32)
+    @testset "T = $T" for T ∈ (Float32, ComplexF32, Float64, ComplexF64)
         compare_with_cpu(T, dims; backend)
     end
     @testset "sort_points = $sort_points" for sort_points ∈ (False(), True())
