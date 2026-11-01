@@ -2,6 +2,7 @@ module Kernels
 
 using KernelAbstractions: KernelAbstractions as KA
 using Adapt: Adapt, adapt
+using LLVM: LLVM
 
 export HalfSupport, EvaluationMode, Direct, FastApproximation
 
