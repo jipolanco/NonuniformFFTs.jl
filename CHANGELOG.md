@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `KaiserBesselKernel` and `BackwardsKaiserBesselKernel`.
   Note that direct evaluation `kernel_evalmode = Direct()` is the default on CUDA.
 
+  This issue seems to be related to changes in CUDA.jl v6.2.0 (released 11 June
+  2026), where `@fastmath sqrt(x)` changes the result of `sqrt`. While this is
+  indeed allowed by `@fastmath`, it wasn't the case in CUDA.jl versions before 6.2.0.
+
 - Fix printing `GaussianKernel`.
 
 ## [v0.9.8] - 2026-10-18
