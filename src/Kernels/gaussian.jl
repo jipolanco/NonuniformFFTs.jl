@@ -53,7 +53,7 @@ GaussianKernel() = GaussianKernel(nothing)
 """
     GaussianKernelData(HalfSupport(M), N, α)
 
-Constructs a Gaussian kernel with standard deviation `σ = α Δx` and half-support `M`, for a
+Constructs a Gaussian kernel with standard deviation `ℓ = α Δx` and half-support `M`, for a
 grid of size `N`.
 
 The domain is assumed to be periodic with period `L = 2π`. The grid spacing is then `Δx =
@@ -64,32 +64,32 @@ struct GaussianKernelData{
         FourierCoefs <: AbstractVector{T},
     } <: AbstractKernelData{GaussianKernel, M, T}
     N  :: Int
-    σ  :: T
+    ℓ  :: T
     τ  :: T
     cs :: NTuple{M, T}  # precomputed exponentials
     gk :: FourierCoefs  # values in uniform Fourier grid
 
-    function GaussianKernelData{M}(N::Int, σ::T, τ::T, cs::NTuple{M, T}, gk) where {M, T <: AbstractFloat}
-        new{M, T, typeof(gk)}(N, σ, τ, cs, gk)
+    function GaussianKernelData{M}(N::Int, ℓ::T, τ::T, cs::NTuple{M, T}, gk) where {M, T <: AbstractFloat}
+        new{M, T, typeof(gk)}(N, ℓ, τ, cs, gk)
     end
 
     function GaussianKernelData{M}(backend, N::Int, α::T) where {M, T <: AbstractFloat}
         L = domain_period(T)
         Δx = L / N
-        σ = α * Δx
-        τ = 2 * σ^2
+        ℓ = α * Δx
+        τ = 2 * ℓ^2
         cs = ntuple(Val(M)) do i
             x = i * Δx
             exp(-x^2 / τ)
         end
         gk = KA.allocate(backend, T, 0)
-        GaussianKernelData{M}(N, σ, τ, cs, gk)
+        GaussianKernelData{M}(N, ℓ, τ, cs, gk)
     end
 end
 
 function Adapt.adapt_structure(to, g::GaussianKernelData{M}) where {M}
     GaussianKernelData{M}(
-        g.N, g.σ, g.τ,
+        g.N, g.ℓ, g.τ,
         adapt(to, g.cs),
         adapt(to, g.gk),
     )
@@ -98,9 +98,8 @@ end
 GaussianKernelData(::HalfSupport{M}, args...) where {M} = GaussianKernelData{M}(args...)
 
 function Base.show(io::IO, g::GaussianKernelData{M}) where {M}
-    (; σ, Δx,) = g
-    r = σ / Δx
-    print(io, "GaussianKernelData(ℓ/Δx = $r) with half-support M = $M")
+    (; ℓ,) = g
+    print(io, "GaussianKernelData(ℓ = $ℓ) with half-support M = $M")
 end
 
 function optimal_kernel(kernel::GaussianKernel, ::Type{T}, h::HalfSupport{M}, N::Int, σ_oversampling; backend) where {T <: AbstractFloat, M}
@@ -117,7 +116,7 @@ end
 function evaluate_fourier_func(g::GaussianKernelData)
     (; τ,) = g
     function (k)
-        exp(-τ * k^2 / 4) * sqrt(π * τ)  # = exp(-σ² k² / 2) * sqrt(2πσ²)
+        exp(-τ * k^2 / 4) * sqrt(π * τ)  # = exp(-ℓ² k² / 2) * sqrt(2πℓ²)
     end
 end
 
