@@ -201,10 +201,12 @@ _besseli0(x) = Bessels.besseli0(x)
     (; β,) = g
     X = r - T(i - 1)  # = (x - x[i]) / Δx = x / Δx - (i - 1)
     # @assert 0 ≤ X < 1
-    js = SVector(ntuple(identity, Val(2M)))
-    ys = @. T(M - js + X) / M
-    zs = @. 1 - ys^2
-    s = @fastmath sqrt.(zs)  # the @fastmath avoids checking that z ≥ 0, returns NaN otherwise
-    vals = _besseli0.(β * s)
-    Tuple(vals)
+    ntuple(Val(2M)) do j
+        @inline
+        y = T(M - j + X) / M
+        z = 1 - y^2
+        LLVM.Interop.assume(z >= 0)  # this slightly reduces the sqrt cost
+        s = sqrt(z)
+        _besseli0(β * s)
+    end
 end

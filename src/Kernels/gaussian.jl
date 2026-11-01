@@ -125,7 +125,7 @@ function evaluate_kernel_func(g::GaussianKernelData{M, T}) where {M, T}
     (; τ, N, cs,) = g
     L = domain_period(T)
     Δx = L / N
-    @inline @fastmath function (x)
+    @inline function (x)
         i, r = point_to_cell(x, N)
         X = x - (i - 1) * Δx  # source position relative to xs[i]
         # @assert 0 ≤ X < i * Δx

@@ -161,15 +161,14 @@ end
     (; β,) = g
     X = r - T(i - 1)  # = (x - x[i]) / Δx = x / Δx - (i - 1)
     # @assert 0 ≤ X < 1
-    js = SVector(ntuple(identity, Val(2M)))
-    ys = @. T(M - js + X) / M
-    zs = @. 1 - ys^2
-    s = @fastmath sqrt.(zs)  # the @fastmath avoids checking that z ≥ 0, returns NaN otherwise
-    vals = map(s) do s
+    ntuple(Val(2M)) do j
         @inline
+        y = T(M - j + X) / M
+        z = 1 - y^2
+        LLVM.Interop.assume(z >= 0)  # this slightly reduces the sqrt cost
+        s = sqrt(z)
         # In rare cases `s` can be zero (if the point x is on the grid, and thus r = 0).
         # The kernel is well defined at s = 0 since sinh(x)/x → 1 when x → 0 (same as sinc).
         ifelse(iszero(s), one(s), sinh(β * s) / (β * s)) * (β / T(π))
     end
-    Tuple(vals)
 end
