@@ -193,7 +193,9 @@ end
 # only a besseli function for arbitrary order).
 # So, on CUDA, we use a package extension (ext/NonuniformFFTsCUDAExt.jl) to override this
 # function, and call the CUDA-defined version instead.
-_besseli0(x) = Bessels.besseli0(x)
+# @inline _besseli0(x) = @inline Bessels.besseli0(x)
+# @inline _besseli0(x::SIMD.Vec) = SIMD.Vec(map(Bessels.besseli0, Tuple(x)))
+@inline _besseli0(x) = @inline besseli0_simd(x)
 
 @inline function _evaluate_kernel_direct(
         g::KaiserBesselKernelData{M, T}, i::Integer, r::T,
@@ -201,12 +203,14 @@ _besseli0(x) = Bessels.besseli0(x)
     (; β,) = g
     X = r - T(i - 1)  # = (x - x[i]) / Δx = x / Δx - (i - 1)
     # @assert 0 ≤ X < 1
-    ntuple(Val(2M)) do j
-        @inline
-        y = T(M - j + X) / M
-        z = 1 - y^2
-        LLVM.Interop.assume(z >= 0)  # this slightly reduces the sqrt cost
-        s = sqrt(z)
-        _besseli0(β * s)
-    end
+    y = SIMD.Vec(
+        ntuple(Val(2M)) do j
+            T(M - j + X) / M
+        end
+    )
+    z = 1 - y * y  # this is usually z ≥ 0
+    z = abs(z)   # this is mainly to tell the compiler that z ≥ 0 (to skip negative checks in sqrt)
+    s = sqrt(z)
+    r = _besseli0(β * s)
+    Tuple(r)
 end

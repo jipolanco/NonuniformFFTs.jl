@@ -172,6 +172,7 @@ function evaluation_points(::Val{M}, X) where {M}
     end
 end
 
+include("simd_functions.jl")
 include("piecewise_polynomial.jl")
 
 include("gaussian.jl")

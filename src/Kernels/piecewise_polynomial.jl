@@ -8,7 +8,7 @@
 # Sci. Comput. 2019), with a few small differences:
 #
 # - we don't need to generate specific code for specific oversampling factors σ or
-#   half-widths M. Our implementation is generic and even then it's extremely efficient;
+#   half-widths M. Our implementation is generic and even then it's very efficient;
 #
 # - we interpolate from function values at Chebyshev nodes, instead of evaluating the
 #   function in the complex plane. This is inspired by a paper by Shamshigar, Bagge &
@@ -82,9 +82,9 @@ end
 # Evaluate multiple polynomials at the same location `x` using Horner's method.
 # This is very fast due to SIMD vectorisation.
 function evaluate_horner(x, cs::NTuple)
-    ys = @inbounds SVector(cs[end])
-    js = @inbounds reverse(eachindex(cs)[1:end - 1])
-    for j ∈ js
+    N = length(cs)
+    ys = @inbounds SVector(cs[N])
+    for j in (N - 1):-1:1
         cj = @inbounds SVector(cs[j])
         ys = muladd(x, ys, cj)
     end
