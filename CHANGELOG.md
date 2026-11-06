@@ -5,6 +5,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.9.10] - 2026-11-06
+
 ### Fixed
 
 - GPU with `method = :shared_memory` (non default): avoid possible out-of-bounds issue for
