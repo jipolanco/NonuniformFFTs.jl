@@ -211,6 +211,7 @@ function spread_from_points!(
             groupsize = groupsize_spreading_gpu_shmem(backend, batch_size_actual)
             ndrange = gpu_shmem_ndrange_from_groupsize(groupsize, ngroups)
             kernel! = spread_from_points_shmem_kernel!(backend, groupsize, ndrange)
+            @debug "Launching shared memory spreading kernel" ngroups ndrange groupsize size(us[1]) block_dims_val kernel!
             kernel!(
                 us_real, gs, evalmode, xp, vp_sorted, pointperm_, bd.cumulative_npoints_per_block,
                 HalfSupport(M), block_dims, Val(shmem_size), bd.batch_size, transform_fold, callback,
@@ -429,15 +430,21 @@ end
     offsets = ntuple(Val(D)) do d
         @inline
         local off = ishifts[d] - M
-        ifelse(off < 0, off + Ns[d], off)  # make sure the offset is non-negative (to avoid some wrapping below)
+        local N = Ns[d]
+        off = ifelse(off < 0, off + N, off)  # make sure the offset is non-negative (to avoid some wrapping below)
+        # @assert off >= 0
+        off
     end
     @inbounds for n ∈ threadidx:nthreads:length(inds)
         I = inds[n]
         is = Tuple(I)
         js = ntuple(Val(D)) do d
             @inline
-            j = is[d] + offsets[d]
-            ifelse(j > Ns[d], j - Ns[d], j)
+            local j = is[d] + offsets[d]
+            local N = Ns[d]
+            assume(j > 0)
+            assume(N > 0)  # this avoids a division-by-zero check in mod1
+            mod1(j, N)
         end
         w = u_local[is...]
         _atomic_add!(u_global, w, js)
