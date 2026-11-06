@@ -354,6 +354,7 @@ end
             assume(j > 0)
             # For some reason, assuming N > 0 leads to error on POCLBackend.
             # (It works in spreading, but not in interpolation.)
+            # This is for a small problem, size (35, 64), with M = 4.
             # assume(N > 0)
             mod1(j, N)
         end
