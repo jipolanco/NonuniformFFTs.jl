@@ -97,15 +97,17 @@ function compare_with_cpu(
     p_cpu = @inferred PlanNUFFT(T, dims; params..., backend = CPU())
     p_gpu = @inferred PlanNUFFT(T, dims; params..., backend = backend)
 
-    # Test that plan_nfft interface works.
-    xmat = hcat(xp_init...)'  # matrix of dimensions (D, Np)
-    # We explicitly pass the backend, otherwise CPU and POCLBackend may get confused
-    # (since array_type is Array in both cases)
-    p_nfft = @inferred AbstractNFFTs.plan_nfft(array_type(backend), xmat, dims; backend)
-    @test typeof(p_nfft.p.backend) === typeof(backend)
-    # Test without the initial argument (type of array)
-    p_nfft_cpu = @inferred AbstractNFFTs.plan_nfft(xmat, dims; backend = CPU())
-    @test p_nfft_cpu.p.backend isa CPU
+    # Test that plan_nfft interface works (this doesn't work on 1D, should be updated).
+    if D > 1
+        xmat = hcat(xp_init...)'  # matrix of dimensions (D, Np)
+        # We explicitly pass the backend, otherwise CPU and POCLBackend may get confused
+        # (since array_type is Array in both cases)
+        p_nfft = @inferred AbstractNFFTs.plan_nfft(array_type(backend), xmat, dims; backend)
+        @test typeof(p_nfft.p.backend) === typeof(backend)
+        # Test without the initial argument (type of array)
+        p_nfft_cpu = @inferred AbstractNFFTs.plan_nfft(xmat, dims; backend = CPU())
+        @test p_nfft_cpu.p.backend isa CPU
+    end
 
     r_cpu = run_plan(p_cpu, xp_init, vp_init; callbacks_type1, callbacks_type2)
     r_gpu = run_plan(
@@ -143,8 +145,8 @@ struct NonuniformCallbackMultiplyByWeights{Weights <: AbstractArray} <: Function
 end
 (f::NonuniformCallbackMultiplyByWeights)(v, n) = oftype(v, @inbounds(v .* f.weights[n]))
 
-function test_gpu(backend::KA.Backend)
-    dims = (35, 64, 40)
+function test_gpu(backend::KA.Backend, dims::Dims)
+    D = length(dims)
     @testset "T = $T" for T ∈ (Float32, ComplexF32, Float64, ComplexF64)
         compare_with_cpu(T, dims; backend)
     end
@@ -154,14 +156,18 @@ function test_gpu(backend::KA.Backend)
     @testset "No blocking" begin  # spatial sorting disabled
         compare_with_cpu(ComplexF64, dims; backend, block_size = nothing)
     end
-    @testset "gpu_method = :shared_memory" begin
-        @testset "Float32" compare_with_cpu(Float32, dims; backend, gpu_method = :shared_memory)
-        @testset "ComplexF32" compare_with_cpu(ComplexF32, dims; backend, gpu_method = :shared_memory)
+    if D <= 3  # avoid shared_memory at very high dimensions (not worth it)
+        @testset "gpu_method = :shared_memory" begin
+            @testset "Float32" compare_with_cpu(Float32, dims; backend, gpu_method = :shared_memory)
+            @testset "ComplexF32" compare_with_cpu(ComplexF32, dims; backend, gpu_method = :shared_memory)
+        end
     end
     @testset "Multiple transforms" begin
         ntransforms = Val(2)
         @testset "Global memory" compare_with_cpu(Float32, dims; backend, ntransforms, gpu_method = :global_memory)
-        @testset "Shared memory" compare_with_cpu(Float32, dims; backend, ntransforms, gpu_method = :shared_memory)
+        if D <= 3
+            @testset "Shared memory" compare_with_cpu(Float32, dims; backend, ntransforms, gpu_method = :shared_memory)
+        end
     end
     @testset "Callbacks" begin
         Np = prod(dims) ÷ 2
@@ -181,12 +187,17 @@ function test_gpu(backend::KA.Backend)
             uniform,
         )
         @testset "Global memory" compare_with_cpu(ComplexF32, dims; backend, Np, callbacks_type1 = callbacks, callbacks_type2 = callbacks, gpu_method = :global_memory)
-        @testset "Shared memory" compare_with_cpu(ComplexF32, dims; backend, Np, callbacks_type1 = callbacks, callbacks_type2 = callbacks, gpu_method = :shared_memory)
-        @testset "Shared memory (ntransforms = 2)" compare_with_cpu(ComplexF32, dims; backend, Np, ntransforms = Val(2), callbacks_type1 = callbacks, callbacks_type2 = callbacks, gpu_method = :shared_memory)
+        if D <= 3
+            @testset "Shared memory" compare_with_cpu(ComplexF32, dims; backend, Np, callbacks_type1 = callbacks, callbacks_type2 = callbacks, gpu_method = :shared_memory)
+            @testset "Shared memory (ntransforms = 2)" compare_with_cpu(ComplexF32, dims; backend, Np, ntransforms = Val(2), callbacks_type1 = callbacks, callbacks_type2 = callbacks, gpu_method = :shared_memory)
+        end
     end
     nothing
 end
 
 @testset "GPU implementation (using $GPUBackend)" begin
-    test_gpu(GPUBackend())
+    @testset "1D" test_gpu(GPUBackend(), (35,))
+    @testset "2D" test_gpu(GPUBackend(), (35, 64))
+    @testset "3D" test_gpu(GPUBackend(), (35, 64, 40))
+    @testset "4D" test_gpu(GPUBackend(), (35, 20, 10, 16))
 end

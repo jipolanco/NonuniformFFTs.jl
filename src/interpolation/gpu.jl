@@ -339,15 +339,23 @@ end
     inds = CartesianIndices(axes(u_local))
     offsets = ntuple(Val(D)) do d
         @inline
-        off = ishifts[d] - M
-        ifelse(off < 0, off + Ns[d], off)  # make sure the offset is non-negative (to avoid some wrapping below)
+        local off = ishifts[d] - M
+        local N = Ns[d]
+        off = ifelse(off < 0, off + N, off)  # make sure the offset is non-negative (to avoid some wrapping below)
+        # @assert off >= 0
+        off
     end
     @inbounds for n ∈ threadidx:nthreads:length(inds)
         is = Tuple(inds[n])
         js = ntuple(Val(D)) do d
             @inline
-            j = is[d] + offsets[d]
-            ifelse(j > Ns[d], j - Ns[d], j)
+            local j = is[d] + offsets[d]
+            local N = Ns[d]
+            assume(j > 0)
+            # For some reason, assuming N > 0 leads to error on POCLBackend.
+            # (It works in spreading, but not in interpolation.)
+            # assume(N > 0)
+            mod1(j, N)
         end
         u_local[n] = u_global[js...]
     end

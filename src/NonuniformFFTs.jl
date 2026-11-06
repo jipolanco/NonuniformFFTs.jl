@@ -7,6 +7,7 @@ using KernelAbstractions: KernelAbstractions as KA, @kernel, @index, @Const,
     @groupsize, @localmem, @synchronize, @uniform
 using AcceleratedKernels: AcceleratedKernels as AK
 using Atomix: Atomix
+using LLVM.Interop: assume  # this enables a few optimisations
 using OhMyThreads: OhMyThreads, tforeach, DynamicScheduler
 using FFTW: FFTW
 using LinearAlgebra: mul!
